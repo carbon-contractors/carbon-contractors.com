@@ -10,24 +10,52 @@ Workers register their skills and hourly rates on-chain. AI agents query the wor
 
 The trust layer is reputation staking — workers put skin in the game, and their track record is public and verifiable. No KYC, no resumes, no interviews. Just wallets, skills, and outcomes.
 
+## Why Base
+
+Base is Coinbase's L2, built on the OP Stack. It was chosen deliberately, not by default.
+
+**Cost.** A USDC transfer on Base costs fractions of a cent. When an AI agent is hiring humans for microtasks — review this PR, verify this address, check this photo — the transaction fees need to be invisible. On Ethereum mainnet, the gas alone could exceed the task payment. Base makes sub-dollar payments economically viable.
+
+**Coinbase rails.** The entire identity and payment stack is Coinbase-native. Smart Wallets use passkeys through Coinbase's infrastructure. AgentKit gives AI agents their own wallets that can sign and broadcast without human intervention. x402 settles payments through Coinbase's payment protocol. Choosing Base means all of these work together without bridging, wrapping, or third-party integrations.
+
+**Onchain UX.** Smart Wallets on Base support passkey creation — a user taps FaceID or a fingerprint and has a wallet. No seed phrases, no browser extensions, no mobile app downloads. This matters because the workers on this platform aren't crypto natives. They're people with skills who want to get paid. The onboarding friction has to be zero.
+
+**Finality.** Base inherits Ethereum's security guarantees while settling in seconds. When an agent locks funds in escrow, the worker can see confirmation almost immediately. When a task is attested as complete, the payout doesn't sit in a mempool.
+
+## What is x402
+
+HTTP status code 402 has been "reserved for future use" since 1999. The x402 protocol finally gives it a purpose: machine-to-machine payments at the HTTP layer.
+
+The flow works like this:
+
+1. An AI agent calls `request_human_work` on the MCP server
+2. The server returns a `402 Payment Required` response with a payment header specifying the amount, recipient, and escrow contract
+3. The agent's x402-compatible wallet reads the header, signs the USDC transfer, and broadcasts it to Base
+4. The server verifies the on-chain payment and creates the task
+5. On task completion, the escrow releases funds to the worker
+
+No API keys. No Stripe integration. No payment processor taking a cut. The agent's wallet pays directly, and the protocol is the invoice. Any agent with a funded wallet and an MCP client can participate — the payment negotiation happens entirely within the HTTP request/response cycle.
+
+This is what makes the system genuinely autonomous. The agent doesn't need a human to approve a purchase order or enter credit card details. It reads the price, pays the price, and gets the work done.
+
 ## Architecture
 
 ```
 AI Agent (Claude, GPT, etc.)
-    │
-    ▼
-MCP Client ──── JSON-RPC / SSE ────► /api/mcp
-                                        │
-                            ┌───────────┼───────────┐
-                            ▼           ▼           ▼
-                     search_whitepages  │   human_whitepages
-                                        │   (resource)
+    |
+    v
+MCP Client ---- JSON-RPC / SSE ----> /api/mcp
+                                        |
+                            +-----------+-----------+
+                            v           v           v
+                     search_whitepages  |   human_whitepages
+                                        |   (resource)
                                 request_human_work
-                                        │
-                                        ▼
+                                        |
+                                        v
                                  x402 Escrow (Base L2)
-                                        │
-                                        ▼
+                                        |
+                                        v
                                   USDC Settlement
 ```
 
@@ -51,74 +79,6 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 | Payments | USDC via x402 protocol |
 | Identity | Coinbase Smart Wallet (passkeys, no seed phrases) |
 | Agent SDK | Coinbase AgentKit |
-
-## Running it locally
-
-```bash
-git clone https://github.com/Wahzammo/carbon-contractors.git
-cd carbon-contractors
-npm install
-```
-
-Create `.env.local` from the template:
-
-```bash
-cp .env.example .env.local
-```
-
-Fill in your Supabase credentials (free tier works):
-
-```
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
-```
-
-Create the database tables by running `supabase/migrations/001_init.sql` in your Supabase SQL Editor, then seed the dev data:
-
-```bash
-npm run seed
-npm run dev
-```
-
-The MCP endpoint is live at `http://localhost:3000/api/mcp`. Health check at `/api/health`.
-
-## Testing the MCP server
-
-Initialise a session:
-
-```bash
-curl -X POST http://localhost:3000/api/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2025-03-26",
-      "capabilities": {},
-      "clientInfo": {"name": "test", "version": "1.0.0"}
-    }
-  }'
-```
-
-Search for workers (use the `mcp-session-id` from the response headers):
-
-```bash
-curl -X POST http://localhost:3000/api/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "mcp-session-id: YOUR_SESSION_ID" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/call",
-    "params": {
-      "name": "search_whitepages",
-      "arguments": {"skill": "solidity"}
-    }
-  }'
-```
 
 ## Project status
 
