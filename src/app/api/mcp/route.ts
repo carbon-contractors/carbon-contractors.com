@@ -14,6 +14,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createMcpServer } from "@/lib/mcp/server";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { NextRequest } from "next/server";
+import { log } from "@/lib/logging";
 
 // ── Session registry ─────────────────────────────────────────────────────────
 // Maps sessionId → transport. Replace with Redis for multi-replica.
@@ -31,9 +32,6 @@ function createTransport(): WebStandardStreamableHTTPServerTransport {
   });
   return transport;
 }
-
-const log = (level: string, event: string, meta?: Record<string, unknown>) =>
-  console.log(JSON.stringify({ level, event, ts: Date.now(), ...meta }));
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 async function handler(req: NextRequest): Promise<Response> {
