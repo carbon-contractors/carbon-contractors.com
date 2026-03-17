@@ -1,13 +1,16 @@
 /**
  * x402.ts
- * Mock x402 payment request handler for Coinbase Smart Wallet SDK.
- * Implements the x402 protocol request/response shape.
- * Replace `signAndBroadcast` with real Coinbase SDK call when keys are available.
+ * x402 payment request handler for the Carbon Contractors escrow system.
+ *
+ * Phase 3: Returns escrow contract details + on-chain task ID so the agent
+ * can fund the escrow via USDC approve + createTask on-chain. The platform
+ * tracks the task in Supabase alongside the on-chain state.
  */
 
-import { createHash, randomBytes } from "crypto";
+import { randomBytes } from "crypto";
 import { createTask } from "@/lib/db/tasks";
 import { log } from "@/lib/logging";
+import { toTaskId, getEscrowConfig } from "@/lib/contracts/escrow";
 
 export interface X402PaymentRequest {
   from_agent_wallet: string;
@@ -18,38 +21,28 @@ export interface X402PaymentRequest {
 }
 
 export interface X402PaymentResponse {
-  status: "pending" | "confirmed" | "failed";
-  tx_hash: string;
-  escrow_contract: string;
+  status: "awaiting_funding";
   payment_request_id: string;
+  task_id_bytes32: string;
+  escrow_contract: string | null;
   amount_usdc: number;
-  base_network: "mainnet" | "testnet";
+  amount_wei: string;
+  chain_id: number;
+  base_network: string;
+  instructions: string;
   timestamp_unix: number;
 }
 
-const BASE_ESCROW_CONTRACT = "0xESCROW_MOCK_CONTRACT_ADDRESS_ON_BASE";
-const BASE_NETWORK = (process.env.NEXT_PUBLIC_BASE_NETWORK ?? "testnet") as
-  | "mainnet"
-  | "testnet";
-
-/**
- * signAndBroadcast
- * MOCK: Simulates signing and broadcasting a Base L2 x402 payment to escrow.
- * Real implementation: use `@coinbase/coinbase-sdk` onchain transactions.
- */
-async function signAndBroadcast(req: X402PaymentRequest): Promise<string> {
-  const nonce = randomBytes(8).toString("hex");
-  const raw = `${req.from_agent_wallet}:${req.to_human_wallet}:${req.amount_usdc}:${nonce}`;
-  return "0x" + createHash("sha256").update(raw).digest("hex");
-}
+const USDC_DECIMALS = 6;
 
 /**
  * initiateX402Payment
- * Creates an escrow payment request on Base L2 via x402 protocol.
- * Persists the task to Supabase for tracking.
+ * Creates a payment request and persists the task to Supabase.
+ * Returns the on-chain task ID and escrow address so the agent
+ * can fund it via USDC.approve() + escrow.createTask().
  */
 export async function initiateX402Payment(
-  req: X402PaymentRequest,
+  req: X402PaymentRequest
 ): Promise<X402PaymentResponse> {
   if (req.amount_usdc <= 0) {
     throw new Error("amount_usdc must be > 0");
@@ -61,10 +54,17 @@ export async function initiateX402Payment(
     throw new Error("to_human_wallet must be a valid 0x address");
   }
 
-  const tx_hash = await signAndBroadcast(req);
   const payment_request_id = randomBytes(16).toString("hex");
+  const taskIdBytes32 = toTaskId(payment_request_id);
+  const escrowConfig = getEscrowConfig();
 
-  // Persist to database
+  // Convert USDC to wei (6 decimals)
+  const amountWei = BigInt(
+    Math.round(req.amount_usdc * 10 ** USDC_DECIMALS)
+  ).toString();
+
+  // Persist to database with "pending" status — will move to "active"
+  // once on-chain funding is confirmed.
   await createTask({
     payment_request_id,
     from_agent_wallet: req.from_agent_wallet,
@@ -72,23 +72,31 @@ export async function initiateX402Payment(
     task_description: req.task_description,
     amount_usdc: req.amount_usdc,
     deadline_unix: req.deadline_unix,
-    tx_hash,
-    escrow_contract: BASE_ESCROW_CONTRACT,
+    tx_hash: "",
+    escrow_contract: escrowConfig.address ?? "",
   });
 
-  log("info", "payment_initiated", {
+  log("info", "payment_request_created", {
     payment_request_id,
+    task_id_bytes32: taskIdBytes32,
     amount_usdc: req.amount_usdc,
     to_human_wallet: req.to_human_wallet,
   });
 
   return {
-    status: "pending",
-    tx_hash,
-    escrow_contract: BASE_ESCROW_CONTRACT,
+    status: "awaiting_funding",
     payment_request_id,
+    task_id_bytes32: taskIdBytes32,
+    escrow_contract: escrowConfig.address,
     amount_usdc: req.amount_usdc,
-    base_network: BASE_NETWORK,
+    amount_wei: amountWei,
+    chain_id: escrowConfig.chainId,
+    base_network: escrowConfig.chainName,
+    instructions: [
+      `1. Approve USDC spend: usdc.approve(${escrowConfig.address}, ${amountWei})`,
+      `2. Fund escrow: escrow.createTask(${taskIdBytes32}, ${req.to_human_wallet}, ${amountWei}, ${req.deadline_unix})`,
+      `3. Task will move to "active" once funding tx is confirmed.`,
+    ].join("\n"),
     timestamp_unix: Math.floor(Date.now() / 1000),
   };
 }

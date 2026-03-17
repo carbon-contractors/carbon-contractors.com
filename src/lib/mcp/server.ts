@@ -1,6 +1,6 @@
 /**
  * server.ts
- * Singleton McpServer instance.
+ * Per-session McpServer factory.
  * Registers all tools and resources for the Base-Human marketplace.
  * Output is intentionally terse and machine-optimized (no markdown, no prose).
  */
@@ -9,6 +9,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { searchBySkill, getAllHumans } from "@/lib/db/whitepages";
 import { initiateX402Payment } from "@/lib/payments/x402";
+import { getTaskByPaymentId, updateTaskStatus } from "@/lib/db/tasks";
+import {
+  registerNotificationChannel,
+  getChannelsForContractor,
+} from "@/lib/db/notifications";
+import {
+  getOnChainTask,
+  getEscrowConfig,
+  TaskStateEnum,
+} from "@/lib/contracts/escrow";
+import { log } from "@/lib/logging";
 
 /**
  * Creates a fresh McpServer instance per session.
@@ -21,7 +32,7 @@ export function createMcpServer(): McpServer {
     version: "1.0.0",
   });
 
-  // ─── Tool: search_whitepages ────────────────────────────────────────────────
+  // ─── Tool: search_whitepages ──────────────────────────────────────────────
   server.tool(
     "search_whitepages",
     "Query the Base-Human whitepages for verified wallet addresses by skill. Returns JSON array of matching humans sorted by reputation desc.",
@@ -74,10 +85,10 @@ export function createMcpServer(): McpServer {
     }
   );
 
-  // ─── Tool: request_human_work ───────────────────────────────────────────────
+  // ─── Tool: request_human_work ─────────────────────────────────────────────
   server.tool(
     "request_human_work",
-    "Initiate an x402 escrow payment request on Base L2 to hire a verified human. Returns a payment_request_id and pending tx_hash. Funds are locked in escrow until task completion is confirmed.",
+    "Initiate an x402 escrow payment request on Base L2 to hire a verified human. Returns a payment_request_id, on-chain task ID, and instructions for funding the escrow contract with USDC.",
     {
       from_agent_wallet: z
         .string()
@@ -145,7 +156,238 @@ export function createMcpServer(): McpServer {
     }
   );
 
-  // ─── Resource: human_whitepages ─────────────────────────────────────────────
+  // ─── Tool: get_task_status ────────────────────────────────────────────────
+  server.tool(
+    "get_task_status",
+    "Check the status of a task by payment_request_id. Returns both database state and on-chain escrow state (if contract is deployed).",
+    {
+      payment_request_id: z
+        .string()
+        .min(1)
+        .describe("The payment_request_id returned by request_human_work"),
+    },
+    async ({ payment_request_id }) => {
+      try {
+        const dbTask = await getTaskByPaymentId(payment_request_id);
+        if (!dbTask) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Task not found",
+                }),
+              },
+            ],
+          };
+        }
+
+        // Try to read on-chain state (may fail if contract not deployed)
+        let onChain = null;
+        const escrowConfig = getEscrowConfig();
+        if (escrowConfig.address) {
+          try {
+            const onChainTask = await getOnChainTask(payment_request_id);
+            onChain = {
+              state: onChainTask.state,
+              amount_wei: onChainTask.amount.toString(),
+              deadline: Number(onChainTask.deadline),
+              agent: onChainTask.agent,
+              worker: onChainTask.worker,
+            };
+          } catch {
+            onChain = { error: "Could not read on-chain state" };
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                ok: true,
+                database: {
+                  payment_request_id: dbTask.payment_request_id,
+                  status: dbTask.status,
+                  amount_usdc: dbTask.amount_usdc,
+                  from_agent: dbTask.from_agent_wallet,
+                  to_worker: dbTask.to_human_wallet,
+                  task_description: dbTask.task_description,
+                  deadline_unix: dbTask.deadline_unix,
+                  created_at: dbTask.created_at,
+                },
+                on_chain: onChain,
+              }),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ ok: false, error: message }),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ─── Tool: confirm_task_completion ────────────────────────────────────────
+  server.tool(
+    "confirm_task_completion",
+    "Mark a task as completed in the database. The agent should also call escrow.completeTask() on-chain to release funds to the worker.",
+    {
+      payment_request_id: z
+        .string()
+        .min(1)
+        .describe("The payment_request_id of the task to complete"),
+    },
+    async ({ payment_request_id }) => {
+      try {
+        const task = await getTaskByPaymentId(payment_request_id);
+        if (!task) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Task not found",
+                }),
+              },
+            ],
+          };
+        }
+
+        if (task.status !== "active" && task.status !== "pending") {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: `Task is ${task.status}, cannot complete`,
+                }),
+              },
+            ],
+          };
+        }
+
+        await updateTaskStatus(payment_request_id, "completed");
+
+        log("info", "task_completed", {
+          payment_request_id,
+          amount_usdc: task.amount_usdc,
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                ok: true,
+                payment_request_id,
+                status: "completed",
+                note: "Database updated. Call escrow.completeTask(taskId) on-chain to release USDC to worker.",
+              }),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ ok: false, error: message }),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ─── Tool: register_notification_channel ──────────────────────────────────
+  server.tool(
+    "register_notification_channel",
+    "Register or update a notification channel for a contractor. When accepts_auto_booking is true, orchestrator agents can hire this worker directly without human approval.",
+    {
+      contractor_id: z
+        .string()
+        .uuid()
+        .describe("UUID of the contractor (from humans table)"),
+      type: z
+        .enum(["email", "webhook", "telegram", "discord"])
+        .describe("Notification channel type"),
+      address: z
+        .string()
+        .min(1)
+        .describe(
+          "Channel address: email address, webhook URL, Telegram chat ID, or Discord user ID"
+        ),
+      accepts_auto_booking: z
+        .boolean()
+        .describe(
+          "If true, orchestrator agents can hire this worker without human approval"
+        ),
+    },
+    async ({ contractor_id, type, address, accepts_auto_booking }) => {
+      try {
+        const channel = await registerNotificationChannel({
+          contractor_id,
+          type,
+          address,
+          accepts_auto_booking,
+        });
+
+        log("info", "notification_channel_registered", {
+          contractor_id,
+          type,
+          accepts_auto_booking,
+        });
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: true,
+                channel: {
+                  id: channel.id,
+                  contractor_id: channel.contractor_id,
+                  type: channel.type,
+                  address: channel.address,
+                  accepts_auto_booking: channel.accepts_auto_booking,
+                },
+              }),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ ok: false, error: message }),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ─── Resource: human_whitepages ───────────────────────────────────────────
   server.resource(
     "human_whitepages",
     "base-human://whitepages/all",
@@ -165,6 +407,32 @@ export function createMcpServer(): McpServer {
               protocol: "base-human-mcp/1.0",
               total: all.length,
               humans: all,
+            }),
+          },
+        ],
+      };
+    }
+  );
+
+  // ─── Resource: escrow_config ──────────────────────────────────────────────
+  server.resource(
+    "escrow_config",
+    "base-human://escrow/config",
+    {
+      description:
+        "Escrow contract address and chain configuration for on-chain interactions.",
+      mimeType: "application/json",
+    },
+    async () => {
+      const config = getEscrowConfig();
+      return {
+        contents: [
+          {
+            uri: "base-human://escrow/config",
+            mimeType: "application/json",
+            text: JSON.stringify({
+              protocol: "base-human-mcp/1.0",
+              escrow: config,
             }),
           },
         ],

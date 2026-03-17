@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "compile": "TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat compile",
+    "deploy:sepolia": "TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/escrow.ts --network baseSepolia"
   },
   "dependencies": {
     "@coinbase/onchainkit": "^1.1.2",
@@ -22,11 +24,16 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.6.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "hardhat": "^2.28.6",
+    "hardhat-deploy": "^1.0.4",
     "tsx": "^4.21.0",
     "typescript": "^5"
   }

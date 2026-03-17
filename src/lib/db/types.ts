@@ -10,6 +10,7 @@ export type TaskStatus =
   | "completed"
   | "disputed"
   | "expired";
+export type NotificationChannelType = "email" | "webhook" | "telegram" | "discord";
 
 export interface Database {
   public: {
@@ -87,6 +88,36 @@ export interface Database {
           status?: TaskStatus;
           tx_hash?: string | null;
           escrow_contract?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      notification_channels: {
+        Row: {
+          id: string;
+          contractor_id: string;
+          type: NotificationChannelType;
+          address: string;
+          accepts_auto_booking: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          contractor_id: string;
+          type: NotificationChannelType;
+          address: string;
+          accepts_auto_booking?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          contractor_id?: string;
+          type?: NotificationChannelType;
+          address?: string;
+          accepts_auto_booking?: boolean;
           created_at?: string;
           updated_at?: string;
         };
