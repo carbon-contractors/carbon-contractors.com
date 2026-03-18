@@ -44,27 +44,37 @@ This is what makes the system genuinely autonomous. The agent doesn't need a hum
 AI Agent (Claude, GPT, etc.)
     |
     v
-MCP Client ---- JSON-RPC / SSE ----> /api/mcp
+MCP Client ---- JSON-RPC / SSE ----> /api/basedhuman.mcp
                                         |
-                            +-----------+-----------+
-                            v           v           v
-                     search_whitepages  |   human_whitepages
-                                        |   (resource)
-                                request_human_work
-                                        |
-                                        v
-                                 x402 Escrow (Base L2)
-                                        |
-                                        v
-                                  USDC Settlement
+                    +-------------------+-------------------+
+                    v                   v                   v
+              ┌─ Discover ──┐   ┌─── Hire ────┐   ┌── Settle ──┐
+              │              │   │             │   │            │
+         search_whitepages   │  request_human_ │  confirm_task_│
+         get_contractor      │  work           │  completion   │
+         list_skills         │  get_task_status│              │
+              └──────────────┘   └─────────────┘   └────────────┘
+                    |                   |                   |
+                    v                   v                   v
+              Supabase (Postgres)   CarbonEscrow.sol    USDC on Base
+                                   (Base Sepolia)
 ```
 
 **MCP Tools:**
-- `search_whitepages` — Query workers by skill, ranked by reputation
-- `request_human_work` — Lock USDC in escrow to hire a worker
 
-**MCP Resource:**
+| Phase | Tool | Purpose |
+|-------|------|---------|
+| Discover | `search_whitepages` | Query workers by skill, ranked by reputation |
+| Discover | `get_contractor` | Single worker profile by wallet or ID |
+| Discover | `list_skills` | Canonical skill taxonomy |
+| Hire | `request_human_work` | Create task + escrow funding instructions |
+| Hire | `get_task_status` | Poll task state (DB + on-chain) |
+| Settle | `confirm_task_completion` | Mark task complete, release escrow |
+| Config | `register_notification_channel` | Set notification prefs + auto-booking flag |
+
+**MCP Resources:**
 - `human_whitepages` — Full worker directory as structured JSON
+- `escrow_config` — Contract address and chain configuration
 
 The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible client can connect — no custom SDK required.
 
@@ -75,10 +85,11 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 | Framework | Next.js 16 (App Router) |
 | Protocol | MCP over HTTP + SSE |
 | Database | Supabase (Postgres) |
-| Chain | Base L2 |
+| Chain | Base L2 (Sepolia testnet) |
+| Escrow | Solidity (OpenZeppelin v5, Hardhat) |
 | Payments | USDC via x402 protocol |
-| Identity | Coinbase Smart Wallet (passkeys, no seed phrases) |
-| Agent SDK | Coinbase AgentKit |
+| Identity | Coinbase Smart Wallet / OnchainKit (passkeys) |
+| Agent SDK | Coinbase AgentKit (planned) |
 
 ## Project status
 
@@ -87,13 +98,15 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] Skill search with reputation ranking
 - [x] Task creation with payment persistence
 - [x] Structured logging (Wazuh-compatible)
-- [ ] Coinbase Smart Wallet integration (passkey auth)
-- [ ] Worker self-registration flow
-- [ ] On-chain USDC escrow contracts
-- [ ] x402 payment protocol (live transactions)
+- [x] Coinbase Smart Wallet integration (passkey auth)
+- [x] Worker self-registration flow (wallet signature verification)
+- [x] On-chain USDC escrow contract (Base Sepolia)
+- [x] Task lifecycle MCP tools (create → fund → complete)
+- [x] Notification channels with agent-to-agent auto-booking
 - [ ] AgentKit autonomous agent wallets
-- [ ] Reputation staking
-- [ ] Task attestation and completion flow
+- [ ] Reputation staking + on-chain history
+- [ ] Task attestation and completion attestations
+- [ ] `/learn` educational content (crypto rails onboarding)
 
 ## Design constraints
 
