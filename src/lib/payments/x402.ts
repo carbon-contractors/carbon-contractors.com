@@ -29,6 +29,7 @@ export interface X402PaymentResponse {
   amount_wei: string;
   chain_id: number;
   base_network: string;
+  fund_url: string;
   instructions: string;
   timestamp_unix: number;
 }
@@ -83,6 +84,8 @@ export async function initiateX402Payment(
     to_human_wallet: req.to_human_wallet,
   });
 
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
+
   return {
     status: "awaiting_funding",
     payment_request_id,
@@ -92,10 +95,13 @@ export async function initiateX402Payment(
     amount_wei: amountWei,
     chain_id: escrowConfig.chainId,
     base_network: escrowConfig.chainName,
+    fund_url: `${baseUrl}/api/fund-task`,
     instructions: [
-      `1. Approve USDC spend: usdc.approve(${escrowConfig.address}, ${amountWei})`,
-      `2. Fund escrow: escrow.createTask(${taskIdBytes32}, ${req.to_human_wallet}, ${amountWei}, ${req.deadline_unix})`,
-      `3. Task will move to "active" once funding tx is confirmed.`,
+      `1. POST to /api/fund-task with { "payment_request_id": "${payment_request_id}" }`,
+      `   The endpoint is x402-protected — your HTTP client must support x402 auto-payment.`,
+      `   Use @x402/fetch wrapFetchWithPayment() to handle 402 responses automatically.`,
+      `2. The facilitator will verify ${req.amount_usdc} USDC payment on ${escrowConfig.chainName}.`,
+      `3. On success, task moves to "active" and the worker is notified.`,
     ].join("\n"),
     timestamp_unix: Math.floor(Date.now() / 1000),
   };

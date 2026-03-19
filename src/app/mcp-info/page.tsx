@@ -7,11 +7,26 @@ const TOOLS = [
     description:
       "Query the Base-Human whitepages for verified wallet addresses by skill. Returns JSON array of matching humans sorted by reputation.",
     params: ["skill: string"],
+    phase: "Discover",
+  },
+  {
+    name: "get_contractor",
+    description:
+      "Look up a single contractor's full profile by wallet address or UUID. Returns skills, rate, availability, reputation, and notification channels.",
+    params: ["wallet?: 0x...", "id?: uuid"],
+    phase: "Discover",
+  },
+  {
+    name: "list_skills",
+    description:
+      "Returns the canonical skill taxonomy — all unique skills registered by contractors on the platform.",
+    params: [],
+    phase: "Discover",
   },
   {
     name: "request_human_work",
     description:
-      "Initiate an x402 escrow payment request on Base L2 to hire a verified human. Returns a payment_request_id, on-chain task ID, and funding instructions.",
+      "Initiate a task to hire a verified human. Returns a payment_request_id and fund_url. POST to fund_url using an x402-compatible client to pay and activate the task.",
     params: [
       "from_agent_wallet: 0x...",
       "to_human_wallet: 0x...",
@@ -19,18 +34,21 @@ const TOOLS = [
       "amount_usdc: number",
       "deadline_hours: 1-720",
     ],
+    phase: "Hire",
   },
   {
     name: "get_task_status",
     description:
       "Check the status of a task by payment_request_id. Returns both database state and on-chain escrow state.",
     params: ["payment_request_id: string"],
+    phase: "Hire",
   },
   {
     name: "confirm_task_completion",
     description:
-      "Mark a task as completed in the database. The agent should also call escrow.completeTask() on-chain to release USDC to the worker.",
+      "Mark a task as completed. Triggers escrow release of USDC to the worker.",
     params: ["payment_request_id: string"],
+    phase: "Settle",
   },
   {
     name: "register_notification_channel",
@@ -42,6 +60,14 @@ const TOOLS = [
       "address: string",
       "accepts_auto_booking: boolean",
     ],
+    phase: "Settle",
+  },
+  {
+    name: "get_reputation",
+    description:
+      "Get a contractor's reputation score and task history summary. Completed/disputed/expired counts, total USDC earned, completion rate.",
+    params: ["wallet: 0x..."],
+    phase: "Reputation",
   },
 ];
 
@@ -99,15 +125,22 @@ export default function McpInfoPage() {
           <h2 className={styles.sectionTitle}>Tools</h2>
           {TOOLS.map((tool) => (
             <div key={tool.name} className={styles.toolCard}>
-              <div className={styles.toolName}>{tool.name}</div>
-              <p className={styles.toolDesc}>{tool.description}</p>
-              <div className={styles.params}>
-                {tool.params.map((p) => (
-                  <span key={p} className={styles.param}>
-                    {p}
-                  </span>
-                ))}
+              <div className={styles.toolHeader}>
+                <div className={styles.toolName}>{tool.name}</div>
+                <span className={styles.phaseBadge} data-phase={tool.phase.toLowerCase()}>
+                  {tool.phase}
+                </span>
               </div>
+              <p className={styles.toolDesc}>{tool.description}</p>
+              {tool.params.length > 0 && (
+                <div className={styles.params}>
+                  {tool.params.map((p) => (
+                    <span key={p} className={styles.param}>
+                      {p}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </section>
@@ -140,6 +173,43 @@ export default function McpInfoPage() {
               <span className={styles.chainValue}>USDC (6 decimals)</span>
             </span>
           </div>
+        </section>
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>x402 Payment Flow</h2>
+          <div className={styles.flowSteps}>
+            <div className={styles.flowStep}>
+              <span className={styles.stepNum}>1</span>
+              <span>Agent calls <code>request_human_work</code> via MCP</span>
+            </div>
+            <div className={styles.flowStep}>
+              <span className={styles.stepNum}>2</span>
+              <span>Server returns <code>fund_url</code> + <code>payment_request_id</code></span>
+            </div>
+            <div className={styles.flowStep}>
+              <span className={styles.stepNum}>3</span>
+              <span>Agent POSTs to <code>/api/fund-task</code> — gets HTTP 402</span>
+            </div>
+            <div className={styles.flowStep}>
+              <span className={styles.stepNum}>4</span>
+              <span>x402 client auto-pays USDC via facilitator</span>
+            </div>
+            <div className={styles.flowStep}>
+              <span className={styles.stepNum}>5</span>
+              <span>Task activates, worker is notified</span>
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Claude Config</h2>
+          <pre className={styles.codeBlock}>{`{
+  "mcpServers": {
+    "carbon-contractors": {
+      "type": "streamable-http",
+      "url": "http://localhost:3000/api/basedhuman.mcp"
+    }
+  }
+}`}</pre>
         </section>
       </main>
     </div>

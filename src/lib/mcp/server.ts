@@ -98,7 +98,7 @@ export function createMcpServer(): McpServer {
   // ─── Tool: request_human_work ─────────────────────────────────────────────
   server.tool(
     "request_human_work",
-    "Initiate an x402 escrow payment request on Base L2 to hire a verified human. Returns a payment_request_id, on-chain task ID, and instructions for funding the escrow contract with USDC.",
+    "Initiate a task to hire a verified human on Base L2. Returns a payment_request_id and a fund_url. POST { payment_request_id } to fund_url using an x402-compatible HTTP client (@x402/fetch) — the endpoint returns 402 Payment Required, your client auto-pays USDC, and the task activates.",
     {
       from_agent_wallet: z
         .string()
