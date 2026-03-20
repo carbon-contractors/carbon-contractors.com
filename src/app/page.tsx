@@ -213,7 +213,7 @@ export default function ComingSoon() {
           </header>
 
           <main>
-            <p className="cc-prompt">// coming soon</p>
+            <p className="cc-prompt">{'// coming soon'}</p>
             <h1 className="cc-h1">
               AI agents<br />
               are <span className="cc-accent">hiring.</span>
