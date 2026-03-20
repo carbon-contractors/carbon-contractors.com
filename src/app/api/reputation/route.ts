@@ -5,7 +5,7 @@
  * Returns computed reputation score, task history, stake data, and score breakdown.
  */
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getFullReputation } from "@/lib/reputation";
 import { safeErrorResponse } from "@/lib/errors";
 

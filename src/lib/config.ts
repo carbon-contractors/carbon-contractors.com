@@ -53,6 +53,11 @@ let _config: AppConfig | null = null;
  * Returns the validated config, parsing env vars on first call.
  * Throws a descriptive error if required vars are missing.
  */
+/** For testing only — resets the cached config so getConfig() re-parses env vars. */
+export function _resetConfig(): void {
+  _config = null;
+}
+
 export function getConfig(): AppConfig {
   if (_config) return _config;
 

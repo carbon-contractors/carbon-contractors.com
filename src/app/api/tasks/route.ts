@@ -7,6 +7,7 @@
 import { NextRequest } from "next/server";
 import { getTasksByWallet } from "@/lib/db/tasks";
 import { getOnChainTask, getEscrowConfig } from "@/lib/contracts/escrow";
+import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
 
 const WALLET_RE = /^0x[0-9a-fA-F]{40}$/;

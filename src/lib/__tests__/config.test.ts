@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Reset the cached config between tests
-let getConfig: () => ReturnType<typeof import("@/lib/config").getConfig>;
+import { getConfig, _resetConfig } from "@/lib/config";
 
 const VALID_ENV = {
   SUPABASE_URL: "https://test.supabase.co",
@@ -13,12 +11,9 @@ const VALID_ENV = {
 };
 
 describe("config", () => {
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeEach(() => {
+    _resetConfig();
     vi.unstubAllEnvs();
-    // Re-import fresh module each time
-    const mod = await import("@/lib/config");
-    getConfig = mod.getConfig;
   });
 
   it("validates successfully with required env vars", () => {
@@ -48,7 +43,8 @@ describe("config", () => {
   });
 
   it("throws when NEXT_PUBLIC_BASE_NETWORK is not set", () => {
-    const { NEXT_PUBLIC_BASE_NETWORK: _, ...envWithout } = VALID_ENV;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { NEXT_PUBLIC_BASE_NETWORK: _omit, ...envWithout } = VALID_ENV;
     for (const [key, val] of Object.entries(envWithout)) {
       vi.stubEnv(key, val);
     }
@@ -56,7 +52,8 @@ describe("config", () => {
   });
 
   it("throws when NEXT_PUBLIC_USDC_ADDRESS is not set", () => {
-    const { NEXT_PUBLIC_USDC_ADDRESS: _, ...envWithout } = VALID_ENV;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { NEXT_PUBLIC_USDC_ADDRESS: _omit, ...envWithout } = VALID_ENV;
     for (const [key, val] of Object.entries(envWithout)) {
       vi.stubEnv(key, val);
     }
@@ -64,7 +61,8 @@ describe("config", () => {
   });
 
   it("throws when SUPABASE_SERVICE_ROLE_KEY is not set", () => {
-    const { SUPABASE_SERVICE_ROLE_KEY: _, ...envWithout } = VALID_ENV;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { SUPABASE_SERVICE_ROLE_KEY: _omit, ...envWithout } = VALID_ENV;
     for (const [key, val] of Object.entries(envWithout)) {
       vi.stubEnv(key, val);
     }
