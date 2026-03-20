@@ -33,13 +33,17 @@ jobs:
         env:
           SUPABASE_URL: https://test.supabase.co
           SUPABASE_ANON_KEY: test-key
+          SUPABASE_SERVICE_ROLE_KEY: test-service-role-key
           NEXT_PUBLIC_ONCHAINKIT_API_KEY: test-key
           NEXT_PUBLIC_BASE_NETWORK: testnet
+          NEXT_PUBLIC_USDC_ADDRESS: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 
       - name: Build
         run: npm run build
         env:
           SUPABASE_URL: https://test.supabase.co
           SUPABASE_ANON_KEY: test-key
+          SUPABASE_SERVICE_ROLE_KEY: test-service-role-key
           NEXT_PUBLIC_ONCHAINKIT_API_KEY: test-key
           NEXT_PUBLIC_BASE_NETWORK: testnet
+          NEXT_PUBLIC_USDC_ADDRESS: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"

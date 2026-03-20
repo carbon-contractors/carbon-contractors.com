@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTaskByPaymentId, updateTaskStatus } from "@/lib/db/tasks";
 import { log } from "@/lib/logging";
+import { safeErrorResponse } from "@/lib/errors";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -51,11 +52,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       status: "disputed",
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    log("error", "dispute_failed", { error: message });
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
-    );
+    return safeErrorResponse(err, "dispute_failed");
   }
 }

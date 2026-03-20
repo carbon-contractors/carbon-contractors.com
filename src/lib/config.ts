@@ -10,17 +10,20 @@ const envSchema = z.object({
   // ── Required ──────────────────────────────────────────────────────────────
   SUPABASE_URL: z.url(),
   SUPABASE_ANON_KEY: z.string().min(1),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   NEXT_PUBLIC_ONCHAINKIT_API_KEY: z.string().min(1),
 
-  // ── Network ───────────────────────────────────────────────────────────────
-  NEXT_PUBLIC_BASE_NETWORK: z
-    .enum(["testnet", "mainnet"])
-    .default("testnet"),
+  // ── Network (required — no default, must be set explicitly) ──────────────
+  NEXT_PUBLIC_BASE_NETWORK: z.enum(["testnet", "mainnet"]),
 
   // ── Contracts (optional — may not be deployed yet) ────────────────────────
   NEXT_PUBLIC_ESCROW_CONTRACT: z.string().optional(),
   NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT: z.string().optional(),
   BASE_SEPOLIA_RPC_URL: z.string().optional(),
+  BASE_MAINNET_RPC_URL: z.string().optional(),
+
+  // ── USDC contract address (required — differs per network) ────────────────
+  NEXT_PUBLIC_USDC_ADDRESS: z.string().min(1),
 
   // ── x402 / Platform ───────────────────────────────────────────────────────
   NEXT_PUBLIC_BASE_URL: z.string().default("http://localhost:3000"),

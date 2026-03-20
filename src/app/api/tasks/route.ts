@@ -7,7 +7,7 @@
 import { NextRequest } from "next/server";
 import { getTasksByWallet } from "@/lib/db/tasks";
 import { getOnChainTask, getEscrowConfig } from "@/lib/contracts/escrow";
-import { log } from "@/lib/logging";
+import { safeErrorResponse } from "@/lib/errors";
 
 const WALLET_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -49,8 +49,6 @@ export async function GET(req: NextRequest) {
 
     return Response.json({ ok: true, tasks: enriched });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    log("error", "tasks_fetch_failed", { wallet, error: message });
-    return Response.json({ error: message }, { status: 500 });
+    return safeErrorResponse(err, "tasks_fetch_failed", { wallet });
   }
 }

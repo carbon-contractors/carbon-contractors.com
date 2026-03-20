@@ -21,7 +21,9 @@ function getPublicClient() {
   if (_publicClient) return _publicClient;
   const config = getConfig();
   const chain = config.NEXT_PUBLIC_BASE_NETWORK === "mainnet" ? base : baseSepolia;
-  const rpcUrl = config.BASE_SEPOLIA_RPC_URL ?? chain.rpcUrls.default.http[0];
+  const rpcUrl = config.NEXT_PUBLIC_BASE_NETWORK === "mainnet"
+    ? (config.BASE_MAINNET_RPC_URL ?? chain.rpcUrls.default.http[0])
+    : (config.BASE_SEPOLIA_RPC_URL ?? chain.rpcUrls.default.http[0]);
   _publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
   return _publicClient;
 }

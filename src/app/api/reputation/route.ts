@@ -5,8 +5,9 @@
  * Returns computed reputation score, task history, stake data, and score breakdown.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getFullReputation } from "@/lib/reputation";
+import { safeErrorResponse } from "@/lib/errors";
 
 export async function GET(request: NextRequest) {
   const wallet = request.nextUrl.searchParams.get("wallet");
@@ -22,10 +23,6 @@ export async function GET(request: NextRequest) {
     const reputation = await getFullReputation(wallet);
     return NextResponse.json({ ok: true, reputation });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 }
-    );
+    return safeErrorResponse(err, "reputation_fetch_error", { wallet });
   }
 }

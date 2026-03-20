@@ -55,9 +55,9 @@ const DISPUTE_ABI = [
   },
 ] as const;
 
-// ── USDC on Base Sepolia ────────────────────────────────────────────────────
+// ── USDC address (set via env var — differs per network) ────────────────────
 
-const USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
 const USDC_DECIMALS = 6;
 
 // ── Types ───────────────────────────────────────────────────────────────────

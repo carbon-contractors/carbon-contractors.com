@@ -1,15 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock Supabase client
+// Mock Supabase client (reads use anon, writes use admin — both share mockFrom)
 const mockFrom = vi.fn();
 vi.mock("@/lib/db/client", () => ({
   getSupabase: () => ({ from: mockFrom }),
+  getSupabaseAdmin: () => ({ from: mockFrom }),
 }));
 
 // Stub config env
 vi.stubEnv("SUPABASE_URL", "https://test.supabase.co");
 vi.stubEnv("SUPABASE_ANON_KEY", "key");
+vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
 vi.stubEnv("NEXT_PUBLIC_ONCHAINKIT_API_KEY", "key");
+vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
+vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
 import { getTaskByPaymentId, updateTaskStatus, getReputationSummary } from "@/lib/db/tasks";
 

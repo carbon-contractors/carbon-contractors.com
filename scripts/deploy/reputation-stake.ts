@@ -1,19 +1,22 @@
 /**
  * deploy/reputation-stake.ts
- * Deploys ReputationStake to Base Sepolia.
+ * Deploys ReputationStake to Base Sepolia or Base Mainnet.
  *
  * Usage:
  *   npx hardhat run scripts/deploy/reputation-stake.ts --network baseSepolia
+ *   npx hardhat run scripts/deploy/reputation-stake.ts --network base
  *
  * Requires in .env.local:
  *   DEPLOYER_PRIVATE_KEY=0x...
- *   BASE_SEPOLIA_RPC_URL=https://sepolia.base.org  (optional, defaults to public RPC)
+ *   NEXT_PUBLIC_USDC_ADDRESS=0x...  (USDC contract for target network)
  */
 
 import { ethers } from "hardhat";
 
-// USDC on Base Sepolia (Circle's official test token)
-const BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS;
+if (!USDC_ADDRESS) {
+  throw new Error("NEXT_PUBLIC_USDC_ADDRESS must be set in .env.local");
+}
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -23,14 +26,14 @@ async function main() {
   console.log("Balance:", ethers.formatEther(balance), "ETH");
 
   if (balance === 0n) {
-    throw new Error("Deployer has no ETH. Get some from faucet.base.org");
+    throw new Error("Deployer has no ETH.");
   }
 
   console.log("\nDeploying ReputationStake...");
-  console.log("USDC address:", BASE_SEPOLIA_USDC);
+  console.log("USDC address:", USDC_ADDRESS);
 
   const ReputationStake = await ethers.getContractFactory("ReputationStake");
-  const stake = await ReputationStake.deploy(BASE_SEPOLIA_USDC);
+  const stake = await ReputationStake.deploy(USDC_ADDRESS);
   await stake.waitForDeployment();
 
   const address = await stake.getAddress();
@@ -48,7 +51,7 @@ async function main() {
   console.log("  Min stake:", ethers.formatUnits(minStake, 6), "USDC");
   console.log(
     "  USDC matches:",
-    usdc.toLowerCase() === BASE_SEPOLIA_USDC.toLowerCase()
+    usdc.toLowerCase() === USDC_ADDRESS.toLowerCase()
   );
 }
 

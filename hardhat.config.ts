@@ -11,6 +11,9 @@ const DEPLOYER_KEY = process.env.DEPLOYER_PRIVATE_KEY ?? "";
 const BASE_SEPOLIA_RPC =
   process.env.BASE_SEPOLIA_RPC_URL ??
   "https://sepolia.base.org";
+const BASE_MAINNET_RPC =
+  process.env.BASE_MAINNET_RPC_URL ??
+  "https://mainnet.base.org";
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -27,6 +30,11 @@ const config: HardhatUserConfig = {
     baseSepolia: {
       url: BASE_SEPOLIA_RPC,
       chainId: 84532,
+      accounts: DEPLOYER_KEY ? [DEPLOYER_KEY] : [],
+    },
+    base: {
+      url: BASE_MAINNET_RPC,
+      chainId: 8453,
       accounts: DEPLOYER_KEY ? [DEPLOYER_KEY] : [],
     },
   },

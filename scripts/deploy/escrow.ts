@@ -1,19 +1,22 @@
 /**
  * deploy/escrow.ts
- * Deploys CarbonEscrow to Base Sepolia.
+ * Deploys CarbonEscrow to Base Sepolia or Base Mainnet.
  *
  * Usage:
  *   npx hardhat run scripts/deploy/escrow.ts --network baseSepolia
+ *   npx hardhat run scripts/deploy/escrow.ts --network base
  *
  * Requires in .env.local:
  *   DEPLOYER_PRIVATE_KEY=0x...
- *   BASE_SEPOLIA_RPC_URL=https://sepolia.base.org  (optional, defaults to public RPC)
+ *   NEXT_PUBLIC_USDC_ADDRESS=0x...  (USDC contract for target network)
  */
 
 import { ethers } from "hardhat";
 
-// USDC on Base Sepolia (Circle's official test token)
-const BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS;
+if (!USDC_ADDRESS) {
+  throw new Error("NEXT_PUBLIC_USDC_ADDRESS must be set in .env.local");
+}
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -23,14 +26,14 @@ async function main() {
   console.log("Balance:", ethers.formatEther(balance), "ETH");
 
   if (balance === 0n) {
-    throw new Error("Deployer has no ETH. Get some from faucet.base.org");
+    throw new Error("Deployer has no ETH.");
   }
 
   console.log("\nDeploying CarbonEscrow...");
-  console.log("USDC address:", BASE_SEPOLIA_USDC);
+  console.log("USDC address:", USDC_ADDRESS);
 
   const CarbonEscrow = await ethers.getContractFactory("CarbonEscrow");
-  const escrow = await CarbonEscrow.deploy(BASE_SEPOLIA_USDC);
+  const escrow = await CarbonEscrow.deploy(USDC_ADDRESS);
   await escrow.waitForDeployment();
 
   const address = await escrow.getAddress();
@@ -44,7 +47,7 @@ async function main() {
   console.log("\nVerification:");
   console.log("  Owner:", owner);
   console.log("  USDC:", usdc);
-  console.log("  Matches expected:", usdc.toLowerCase() === BASE_SEPOLIA_USDC.toLowerCase());
+  console.log("  Matches expected:", usdc.toLowerCase() === USDC_ADDRESS.toLowerCase());
 }
 
 main().catch((err) => {

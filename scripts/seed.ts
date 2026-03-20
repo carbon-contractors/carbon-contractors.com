@@ -2,19 +2,31 @@
  * seed.ts
  * Populates the humans table with mock data for development.
  * Usage: npx tsx scripts/seed.ts
+ *
+ * SAFETY: Refuses to run against production or mainnet databases.
+ * Uses service role key (anon role is read-only after migration 003).
  */
 
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.error("Set SUPABASE_URL and SUPABASE_ANON_KEY env vars");
+// ── Production guard ────────────────────────────────────────────────────────
+if (
+  process.env.NODE_ENV === "production" ||
+  process.env.NEXT_PUBLIC_BASE_NETWORK === "mainnet"
+) {
+  console.error("ERROR: Seed script cannot run against production/mainnet");
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars");
+  process.exit(1);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const SEED_HUMANS = [
   {

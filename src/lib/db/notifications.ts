@@ -6,7 +6,7 @@
  * human approval — the orchestrator can book directly.
  */
 
-import { getSupabase } from "./client";
+import { getSupabase, getSupabaseAdmin } from "./client";
 
 export interface NotificationChannel {
   id: string;
@@ -31,7 +31,7 @@ export interface RegisterChannelInput {
 export async function registerNotificationChannel(
   input: RegisterChannelInput
 ): Promise<NotificationChannel> {
-  const supabase = getSupabase();
+  const supabase = getSupabaseAdmin();
 
   const { data, error } = await supabase
     .from("notification_channels")

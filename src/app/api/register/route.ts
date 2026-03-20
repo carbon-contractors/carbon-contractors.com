@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { verifyMessage } from "viem";
-import { getSupabase } from "@/lib/db/client";
+import { getSupabaseAdmin } from "@/lib/db/client";
 import { log } from "@/lib/logging";
 
 interface RegisterBody {
@@ -61,8 +61,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  // Upsert into humans table
-  const supabase = getSupabase();
+  // Upsert into humans table (service role bypasses RLS)
+  const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("humans").upsert(
     {
       wallet: wallet,
