@@ -206,7 +206,7 @@ export default function McpInfoPage() {
   "mcpServers": {
     "carbon-contractors": {
       "type": "streamable-http",
-      "url": "http://localhost:3000/api/basedhuman.mcp"
+      "url": "https://carbon-contractors.com/api/basedhuman.mcp"
     }
   }
 }`}</pre>
