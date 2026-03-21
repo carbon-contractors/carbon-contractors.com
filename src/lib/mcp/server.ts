@@ -33,12 +33,22 @@ import {
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { log } from "@/lib/logging";
 
+/** Context provided when a caller authenticates their session. */
+export interface McpSessionContext {
+  /** The authenticated caller's wallet address, or null if unauthenticated. */
+  callerWallet: string | null;
+}
+
 /**
  * Creates a fresh McpServer instance per session.
  * Each transport needs its own server — the SDK does not support
  * connecting a single McpServer to multiple transports simultaneously.
+ *
+ * @param context Optional session context with caller identity.
+ *   Tools that mutate task state (resolve_dispute, confirm_task_completion,
+ *   dispute_task) require `callerWallet` to match the task's `from_agent_wallet`.
  */
-export function createMcpServer(): McpServer {
+export function createMcpServer(context?: McpSessionContext): McpServer {
   const server = new McpServer({
     name: "base-human-mcp",
     version: "1.0.0",
@@ -262,6 +272,22 @@ export function createMcpServer(): McpServer {
     },
     async ({ payment_request_id }) => {
       try {
+        // Authorization: only the originating agent may confirm completion
+        if (!context?.callerWallet) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Authentication required. Provide a verified wallet to confirm task completion.",
+                }),
+              },
+            ],
+          };
+        }
+
         const task = await getTaskByPaymentId(payment_request_id);
         if (!task) {
           return {
@@ -272,6 +298,26 @@ export function createMcpServer(): McpServer {
                 text: JSON.stringify({
                   ok: false,
                   error: "Task not found",
+                }),
+              },
+            ],
+          };
+        }
+
+        if (task.from_agent_wallet.toLowerCase() !== context.callerWallet.toLowerCase()) {
+          log("warn", "confirm_completion_unauthorized", {
+            payment_request_id,
+            caller: context.callerWallet,
+            task_agent: task.from_agent_wallet,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Not authorized. Only the originating agent may confirm task completion.",
                 }),
               },
             ],
@@ -584,6 +630,22 @@ export function createMcpServer(): McpServer {
     },
     async ({ payment_request_id, reason }) => {
       try {
+        // Authorization: only the originating agent may dispute a task
+        if (!context?.callerWallet) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Authentication required. Provide a verified wallet to dispute tasks.",
+                }),
+              },
+            ],
+          };
+        }
+
         const task = await getTaskByPaymentId(payment_request_id);
         if (!task) {
           return {
@@ -594,6 +656,26 @@ export function createMcpServer(): McpServer {
                 text: JSON.stringify({
                   ok: false,
                   error: "Task not found",
+                }),
+              },
+            ],
+          };
+        }
+
+        if (task.from_agent_wallet.toLowerCase() !== context.callerWallet.toLowerCase()) {
+          log("warn", "dispute_task_unauthorized", {
+            payment_request_id,
+            caller: context.callerWallet,
+            task_agent: task.from_agent_wallet,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Not authorized. Only the originating agent may dispute this task.",
                 }),
               },
             ],
@@ -676,6 +758,22 @@ export function createMcpServer(): McpServer {
     },
     async ({ payment_request_id, release_to_worker, resolution_note }) => {
       try {
+        // Authorization: only the originating agent may resolve a dispute
+        if (!context?.callerWallet) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Authentication required. Provide a verified wallet to resolve disputes.",
+                }),
+              },
+            ],
+          };
+        }
+
         const task = await getTaskByPaymentId(payment_request_id);
         if (!task) {
           return {
@@ -686,6 +784,26 @@ export function createMcpServer(): McpServer {
                 text: JSON.stringify({
                   ok: false,
                   error: "Task not found",
+                }),
+              },
+            ],
+          };
+        }
+
+        if (task.from_agent_wallet.toLowerCase() !== context.callerWallet.toLowerCase()) {
+          log("warn", "resolve_dispute_unauthorized", {
+            payment_request_id,
+            caller: context.callerWallet,
+            task_agent: task.from_agent_wallet,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Not authorized. Only the originating agent may resolve this dispute.",
                 }),
               },
             ],

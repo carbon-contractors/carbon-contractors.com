@@ -69,13 +69,27 @@ describe("tasks", () => {
   });
 
   it("updateTaskStatus calls update with correct args", async () => {
-    const chain = chainable({ data: null, error: null });
-    mockFrom.mockReturnValue(chain);
+    // First call: select to fetch current status
+    const selectChain = chainable({ data: { status: "active" }, error: null });
+    // Second call: update
+    const updateChain = chainable({ data: null, error: null });
+    mockFrom
+      .mockReturnValueOnce(selectChain)
+      .mockReturnValueOnce(updateChain);
 
     await updateTaskStatus("abc", "completed");
     expect(mockFrom).toHaveBeenCalledWith("tasks");
-    expect(chain.update).toHaveBeenCalledWith(
+    expect(updateChain.update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "completed" })
+    );
+  });
+
+  it("updateTaskStatus rejects invalid state transitions", async () => {
+    const selectChain = chainable({ data: { status: "completed" }, error: null });
+    mockFrom.mockReturnValue(selectChain);
+
+    await expect(updateTaskStatus("abc", "active")).rejects.toThrow(
+      "Invalid state transition: completed → active"
     );
   });
 

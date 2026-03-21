@@ -71,11 +71,40 @@ export async function getTaskByPaymentId(
   return (data as TaskRecord) ?? null;
 }
 
+/**
+ * Valid state transitions. Prevents illegal jumps like completed→active.
+ * Each key is the target status; its value lists allowed source statuses.
+ */
+const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+  pending: [],                         // initial state only (via createTask)
+  active: ["pending"],                 // funded
+  completed: ["active", "disputed"],   // work done or dispute resolved in worker's favor
+  disputed: ["active", "pending"],     // either party flags
+  expired: ["disputed", "pending"],    // dispute resolved in agent's favor, or timeout
+};
+
 export async function updateTaskStatus(
   paymentRequestId: string,
   status: TaskStatus,
 ): Promise<void> {
   const supabase = getSupabaseAdmin();
+
+  // Fetch current status to enforce valid transitions
+  const { data: current, error: fetchError } = await supabase
+    .from("tasks")
+    .select("status")
+    .eq("payment_request_id", paymentRequestId)
+    .single();
+
+  if (fetchError) throw new Error(`updateTaskStatus fetch failed: ${fetchError.message}`);
+  if (!current) throw new Error(`Task not found: ${paymentRequestId}`);
+
+  const allowed = VALID_TRANSITIONS[status];
+  if (!allowed.includes(current.status as TaskStatus)) {
+    throw new Error(
+      `Invalid state transition: ${current.status} → ${status} (allowed from: ${allowed.join(", ") || "none"})`,
+    );
+  }
 
   const { error } = await supabase
     .from("tasks")

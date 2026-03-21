@@ -12,6 +12,7 @@ import { createTask } from "@/lib/db/tasks";
 import { log } from "@/lib/logging";
 import { toTaskId, getEscrowConfig } from "@/lib/contracts/escrow";
 import { getConfig } from "@/lib/config";
+import { isValidWalletAddress } from "@/lib/validation";
 
 export interface X402PaymentRequest {
   from_agent_wallet: string;
@@ -49,11 +50,11 @@ export async function initiateX402Payment(
   if (req.amount_usdc <= 0) {
     throw new Error("amount_usdc must be > 0");
   }
-  if (!req.from_agent_wallet.startsWith("0x")) {
-    throw new Error("from_agent_wallet must be a valid 0x address");
+  if (!isValidWalletAddress(req.from_agent_wallet)) {
+    throw new Error("from_agent_wallet must be a valid 0x address (40 hex chars)");
   }
-  if (!req.to_human_wallet.startsWith("0x")) {
-    throw new Error("to_human_wallet must be a valid 0x address");
+  if (!isValidWalletAddress(req.to_human_wallet)) {
+    throw new Error("to_human_wallet must be a valid 0x address (40 hex chars)");
   }
 
   const payment_request_id = randomBytes(16).toString("hex");

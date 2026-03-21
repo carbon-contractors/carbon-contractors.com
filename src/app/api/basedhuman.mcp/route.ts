@@ -11,7 +11,7 @@
  */
 
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { createMcpServer } from "@/lib/mcp/server";
+import { createMcpServer, type McpSessionContext } from "@/lib/mcp/server";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { NextRequest } from "next/server";
 import { log } from "@/lib/logging";
@@ -22,6 +22,7 @@ import { setSessionCount } from "@/lib/mcp/session-count";
 
 interface SessionEntry {
   transport: WebStandardStreamableHTTPServerTransport;
+  context: McpSessionContext;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -60,12 +61,12 @@ function purgeExpiredSessions(): void {
   setSessionCount(sessions.size);
 }
 
-function createTransport(): WebStandardStreamableHTTPServerTransport {
+function createTransport(context: McpSessionContext): WebStandardStreamableHTTPServerTransport {
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => crypto.randomUUID(),
     onsessioninitialized: (sessionId) => {
       const now = Date.now();
-      sessions.set(sessionId, { transport, createdAt: now, lastActivityAt: now });
+      sessions.set(sessionId, { transport, context, createdAt: now, lastActivityAt: now });
       setSessionCount(sessions.size);
     },
     onsessionclosed: (sessionId) => {
@@ -128,9 +129,17 @@ async function handler(req: NextRequest): Promise<Response> {
       return jsonRpcError(-32000, "Server at capacity. Try again later.", 503);
     }
 
+    // Extract caller wallet from header (set by authenticated agent clients).
+    // Validated as a 0x-prefixed 40-hex-char address; null if missing/invalid.
+    const rawWallet = req.headers.get("x-caller-wallet");
+    const callerWallet =
+      rawWallet && /^0x[0-9a-fA-F]{40}$/.test(rawWallet) ? rawWallet : null;
+
+    const sessionContext: McpSessionContext = { callerWallet };
+
     // New session: fresh server + transport per connection.
-    const server = createMcpServer();
-    const transport = createTransport();
+    const server = createMcpServer(sessionContext);
+    const transport = createTransport(sessionContext);
     try {
       await server.connect(transport);
       log("info", "session_created", { total: sessions.size });

@@ -123,6 +123,24 @@ export interface Database {
         };
         Relationships: [];
       };
+      used_nonces: {
+        Row: {
+          nonce: string;
+          wallet: string;
+          consumed_at: string;
+        };
+        Insert: {
+          nonce: string;
+          wallet: string;
+          consumed_at?: string;
+        };
+        Update: {
+          nonce?: string;
+          wallet?: string;
+          consumed_at?: string;
+        };
+        Relationships: [];
+      };
       waitlist: {
         Row: {
           id: string;
