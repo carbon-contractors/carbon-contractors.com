@@ -5,14 +5,14 @@ import { NextRequest } from "next/server";
 vi.stubEnv("RATE_LIMIT_MAX_REQUESTS", "3");
 vi.stubEnv("RATE_LIMIT_WINDOW_MS", "60000");
 
-// We need to test the middleware function
-let middleware: (req: NextRequest) => ReturnType<typeof import("@/middleware").middleware>;
+// We need to test the middleware function — root middleware.ts (not src/)
+let middleware: (req: NextRequest) => ReturnType<typeof import("../../../middleware").middleware>;
 
 describe("rate limiting middleware", () => {
   beforeEach(async () => {
     vi.resetModules();
-    // Re-import to get fresh state
-    const mod = await import("@/middleware");
+    // Re-import to get fresh state (root middleware.ts)
+    const mod = await import("../../../middleware");
     middleware = mod.middleware;
   });
 
