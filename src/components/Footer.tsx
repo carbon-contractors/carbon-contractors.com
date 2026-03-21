@@ -22,7 +22,7 @@ export default function Footer() {
           <Link href="/learn" className={styles.link}>LEARN</Link>
           <Link href="/mcp-info" className={styles.link}>MCP DOCS</Link>
           <a
-            href="https://github.com/Wahzammo/carbon-contractors"
+            href="https://github.com/carbon-contractors/carbon-contractors.com"
             className={styles.link}
             target="_blank"
             rel="noopener noreferrer"
