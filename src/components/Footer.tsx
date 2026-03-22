@@ -21,6 +21,15 @@ export default function Footer() {
           <span className={styles.builtText}>BASE</span>
         </div>
 
+        <a
+          href="https://www.base.org/name/wahzammo"
+          className={styles.basename}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          wahzammo.base.eth
+        </a>
+
         <div className={styles.links}>
           <Link href="/learn" className={styles.link}>LEARN</Link>
           <Link href="/mcp-info" className={styles.link}>MCP DOCS</Link>

@@ -34,6 +34,20 @@
   opacity: 0.8;
 }
 
+.basename {
+  font-family: var(--cc-font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  color: var(--cc-blue-bright);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.basename:hover {
+  color: var(--cc-green);
+}
+
 .links {
   display: flex;
   gap: 24px;
