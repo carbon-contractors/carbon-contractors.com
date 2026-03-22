@@ -7,13 +7,13 @@ const nextConfig: NextConfig = {
   // and crypto module. Do not use edge runtime.
   experimental: {},
   async headers() {
-    // NOR-177: unsafe-inline/eval only in dev. Production uses strict CSP.
+    // NOR-177: Next.js requires 'unsafe-inline' for hydration bootstrap
+    // scripts and style injection. 'unsafe-eval' is dev-only (React Fast
+    // Refresh). TODO: implement nonce-based CSP for stricter production policy.
     const scriptSrc = isDev
       ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-      : "script-src 'self'";
-    const styleSrc = isDev
-      ? "style-src 'self' 'unsafe-inline'"
-      : "style-src 'self'";
+      : "script-src 'self' 'unsafe-inline'";
+    const styleSrc = "style-src 'self' 'unsafe-inline'";
 
     return [
       {
