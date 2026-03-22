@@ -19,6 +19,7 @@ import { getConfig } from "@/lib/config";
 import { setSessionCount } from "@/lib/mcp/session-count";
 import { recoverAddress, hashMessage } from "viem";
 import { getSupabaseAdmin } from "@/lib/db/client";
+import { mcpRateLimiter } from "@/lib/ratelimit";
 
 // ── Session registry ─────────────────────────────────────────────────────────
 
@@ -154,6 +155,13 @@ function jsonRpcError(code: number, message: string, status: number): Response {
 async function handler(req: NextRequest): Promise<Response> {
   // Purge stale sessions on every request
   purgeExpiredSessions();
+
+// ── Rate limiting (NOR-179) ──────────────────────────────────────────────────
+  const ip = req.headers.get("x-forwarded-for") ?? "127.0.0.1";
+  const { success, retryAfterS } = await mcpRateLimiter.limit(ip);
+  if (!success) {
+  return jsonRpcError(-32029, "Rate limit exceeded. Try again later.", 429);
+  }
 
   if (req.method === "POST") {
     let body: unknown;
