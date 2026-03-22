@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import styles from "./BuyMeACoffee.module.css";
 
@@ -26,50 +26,39 @@ const AMOUNTS = [
   { label: "$10", value: BigInt(10_000_000) },
 ] as const;
 
-type TxState = "idle" | "pending" | "confirming" | "success" | "error";
-
 export default function BuyMeACoffee() {
   const { isConnected } = useAccount();
-  const { writeContract, data: hash, error: writeError, reset } = useWriteContract();
-  const { isSuccess: txConfirmed } = useWaitForTransactionReceipt({ hash });
+  const {
+    writeContract,
+    data: hash,
+    error: writeError,
+    isPending: isSigning,
+    reset,
+  } = useWriteContract();
+  const { isSuccess: txConfirmed, isLoading: isConfirming } =
+    useWaitForTransactionReceipt({ hash });
 
-  const [state, setState] = useState<TxState>("idle");
   const [activeAmount, setActiveAmount] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (txConfirmed) {
-      setState("success");
-      const timer = setTimeout(() => {
-        setState("idle");
-        setActiveAmount(null);
-        reset();
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [txConfirmed, reset]);
+  // Derive display state from hook values — no effects needed
+  const getButtonState = useCallback(
+    (label: string) => {
+      if (activeAmount !== label) return "idle";
+      if (writeError) return "error";
+      if (txConfirmed) return "success";
+      if (isConfirming) return "confirming";
+      if (isSigning) return "pending";
+      return "idle";
+    },
+    [activeAmount, writeError, txConfirmed, isConfirming, isSigning]
+  );
 
-  useEffect(() => {
-    if (writeError) {
-      setState("error");
-      const timer = setTimeout(() => {
-        setState("idle");
-        setActiveAmount(null);
-        reset();
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [writeError, reset]);
-
-  useEffect(() => {
-    if (hash && state === "pending") {
-      setState("confirming");
-    }
-  }, [hash, state]);
+  const isBusy = isSigning || isConfirming;
 
   function handleTip(label: string, amount: bigint) {
     if (!isConnected || !TIP_WALLET || !USDC_ADDRESS) return;
+    reset();
     setActiveAmount(label);
-    setState("pending");
     writeContract({
       address: USDC_ADDRESS,
       abi: ERC20_TRANSFER_ABI,
@@ -78,29 +67,37 @@ export default function BuyMeACoffee() {
     });
   }
 
+  function handleReset() {
+    reset();
+    setActiveAmount(null);
+  }
+
   if (!TIP_WALLET || !USDC_ADDRESS) return null;
+
+  // After success or error, show a reset button
+  const showReset = txConfirmed || writeError;
 
   return (
     <div className={styles.container}>
       <span className={styles.heading}>BUY ME A COFFEE</span>
       <div className={styles.buttons}>
         {AMOUNTS.map(({ label, value }) => {
-          const isActive = activeAmount === label;
-          const disabled = !isConnected || (state !== "idle" && state !== "success" && state !== "error");
+          const btnState = getButtonState(label);
+          const disabled = !isConnected || isBusy;
 
           return (
             <button
               key={label}
-              className={`${styles.btn} ${isActive && state === "success" ? styles.btnSuccess : ""}`}
+              className={`${styles.btn} ${btnState === "success" ? styles.btnSuccess : ""} ${btnState === "error" ? styles.btnError : ""}`}
               disabled={disabled}
-              onClick={() => handleTip(label, value)}
+              onClick={() => (showReset ? handleReset() : handleTip(label, value))}
               title={isConnected ? `Send ${label} USDC` : "Connect wallet first"}
             >
-              {isActive && state === "pending" && "SIGNING..."}
-              {isActive && state === "confirming" && "CONFIRMING..."}
-              {isActive && state === "success" && "SENT!"}
-              {isActive && state === "error" && "FAILED"}
-              {(!isActive || state === "idle") && `${label} USDC`}
+              {btnState === "pending" && "SIGNING..."}
+              {btnState === "confirming" && "CONFIRMING..."}
+              {btnState === "success" && "SENT!"}
+              {btnState === "error" && "FAILED"}
+              {btnState === "idle" && `${label} USDC`}
             </button>
           );
         })}

@@ -51,6 +51,11 @@
   color: var(--cc-green);
 }
 
+.btnError {
+  border-color: var(--cc-red);
+  color: var(--cc-red);
+}
+
 .hint {
   font-family: var(--cc-font-mono);
   font-size: 9px;
