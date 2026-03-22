@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { NextRequest } from "next/server";
 
 // Mock Supabase before importing anything that uses it
-const mockSelect = vi.fn();
-const mockInsert = vi.fn();
-const mockUpdate = vi.fn();
-const mockDelete = vi.fn();
 const mockFrom = vi.fn();
 
 vi.mock("@/lib/db/client", () => ({
@@ -36,8 +33,7 @@ describe("MCP challenge-response auth", () => {
         body: JSON.stringify({}),
       });
 
-      // Cast NextRequest-like for testing
-      const res = await POST(req as any);
+      const res = await POST(req as unknown as NextRequest);
       expect(res.status).toBe(400);
 
       const json = await res.json();
@@ -55,7 +51,7 @@ describe("MCP challenge-response auth", () => {
         body: JSON.stringify({ walletAddress: "not-a-wallet" }),
       });
 
-      const res = await POST(req as any);
+      const res = await POST(req as unknown as NextRequest);
       expect(res.status).toBe(400);
     });
 
@@ -79,7 +75,7 @@ describe("MCP challenge-response auth", () => {
         }),
       });
 
-      const res = await POST(req as any);
+      const res = await POST(req as unknown as NextRequest);
       expect(res.status).toBe(200);
 
       const json = await res.json();

@@ -28,7 +28,6 @@ import {
   getOnChainTask,
   getEscrowConfig,
   toTaskId,
-  TaskStateEnum,
 } from "@/lib/contracts/escrow";
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { log } from "@/lib/logging";
