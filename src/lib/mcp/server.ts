@@ -29,6 +29,7 @@ import {
   getEscrowConfig,
   toTaskId,
 } from "@/lib/contracts/escrow";
+import { completeTaskOnChain } from "@/lib/contracts/signer";
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { log } from "@/lib/logging";
 
@@ -262,7 +263,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   // ─── Tool: confirm_task_completion ────────────────────────────────────────
   server.tool(
     "confirm_task_completion",
-    "Mark a task as completed in the database. The agent should also call escrow.completeTask() on-chain to release funds to the worker.",
+    "Mark a task as completed and release escrowed USDC to the worker on-chain.",
     {
       payment_request_id: z
         .string()
@@ -338,11 +339,37 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
+        // Release USDC on-chain via platform signer
+        const taskId = toTaskId(payment_request_id);
+        let txHash: string | null = null;
+        try {
+          txHash = await completeTaskOnChain(taskId);
+        } catch (chainErr: unknown) {
+          const chainMsg = chainErr instanceof Error ? chainErr.message : String(chainErr);
+          log("error", "signer_complete_task_failed", {
+            payment_request_id,
+            error: chainMsg,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: `On-chain completeTask failed: ${chainMsg}`,
+                }),
+              },
+            ],
+          };
+        }
+
         await updateTaskStatus(payment_request_id, "completed");
 
         log("info", "task_completed", {
           payment_request_id,
           amount_usdc: task.amount_usdc,
+          txHash,
         });
 
         return {
@@ -353,7 +380,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                 ok: true,
                 payment_request_id,
                 status: "completed",
-                note: "Database updated. Call escrow.completeTask(taskId) on-chain to release USDC to worker.",
+                txHash,
               }),
             },
           ],

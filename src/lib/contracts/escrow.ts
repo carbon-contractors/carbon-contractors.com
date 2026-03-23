@@ -4,7 +4,8 @@
  * Uses viem's publicClient to query on-chain task state.
  *
  * Write operations (createTask, completeTask, etc.) happen client-side
- * via the worker's connected wallet or server-side via AgentKit (Phase 4).
+ * via the worker's connected wallet or server-side via the platform signer
+ * (see signer.ts).
  */
 
 import { createPublicClient, http, keccak256, toHex, type Address } from "viem";

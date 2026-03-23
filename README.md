@@ -93,7 +93,7 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 | Escrow | Solidity (OpenZeppelin v5, Hardhat) |
 | Payments | USDC via x402 protocol |
 | Identity | Coinbase Smart Wallet / OnchainKit (passkeys) |
-| Agent SDK | Coinbase AgentKit (planned) |
+| Escrow Ops | Platform signer (viem walletClient) |
 
 ## Project status
 
@@ -105,6 +105,7 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] Coinbase Smart Wallet integration (passkey auth)
 - [x] Worker self-registration flow (wallet signature verification)
 - [x] On-chain USDC escrow contract (Base Sepolia)
+- [x] x402 payment protocol (HTTP 402 → agent auto-pays → escrow funds)
 - [x] Task lifecycle MCP tools (create → fund → complete)
 - [x] Notification channels with agent-to-agent auto-booking
 - [x] Reputation staking + on-chain history (ReputationStake.sol)
@@ -121,8 +122,8 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] `/learn` educational content (6 modules — crypto rails onboarding)
 - [x] `/services` page (10 service categories with examples and disruption notes)
 - [x] Service category selection (max 2 per worker) with API validation
-- [ ] AgentKit autonomous agent wallets
-- [ ] Task attestation and completion attestations
+- [x] Server-side platform signer for escrow operations (completeTask, resolveDispute, expireTask)
+- [ ] Task completion attestations (EAS)
 - [ ] Base Mainnet deployment
 
 ## Design constraints
