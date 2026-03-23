@@ -40,24 +40,32 @@ This is what makes the system genuinely autonomous. The agent doesn't need a hum
 
 ## Architecture
 
-```
-AI Agent (Claude, GPT, etc.)
-    |
-    v
-MCP Client ---- JSON-RPC / SSE ----> /api/basedhuman.mcp
-                                        |
-                    +-------------------+-------------------+
-                    v                   v                   v
-              ┌─ Discover ──┐   ┌─── Hire ────┐   ┌── Settle ──┐
-              │              │   │             │   │            │
-         search_whitepages   │  request_human_ │  confirm_task_│
-         get_contractor      │  work           │  completion   │
-         list_categories     │  get_task_status│              │
-              └──────────────┘   └─────────────┘   └────────────┘
-                    |                   |                   |
-                    v                   v                   v
-              Supabase (Postgres)   CarbonEscrow.sol    USDC on Base
-                                   (Base Sepolia)
+```mermaid
+flowchart LR
+    Agent["AI Agent"] --> MCP["MCP Client"] --> Endpoint["/api/basedhuman.mcp"]
+
+    Endpoint --> Discover
+    Endpoint --> Hire
+    Endpoint --> Settle
+
+    subgraph Discover
+        search_whitepages
+        get_contractor
+        list_categories
+    end
+
+    subgraph Hire
+        request_human_work
+        get_task_status
+    end
+
+    subgraph Settle
+        confirm_task_completion
+    end
+
+    Discover --> Supabase["Supabase (Postgres)"]
+    Hire --> Escrow["CarbonEscrow.sol"]
+    Settle --> USDC["USDC on Base"]
 ```
 
 **MCP Tools:**
