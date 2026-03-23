@@ -89,7 +89,7 @@ remediation in progress).
 
 If you find a security issue, please report it privately before disclosing publicly.
 
-**Email:** aaron@northmetrotech.com.au
+**Email:** security@carbon-contractors.com
 **Response target:** 48 hours
 
 Please include:
