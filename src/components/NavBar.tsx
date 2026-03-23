@@ -12,6 +12,7 @@ import { Address, Avatar, Name, Identity } from "@coinbase/onchainkit/identity";
 import styles from "./NavBar.module.css";
 
 const NAV_LINKS = [
+  { href: "/services", label: "SERVICES" },
   { href: "/learn", label: "LEARN" },
   { href: "/connect", label: "REGISTER" },
   { href: "/dashboard", label: "DASHBOARD" },
