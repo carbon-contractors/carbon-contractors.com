@@ -6,9 +6,9 @@ Human-as-a-Service infrastructure for the agentic web. AI agents autonomously di
 
 Large language models can already write code, analyse data, and generate content. What they can't do is the physical, subjective, or trust-dependent work that still requires a human. Carbon Contractors bridges that gap.
 
-Workers register their skills and hourly rates on-chain. AI agents query the worker registry via MCP (Model Context Protocol), select a worker, and lock USDC in escrow. When the task is done, funds release automatically. No platform middleman, no invoicing, no accounts payable.
+Workers register their service categories and hourly rates on-chain. AI agents query the worker registry via MCP (Model Context Protocol), select a worker, and lock USDC in escrow. When the task is done, funds release automatically. No platform middleman, no invoicing, no accounts payable.
 
-The trust layer is reputation staking — workers put skin in the game, and their track record is public and verifiable. No KYC, no resumes, no interviews. Just wallets, skills, and outcomes.
+The trust layer is reputation staking — workers put skin in the game, and their track record is public and verifiable. No KYC, no resumes, no interviews. Just wallets, services, and outcomes.
 
 ## Why Base
 
@@ -52,7 +52,7 @@ MCP Client ---- JSON-RPC / SSE ----> /api/basedhuman.mcp
               │              │   │             │   │            │
          search_whitepages   │  request_human_ │  confirm_task_│
          get_contractor      │  work           │  completion   │
-         list_skills         │  get_task_status│              │
+         list_categories     │  get_task_status│              │
               └──────────────┘   └─────────────┘   └────────────┘
                     |                   |                   |
                     v                   v                   v
@@ -64,9 +64,9 @@ MCP Client ---- JSON-RPC / SSE ----> /api/basedhuman.mcp
 
 | Phase | Tool | Purpose |
 |-------|------|---------|
-| Discover | `search_whitepages` | Query workers by skill, ranked by reputation |
+| Discover | `search_whitepages` | Query workers by service category, ranked by reputation |
 | Discover | `get_contractor` | Single worker profile by wallet or ID |
-| Discover | `list_skills` | Canonical skill taxonomy |
+| Discover | `list_categories` | Canonical service category taxonomy |
 | Discover | `get_reputation` | Computed reputation score + breakdown |
 | Hire | `request_human_work` | Create task + escrow funding instructions |
 | Hire | `get_task_status` | Poll task state (DB + on-chain) |
@@ -99,7 +99,7 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 
 - [x] MCP server with Streamable HTTP transport
 - [x] Worker registry backed by Postgres (Supabase)
-- [x] Skill search with reputation ranking
+- [x] Service category search with reputation ranking
 - [x] Task creation with payment persistence
 - [x] Structured logging (Wazuh-compatible)
 - [x] Coinbase Smart Wallet integration (passkey auth)
@@ -115,17 +115,19 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] Zod-validated environment configuration
 - [x] Session management with timeout and capacity limits
 - [x] Enhanced health check (DB + contract connectivity)
-- [x] Full test suite (36 tests, Vitest)
+- [x] Full test suite (52 tests, Vitest)
 - [x] GitHub Actions CI pipeline (lint, typecheck, test, build)
 - [x] Vercel deployment configuration
+- [x] `/learn` educational content (6 modules — crypto rails onboarding)
+- [x] `/services` page (10 service categories with examples and disruption notes)
+- [x] Service category selection (max 2 per worker) with API validation
 - [ ] AgentKit autonomous agent wallets
 - [ ] Task attestation and completion attestations
-- [ ] `/learn` educational content (crypto rails onboarding)
 - [ ] Base Mainnet deployment
 
 ## Design constraints
 
-- **Zero PII** — no personal data stored, ever. Wallets and skills only.
+- **Zero PII** — no personal data stored, ever. Wallets and service categories only.
 - **Passkeys only** — no seed phrases, no SMS OTP. WebAuthn or nothing.
 - **Escrow everything** — every task is wrapped in a smart contract. No trust required.
 - **MCP-native** — any LLM with an MCP client can hire humans. No proprietary API.
