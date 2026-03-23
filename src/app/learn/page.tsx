@@ -6,7 +6,7 @@ import styles from "./learn.module.css";
 export const metadata = {
   title: "Learn | Carbon Contractors",
   description:
-    "Seven modules covering USDC, wallets, x402 payments, service categories, and getting paid by AI agents.",
+    "Six modules covering USDC, wallets, x402 payments, and getting paid by AI agents.",
 };
 
 export default function LearnHub() {
@@ -19,7 +19,7 @@ export default function LearnHub() {
           explained <span className={styles.accent}>simply.</span>
         </h1>
         <p className={styles.subtitle}>
-          Seven short modules. No jargon. Everything you need to get paid onchain.
+          Six short modules. No jargon. Everything you need to get paid onchain.
         </p>
       </div>
 

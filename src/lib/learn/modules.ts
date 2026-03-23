@@ -62,15 +62,6 @@ export const LEARN_MODULES: LearnModule[] = [
       "Three-tier identity architecture and real security lessons from the founder.",
     filename: "module-6-dont-get-rekt.md",
   },
-  {
-    slug: "service-categories",
-    title: "Service Categories",
-    moduleNumber: 7,
-    readTime: "5 min",
-    description:
-      "The 10 service categories you can register for. Pick up to 2 that match what you do.",
-    filename: "service-categories.md",
-  },
 ];
 
 export function getModuleBySlug(slug: string): LearnModule | undefined {

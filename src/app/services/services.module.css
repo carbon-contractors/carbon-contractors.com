@@ -1,0 +1,205 @@
+.content {
+  max-width: 720px;
+}
+
+.prompt {
+  font-family: var(--cc-font-mono);
+  font-size: 0.8rem;
+  color: var(--cc-text-faint);
+  margin-bottom: 0.5rem;
+}
+
+.pageTitle {
+  font-size: 1.6rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+  color: var(--cc-text);
+}
+
+.accent {
+  color: var(--cc-green);
+}
+
+.subtitle {
+  color: var(--cc-text-secondary);
+  margin-bottom: 2rem;
+  line-height: 1.5;
+}
+
+/* ── Selection rules ──────────────────────────────────────────────────── */
+
+.rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 2.5rem;
+  padding: 1rem;
+  border: 1px solid var(--cc-border-subtle);
+  border-radius: 8px;
+  background: var(--cc-bg-surface);
+}
+
+.rule {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 140px;
+}
+
+.ruleLabel {
+  font-family: var(--cc-font-mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cc-text-faint);
+}
+
+.ruleValue {
+  font-size: 0.85rem;
+  color: var(--cc-text-secondary);
+}
+
+/* ── Category cards ───────────────────────────────────────────────────── */
+
+.categories {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+
+.categoryCard {
+  border: 1px solid var(--cc-border-subtle);
+  border-radius: 8px;
+  padding: 1.25rem;
+  background: var(--cc-bg-surface);
+}
+
+.categoryHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.categoryNumber {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--cc-bg-elevated);
+  border: 1px solid var(--cc-border);
+  font-family: var(--cc-font-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--cc-text-muted);
+  flex-shrink: 0;
+}
+
+.categoryLabel {
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--cc-text);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.categorySlug {
+  font-family: var(--cc-font-mono);
+  font-size: 0.7rem;
+  color: var(--cc-green);
+}
+
+.categoryTagline {
+  font-size: 0.85rem;
+  color: var(--cc-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+
+/* ── Example table ────────────────────────────────────────────────────── */
+
+.exampleTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.exampleTable th {
+  text-align: left;
+  font-family: var(--cc-font-mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cc-text-faint);
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--cc-border-subtle);
+}
+
+.exampleTable td {
+  padding: 0.4rem 0.6rem;
+  color: var(--cc-text-secondary);
+  border-bottom: 1px solid var(--cc-border-subtle);
+}
+
+.exampleTable tr:last-child td {
+  border-bottom: none;
+}
+
+.exampleTask {
+  font-weight: 500;
+  color: var(--cc-text);
+  white-space: nowrap;
+}
+
+/* ── Disruption note ──────────────────────────────────────────────────── */
+
+.disrupts {
+  font-size: 0.8rem;
+  color: var(--cc-text-muted);
+  line-height: 1.4;
+}
+
+.disruptsLabel {
+  font-family: var(--cc-font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cc-text-faint);
+}
+
+/* ── Bottom CTA ───────────────────────────────────────────────────────── */
+
+.cta {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.ctaText {
+  color: var(--cc-text-secondary);
+  margin-bottom: 1rem;
+}
+
+.ctaButton {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  border-radius: 8px;
+  background: var(--cc-green);
+  color: #0A0B0D;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.ctaButton:hover {
+  background: var(--cc-green-hover);
+}
