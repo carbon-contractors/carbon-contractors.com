@@ -131,7 +131,8 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] `/services` page (10 service categories with examples and disruption notes)
 - [x] Service category selection (max 2 per worker) with API validation
 - [x] Server-side platform signer for escrow operations (completeTask, resolveDispute, expireTask)
-- [ ] Task completion attestations (EAS)
+- [x] On-chain reputation scoring (escrow event logs, zero gas, DB fallback)
+- [ ] Task completion attestations (EAS — roadmap, post-monetisation)
 - [ ] Base Mainnet deployment
 
 ## Design constraints
