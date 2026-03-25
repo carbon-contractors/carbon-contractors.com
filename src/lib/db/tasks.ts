@@ -87,31 +87,43 @@ export async function updateTaskStatus(
   paymentRequestId: string,
   status: TaskStatus,
 ): Promise<void> {
-  const supabase = getSupabaseAdmin();
-
-  // Fetch current status to enforce valid transitions
-  const { data: current, error: fetchError } = await supabase
-    .from("tasks")
-    .select("status")
-    .eq("payment_request_id", paymentRequestId)
-    .single();
-
-  if (fetchError) throw new Error(`updateTaskStatus fetch failed: ${fetchError.message}`);
-  if (!current) throw new Error(`Task not found: ${paymentRequestId}`);
-
   const allowed = VALID_TRANSITIONS[status];
-  if (!allowed.includes(current.status as TaskStatus)) {
+  if (allowed.length === 0) {
     throw new Error(
-      `Invalid state transition: ${current.status} → ${status} (allowed from: ${allowed.join(", ") || "none"})`,
+      `Invalid state transition: cannot transition to '${status}' (no allowed source states)`,
     );
   }
 
-  const { error } = await supabase
+  const supabase = getSupabaseAdmin();
+
+  // Atomic update — the WHERE clause enforces both the payment_request_id match
+  // and that the current status is in the allowed source set, eliminating the
+  // TOCTOU race from the previous read-then-validate-then-write approach.
+  const { data, error } = await supabase
     .from("tasks")
     .update({ status, updated_at: new Date().toISOString() })
-    .eq("payment_request_id", paymentRequestId);
+    .eq("payment_request_id", paymentRequestId)
+    .in("status", allowed)
+    .select("payment_request_id");
 
   if (error) throw new Error(`updateTaskStatus failed: ${error.message}`);
+
+  if (!data || data.length === 0) {
+    // Either the task doesn't exist or its current status doesn't allow this transition.
+    // Fetch current state to produce a clear error message.
+    const { data: current } = await supabase
+      .from("tasks")
+      .select("status")
+      .eq("payment_request_id", paymentRequestId)
+      .single();
+
+    if (!current) {
+      throw new Error(`Task not found: ${paymentRequestId}`);
+    }
+    throw new Error(
+      `Invalid state transition: ${current.status} → ${status} (allowed from: ${allowed.join(", ")})`,
+    );
+  }
 }
 
 export async function getTasksByWallet(

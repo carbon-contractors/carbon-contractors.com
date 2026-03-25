@@ -949,7 +949,13 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             text: JSON.stringify({
               protocol: "base-human-mcp/1.0",
               total: all.length,
-              humans: all,
+              humans: all.map((h) => ({
+                wallet: h.wallet,
+                categories: h.categories,
+                rate_usdc: h.rate_usdc,
+                availability: h.availability,
+                reputation_score: h.reputation_score,
+              })),
             }),
           },
         ],
