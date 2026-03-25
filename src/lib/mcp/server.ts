@@ -325,14 +325,33 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         }
 
         if (task.status !== "active" && task.status !== "pending") {
+          // If DB says not active/pending, check if this is a partial-failure
+          // recovery case: on-chain completed but DB update failed previously.
+          if (task.status !== "completed") {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    ok: false,
+                    error: `Task is ${task.status}, cannot complete`,
+                  }),
+                },
+              ],
+            };
+          }
+          // Already completed in DB — return success idempotently
           return {
-            isError: true,
             content: [
               {
                 type: "text",
                 text: JSON.stringify({
-                  ok: false,
-                  error: `Task is ${task.status}, cannot complete`,
+                  ok: true,
+                  payment_request_id,
+                  status: "completed",
+                  txHash: null,
+                  note: "Task was already completed.",
                 }),
               },
             ],
@@ -342,26 +361,48 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // Release USDC on-chain via platform signer
         const taskId = toTaskId(payment_request_id);
         let txHash: string | null = null;
-        try {
-          txHash = await completeTaskOnChain(taskId);
-        } catch (chainErr: unknown) {
-          const chainMsg = chainErr instanceof Error ? chainErr.message : String(chainErr);
-          log("error", "signer_complete_task_failed", {
-            payment_request_id,
-            error: chainMsg,
-          });
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error: `On-chain completeTask failed: ${chainMsg}`,
-                }),
-              },
-            ],
-          };
+
+        // Check on-chain state first — handles partial-failure recovery where
+        // a previous call completed on-chain but the DB update failed.
+        let alreadyCompletedOnChain = false;
+        const escrowConfig = getEscrowConfig();
+        if (escrowConfig.address) {
+          try {
+            const onChainTask = await getOnChainTask(payment_request_id);
+            if (onChainTask.state === "Completed") {
+              alreadyCompletedOnChain = true;
+              log("info", "signer_complete_task_already_done", {
+                payment_request_id,
+                onChainState: onChainTask.state,
+              });
+            }
+          } catch {
+            // Contract may not be deployed yet — proceed with on-chain call
+          }
+        }
+
+        if (!alreadyCompletedOnChain) {
+          try {
+            txHash = await completeTaskOnChain(taskId);
+          } catch (chainErr: unknown) {
+            const chainMsg = chainErr instanceof Error ? chainErr.message : String(chainErr);
+            log("error", "signer_complete_task_failed", {
+              payment_request_id,
+              error: chainMsg,
+            });
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    ok: false,
+                    error: `On-chain completeTask failed: ${chainMsg}`,
+                  }),
+                },
+              ],
+            };
+          }
         }
 
         await updateTaskStatus(payment_request_id, "completed");
