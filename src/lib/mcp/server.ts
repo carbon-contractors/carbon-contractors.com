@@ -538,10 +538,6 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                   accepts_auto_booking: channels.some(
                     (c) => c.accepts_auto_booking
                   ),
-                  notification_channels: channels.map((c) => ({
-                    type: c.type,
-                    accepts_auto_booking: c.accepts_auto_booking,
-                  })),
                 },
               }),
             },
