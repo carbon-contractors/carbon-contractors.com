@@ -20,6 +20,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+ALTER FUNCTION public.prevent_task_mutation() SET search_path = public;
+
 CREATE TRIGGER trg_prevent_task_mutation
   BEFORE UPDATE ON tasks
   FOR EACH ROW EXECUTE FUNCTION prevent_task_mutation();
