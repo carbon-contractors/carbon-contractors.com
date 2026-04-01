@@ -18,15 +18,19 @@ vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF
 import { getTaskByPaymentId, updateTaskStatus, getReputationSummary } from "@/lib/db/tasks";
 
 function chainable(result: { data: unknown; error: unknown }) {
-  const chain = {
-    select: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockReturnThis(),
-    update: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    order: vi.fn().mockResolvedValue(result),
-    limit: vi.fn().mockResolvedValue(result),
-    single: vi.fn().mockResolvedValue(result),
-  };
+  const chain: Record<string, ReturnType<typeof vi.fn>> = {};
+  const self = () => chain;
+  // Every method returns the chain itself, and the chain is thenable
+  // so awaiting at any point resolves to `result`.
+  chain.select = vi.fn(self);
+  chain.insert = vi.fn(self);
+  chain.update = vi.fn(self);
+  chain.eq = vi.fn(self);
+  chain.in = vi.fn(self);
+  chain.order = vi.fn(self);
+  chain.limit = vi.fn(self);
+  chain.single = vi.fn().mockResolvedValue(result);
+  chain.then = vi.fn((resolve: (v: unknown) => unknown) => Promise.resolve(resolve(result)));
   return chain;
 }
 
@@ -69,27 +73,29 @@ describe("tasks", () => {
   });
 
   it("updateTaskStatus calls update with correct args", async () => {
-    // First call: select to fetch current status
-    const selectChain = chainable({ data: { status: "active" }, error: null });
-    // Second call: update
-    const updateChain = chainable({ data: null, error: null });
-    mockFrom
-      .mockReturnValueOnce(selectChain)
-      .mockReturnValueOnce(updateChain);
+    // Atomic update: .update().eq().in().select() returns matched row
+    const updateChain = chainable({ data: [{ payment_request_id: "abc" }], error: null });
+    mockFrom.mockReturnValueOnce(updateChain);
 
     await updateTaskStatus("abc", "completed");
     expect(mockFrom).toHaveBeenCalledWith("tasks");
     expect(updateChain.update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "completed" })
     );
+    expect(updateChain.in).toHaveBeenCalledWith("status", ["active", "disputed"]);
   });
 
   it("updateTaskStatus rejects invalid state transitions", async () => {
-    const selectChain = chainable({ data: { status: "completed" }, error: null });
-    mockFrom.mockReturnValue(selectChain);
+    // Atomic update returns no rows (status didn't match allowed sources)
+    const updateChain = chainable({ data: [], error: null });
+    // Fallback lookup returns current status
+    const lookupChain = chainable({ data: { status: "completed" }, error: null });
+    mockFrom
+      .mockReturnValueOnce(updateChain)
+      .mockReturnValueOnce(lookupChain);
 
     await expect(updateTaskStatus("abc", "active")).rejects.toThrow(
-      "Invalid state transition: completed → active"
+      "Invalid state transition: completed → active (allowed from: pending)"
     );
   });
 

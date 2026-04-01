@@ -50,7 +50,6 @@
   },
   "overrides": {
     "picomatch": ">=2.3.2",
-    "path-to-regexp": ">=8.4.0",
-    "brace-expansion": ">=1.1.13"
+    "path-to-regexp": ">=8.4.0"
   }
 }
