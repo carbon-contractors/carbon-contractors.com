@@ -1,4 +1,6 @@
 name: Supabase Keepalive
+permissions:
+  contents: read
 on:
   schedule:
     - cron: '0 2 * * 1'  # Mondays 02:00 UTC
