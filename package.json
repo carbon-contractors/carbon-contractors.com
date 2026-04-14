@@ -21,7 +21,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@supabase/supabase-js": "^2.99.1",
     "@tanstack/react-query": "^5.90.21",
-    "next": "16.2.1",
+    "next": "16.2.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
