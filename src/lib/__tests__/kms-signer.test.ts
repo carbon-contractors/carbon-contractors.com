@@ -280,6 +280,40 @@ describe("kms-signer", () => {
 
       _resetKmsClients();
     });
+
+    // Known-vector sanity check — verifies the PEM parsing + keccak256 math
+    // against a well-known secp256k1 test vector, independent of KMS.
+    //
+    // Test vector: secp256k1 generator point G (corresponds to private key = 1)
+    //   x: 79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
+    //   y: 483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8
+    //   Ethereum address: 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+    // This is the canonical starting point of secp256k1; the derived address
+    // is widely documented (e.g. Bitcoin generator -> Ethereum address).
+    it("derives the known Ethereum address for secp256k1 generator point G", async () => {
+      stubEnv();
+
+      // SPKI PEM for the G point — constructed from the standard DER template
+      // Header: 3056301006072a8648ce3d020106052b8104000a03420004 (23 bytes)
+      //   SEQUENCE { SEQUENCE { OID ecPublicKey, OID secp256k1 }, BIT STRING { 0x04 || x || y } }
+      const G_POINT_PEM = `-----BEGIN PUBLIC KEY-----
+MFYwEAYHKoZIzj0CAQYFK4EEAAoDQgAEeb5mfvncu6xVoGKVzocLBwKb/NstzijZ
+WfKBWxb4F5hIOtp3JqPEZV2k+/wOEQio/Re0SKaFVBmcR9CP+xDUuA==
+-----END PUBLIC KEY-----`;
+
+      const KNOWN_G_ADDRESS = "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf";
+
+      mockGetPublicKey.mockResolvedValue([{ pem: G_POINT_PEM }]);
+
+      const { getEthAddressFromKms, _resetKmsClients } = await import(
+        "@/lib/contracts/kms-signer"
+      );
+
+      const address = await getEthAddressFromKms();
+      expect(address).toBe(KNOWN_G_ADDRESS);
+
+      _resetKmsClients();
+    });
   });
 
   describe("createKmsAccount", () => {

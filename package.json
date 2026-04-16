@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
+    "verify:kms": "tsx scripts/verify-kms-signer.ts",
     "compile": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat compile",
     "deploy:sepolia": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/escrow.ts --network baseSepolia",
     "deploy:reputation": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/reputation-stake.ts --network baseSepolia",
