@@ -112,6 +112,7 @@ describe("kms-signer", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.unstubAllEnvs();
+    vi.clearAllMocks();
     mockGetPublicKey.mockReset();
     mockAsymmetricSign.mockReset();
   });
@@ -342,6 +343,90 @@ WfKBWxb4F5hIOtp3JqPEZV2k+/wOEQio/Re0SKaFVBmcR9CP+xDUuA==
 
       // Should have type 'local'
       expect(account.type).toBe("local");
+
+      _resetKmsClients();
+    });
+  });
+
+  // ── Auth branch detection — Vercel WIF vs local ADC ────────────────────────
+  describe("auth branch detection", () => {
+    it("uses ADC (no authClient) when not running in Vercel", async () => {
+      stubEnv();
+      // Explicitly clear Vercel indicators
+      vi.stubEnv("VERCEL", "");
+      vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+
+      mockGetPublicKey.mockResolvedValue([{ pem: TEST_PEM }]);
+
+      const { KeyManagementServiceClient } = await import(
+        "@google-cloud/kms"
+      );
+      const { IdentityPoolClient } = await import("google-auth-library");
+      const { getEthAddressFromKms, _resetKmsClients } = await import(
+        "@/lib/contracts/kms-signer"
+      );
+
+      await getEthAddressFromKms();
+
+      // KeyManagementServiceClient should have been called with NO authClient
+      // (the default ADC chain will be used)
+      const kmsCtor = KeyManagementServiceClient as unknown as ReturnType<
+        typeof vi.fn
+      >;
+      expect(kmsCtor).toHaveBeenCalled();
+      const lastCall = kmsCtor.mock.calls[kmsCtor.mock.calls.length - 1];
+      expect(lastCall[0]).toBeUndefined(); // called with no args
+
+      // IdentityPoolClient should NOT have been constructed
+      expect(IdentityPoolClient).not.toHaveBeenCalled();
+
+      _resetKmsClients();
+    });
+
+    it("uses WIF (IdentityPoolClient) when VERCEL=1", async () => {
+      stubEnv();
+      vi.stubEnv("VERCEL", "1");
+
+      mockGetPublicKey.mockResolvedValue([{ pem: TEST_PEM }]);
+
+      const { IdentityPoolClient } = await import("google-auth-library");
+      const { getEthAddressFromKms, _resetKmsClients } = await import(
+        "@/lib/contracts/kms-signer"
+      );
+
+      await getEthAddressFromKms();
+
+      // IdentityPoolClient SHOULD have been constructed
+      expect(IdentityPoolClient).toHaveBeenCalled();
+
+      _resetKmsClients();
+    });
+
+    it("throws a clear error when in Vercel but WIF env vars are missing", async () => {
+      // Only the required non-KMS config set, plus VERCEL=1 and GCP_KMS_KEY_PATH
+      vi.stubEnv("SUPABASE_URL", "https://test.supabase.co");
+      vi.stubEnv("SUPABASE_ANON_KEY", "key");
+      vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
+      vi.stubEnv("NEXT_PUBLIC_ONCHAINKIT_API_KEY", "key");
+      vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
+      vi.stubEnv(
+        "NEXT_PUBLIC_USDC_ADDRESS",
+        "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+      );
+      vi.stubEnv(
+        "GCP_KMS_KEY_PATH",
+        "projects/test/locations/us-central1/keyRings/test/cryptoKeys/test/cryptoKeyVersions/1",
+      );
+      vi.stubEnv("VERCEL", "1");
+      // Intentionally omit GCP_PROJECT_NUMBER and friends
+
+      const { getEthAddressFromKms, _resetKmsClients } = await import(
+        "@/lib/contracts/kms-signer"
+      );
+
+      await expect(getEthAddressFromKms()).rejects.toThrow(
+        "GCP Workload Identity Federation env vars not set",
+      );
 
       _resetKmsClients();
     });

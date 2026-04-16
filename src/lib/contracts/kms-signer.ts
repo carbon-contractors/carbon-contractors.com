@@ -41,11 +41,43 @@ const SECP256K1_HALF_ORDER = SECP256K1_ORDER / BigInt(2);
 let _kmsClient: KeyManagementServiceClient | null = null;
 let _cachedAddress: Address | null = null;
 
-// ── GCP Authentication via Workload Identity Federation ─────────────────────
+// ── GCP Authentication ──────────────────────────────────────────────────────
+
+/**
+ * Detect whether we're running inside a Vercel function.
+ * Vercel sets VERCEL=1 in all runtime environments. When present, we use
+ * the WIF path with @vercel/oidc. Otherwise we fall through to Application
+ * Default Credentials — which picks up `gcloud auth application-default login`,
+ * GOOGLE_APPLICATION_CREDENTIALS, or metadata-service auth as appropriate.
+ *
+ * This split matches the deployment model:
+ *   - Production/preview (Vercel): zero static credentials, WIF only
+ *   - Local dev / CI: developer's ADC, service account JSON, etc.
+ *
+ * The WIF path cannot be exercised locally — @vercel/oidc has no token
+ * to return outside Vercel's infrastructure. End-to-end WIF validation
+ * only happens on a real Vercel deployment.
+ */
+function isVercelRuntime(): boolean {
+  return Boolean(process.env.VERCEL) || Boolean(process.env.VERCEL_OIDC_TOKEN);
+}
 
 async function getKmsClient(): Promise<KeyManagementServiceClient> {
   if (_kmsClient) return _kmsClient;
 
+  if (!isVercelRuntime()) {
+    // Local dev / CI path — use Application Default Credentials.
+    // The user is expected to have run `gcloud auth application-default login`
+    // or set GOOGLE_APPLICATION_CREDENTIALS. The KMS client's default auth
+    // chain handles the rest.
+    log("info", "kms_signer_using_adc", {
+      reason: "not in Vercel runtime",
+    });
+    _kmsClient = new KeyManagementServiceClient();
+    return _kmsClient;
+  }
+
+  // Vercel runtime — use Workload Identity Federation.
   const config = getConfig();
   const projectNumber = config.GCP_PROJECT_NUMBER;
   const poolId = config.GCP_WORKLOAD_IDENTITY_POOL_ID;
@@ -55,10 +87,12 @@ async function getKmsClient(): Promise<KeyManagementServiceClient> {
   if (!projectNumber || !poolId || !providerId || !serviceAccountEmail) {
     throw new Error(
       "GCP Workload Identity Federation env vars not set. " +
-        "Required: GCP_PROJECT_NUMBER, GCP_WORKLOAD_IDENTITY_POOL_ID, " +
+        "Required in Vercel runtime: GCP_PROJECT_NUMBER, GCP_WORKLOAD_IDENTITY_POOL_ID, " +
         "GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID, GCP_SERVICE_ACCOUNT_EMAIL",
     );
   }
+
+  log("info", "kms_signer_using_wif", { poolId, providerId });
 
   // Dynamic import: @vercel/oidc only exists in Vercel runtime
   const { getVercelOidcToken } = await import("@vercel/oidc");

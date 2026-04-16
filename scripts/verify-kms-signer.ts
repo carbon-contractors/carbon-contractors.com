@@ -10,18 +10,19 @@
  *   3. DER -> r/s/v conversion with low-S normalization
  *   4. viem recoverAddress recovers the same address that was derived
  *
- * Usage:
- *   GCP_KMS_KEY_PATH=projects/.../cryptoKeyVersions/1 \
- *   GCP_PROJECT_NUMBER=529104096274 \
- *   GCP_WORKLOAD_IDENTITY_POOL_ID=carbon-contractors-pool \
- *   GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID=vercel \
- *   GCP_SERVICE_ACCOUNT_EMAIL=kms-signer-svc@... \
- *   npx tsx scripts/verify-kms-signer.ts
+ * Usage (local dev — uses Application Default Credentials):
+ *   gcloud auth application-default login  # one-time setup
+ *   GCP_KMS_KEY_PATH=projects/.../cryptoKeyVersions/1 npm run verify:kms
  *
- * For local runs outside Vercel, you'll typically authenticate via
- * `gcloud auth application-default login` instead of the WIF path.
- * This script uses the same code path as production — any misalignment
- * between WIF/ADC will surface here before test night.
+ * The kms-signer module auto-detects whether it's running inside Vercel
+ * (via the VERCEL env var) and selects its auth path accordingly:
+ *   - In Vercel: Workload Identity Federation via @vercel/oidc (requires
+ *     the five GCP_* env vars)
+ *   - Locally:   Application Default Credentials (gcloud auth / JSON key)
+ *
+ * End-to-end WIF validation only happens on a real Vercel deployment —
+ * this script proves KMS signing + crypto math, which is all that can be
+ * verified without Vercel's infrastructure.
  *
  * Exits 0 on success, 1 on any verification failure with a clear diff.
  */
