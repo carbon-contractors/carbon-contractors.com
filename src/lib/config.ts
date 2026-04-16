@@ -33,6 +33,13 @@ const envSchema = z.object({
   DEPLOYER_PRIVATE_KEY: z.string().optional(),
   CDP_API_KEY: z.string().optional(),
 
+  // ── GCP Cloud KMS (optional — production signer via HSM) ─────────────────
+  GCP_KMS_KEY_PATH: z.string().optional(),
+  GCP_PROJECT_NUMBER: z.string().optional(),
+  GCP_WORKLOAD_IDENTITY_POOL_ID: z.string().optional(),
+  GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID: z.string().optional(),
+  GCP_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
+
   // ── Session management ────────────────────────────────────────────────────
   SESSION_TIMEOUT_MS: z.coerce.number().default(1_800_000), // 30 min
   MAX_SESSIONS: z.coerce.number().default(100),
