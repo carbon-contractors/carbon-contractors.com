@@ -58,7 +58,6 @@
     "defu": ">=6.1.6",
     "lodash": ">=4.17.24",
     "vite": ">=6.4.2 <7",
-    "protobufjs": ">=7.5.5",
-    "brace-expansion": ">=1.1.13"
+    "protobufjs": ">=7.5.5"
   }
 }
