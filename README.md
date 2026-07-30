@@ -124,7 +124,7 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] Zod-validated environment configuration
 - [x] Session management with timeout and capacity limits
 - [x] Enhanced health check (DB + contract connectivity)
-- [x] Full test suite (52 tests, Vitest)
+- [x] Full test suite (74 tests, Vitest — see the caveat in *Local development* below)
 - [x] GitHub Actions CI pipeline (lint, typecheck, test, build)
 - [x] Vercel deployment configuration
 - [x] `/learn` educational content (6 modules — crypto rails onboarding)
@@ -134,6 +134,39 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] On-chain reputation scoring (escrow event logs, zero gas, DB fallback)
 - [ ] Task completion attestations (EAS — roadmap, post-monetisation)
 - [ ] Base Mainnet deployment
+
+## Local development
+
+Two things about the local setup are surprising enough to write down, both measured on 2026-07-30.
+
+**Local escrow writes work, and that is a defect rather than a convenience.** `getSigner()` uses GCP
+Cloud KMS when `GCP_KMS_KEY_PATH` is set and otherwise falls back to `DEPLOYER_PRIVATE_KEY`. There
+are no `GCP_*` variables in `.env.local`, so local runs sign with the raw key — and that key is
+currently the **owner** of both deployed contracts:
+
+```
+CarbonEscrow.owner()  = 0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b   (the local raw key)
+HSM/KMS address       = 0xa8931097540e69B474013D294d0bA6A2cC853e4b   (funded, never given ownership)
+```
+
+So `resolveDisputeOnChain` succeeds locally. It should not: the architecture in
+[docs/Security-Trust-Disclosure.md](docs/Security-Trust-Disclosure.md) intends the HSM key to hold
+authority, and `transferOwnership()` was never called. Tracked as `CC-059`; no GCP setup is needed to
+develop locally until it closes. Verify with:
+
+```bash
+node --env-file=.env.local scripts/audit/verify-contract-owner.mjs
+```
+
+It exits non-zero while ownership is wrong.
+
+`completeTaskOnChain` cannot succeed under any key — `CarbonEscrow.completeTask` requires the caller
+to be the task's agent, not the platform signer (`CC-037`).
+
+**`npm test` is not hermetic.** The suite makes live calls to the public Base Sepolia RPC and can
+broadcast real transactions, so results vary with network latency and rate limiting. Expect
+occasional spurious failures until `CC-060` lands. `BASE_SEPOLIA_RPC_URL` is unset, which means the
+shared public endpoint.
 
 ## Design constraints
 

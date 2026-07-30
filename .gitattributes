@@ -1,0 +1,18 @@
+# Normalise line endings so Windows checkouts don't produce whole-tree diffs.
+# Text files are stored LF in the repo and checked out LF.
+* text=auto eol=lf
+
+# Binary — never touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.dat binary
+
+# Generated — collapse in diffs and exclude from language stats
+package-lock.json linguist-generated=true -diff
+*.tsbuildinfo linguist-generated=true -diff
