@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from "wagmi";
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
@@ -157,6 +157,7 @@ export default function DashboardPage() {
   const [stakeStep, setStakeStep] = useState<"idle" | "approving" | "staking" | "unstaking">("idle");
 
   const { writeContract, data: txHash } = useWriteContract();
+  const { signMessageAsync } = useSignMessage();
   const { isSuccess: txConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
   const stakeContractAddress = reputation?.stake?.contract as `0x${string}` | undefined;
@@ -255,7 +256,7 @@ export default function DashboardPage() {
   const escrowContract = process.env.NEXT_PUBLIC_ESCROW_CONTRACT as `0x${string}` | undefined;
 
   async function handleDispute(task: Task) {
-    if (!escrowContract) return;
+    if (!escrowContract || !address) return;
     setDisputeLoading(task.payment_request_id);
     try {
       // 1. Call escrow.disputeTask on-chain
@@ -266,14 +267,28 @@ export default function DashboardPage() {
         functionName: "disputeTask",
         args: [taskIdBytes32],
       });
-      // 2. Update DB via REST
-      await fetch("/api/dispute", {
+
+      // 2. Prove wallet ownership (CC-004), then update DB via REST
+      const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: address }),
+      });
+      const { nonce, message } = await challengeRes.json();
+      const signature = await signMessageAsync({ message });
+
+      await fetch("/api/dispute", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-caller-wallet": address,
+          "x-caller-signature": signature,
+          "x-caller-nonce": nonce,
+        },
         body: JSON.stringify({ payment_request_id: task.payment_request_id }),
       });
     } catch {
-      // on-chain tx may fail — DB update still attempted
+      // on-chain tx or signing may fail — best-effort
     } finally {
       setDisputeLoading(null);
       fetchData();
