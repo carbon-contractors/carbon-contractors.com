@@ -38,8 +38,8 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
     .from("tasks")
     .insert({
       payment_request_id: input.payment_request_id,
-      from_agent_wallet: input.from_agent_wallet,
-      to_human_wallet: input.to_human_wallet,
+      from_agent_wallet: input.from_agent_wallet.toLowerCase(),
+      to_human_wallet: input.to_human_wallet.toLowerCase(),
       task_description: input.task_description,
       amount_usdc: input.amount_usdc,
       deadline_unix: input.deadline_unix,
@@ -134,7 +134,7 @@ export async function getTasksByWallet(
   const { data, error } = await supabase
     .from("tasks")
     .select()
-    .eq("to_human_wallet", wallet)
+    .eq("to_human_wallet", wallet.toLowerCase())
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(`getTasksByWallet failed: ${error.message}`);

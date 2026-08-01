@@ -14,7 +14,7 @@ vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
 vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
-import { getTaskByPaymentId, updateTaskStatus, getReputationSummary } from "@/lib/db/tasks";
+import { getTaskByPaymentId, updateTaskStatus, getReputationSummary, createTask, getTasksByWallet } from "@/lib/db/tasks";
 
 function chainable(result: { data: unknown; error: unknown }) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -126,5 +126,41 @@ describe("tasks", () => {
     expect(summary.total_tasks).toBe(0);
     expect(summary.completed).toBe(0);
     expect(summary.total_earned_usdc).toBe(0);
+  });
+
+  it("createTask normalizes both wallet fields to lowercase (CC-002)", async () => {
+    const created = { id: "1", payment_request_id: "pr_1" };
+    const chain = chainable({ data: created, error: null });
+    mockFrom.mockReturnValue(chain);
+
+    await createTask({
+      payment_request_id: "pr_1",
+      from_agent_wallet: "0xAAAA111122223333444455556666777788889999",
+      to_human_wallet: "0xBBBB111122223333444455556666777788889999",
+      task_description: "test",
+      amount_usdc: 10,
+      deadline_unix: 0,
+      tx_hash: "0xtx",
+      escrow_contract: "0xescrow",
+    });
+
+    expect(chain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from_agent_wallet: "0xaaaa111122223333444455556666777788889999",
+        to_human_wallet: "0xbbbb111122223333444455556666777788889999",
+      }),
+    );
+  });
+
+  it("getTasksByWallet queries with a lowercased wallet (CC-002)", async () => {
+    const chain = chainable({ data: [], error: null });
+    mockFrom.mockReturnValue(chain);
+
+    await getTasksByWallet("0xCCCC111122223333444455556666777788889999");
+
+    expect(chain.eq).toHaveBeenCalledWith(
+      "to_human_wallet",
+      "0xcccc111122223333444455556666777788889999",
+    );
   });
 });

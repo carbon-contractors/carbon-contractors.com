@@ -53,6 +53,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     return Response.json({ error: "Invalid signature" }, { status: 401 });
   }
 
+  // Normalise once, post-verification — every write and lookup path below
+  // and elsewhere in the app (whitepages.ts) treats `humans.wallet` as
+  // lowercase (CC-002). Verification above used the original casing, which
+  // is what the client actually signed.
+  const normalizedWallet = wallet.toLowerCase() as `0x${string}`;
+
   // Parse the signed message to extract registration data + replay protection fields
   let parsed: RegistrationPayload;
   try {
@@ -107,7 +113,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     .single();
 
   if (existingNonce) {
-    log("warn", "registration_nonce_replay", { wallet, nonce: parsed.nonce });
+    log("warn", "registration_nonce_replay", { wallet: normalizedWallet, nonce: parsed.nonce });
     return Response.json(
       { error: "Nonce already used. Generate a new registration message." },
       { status: 409 },
@@ -117,12 +123,12 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Consume the nonce
   const { error: nonceError } = await supabase.from("used_nonces").insert({
     nonce: parsed.nonce,
-    wallet,
+    wallet: normalizedWallet,
   });
 
   if (nonceError) {
     // Unique constraint violation = concurrent replay attempt
-    log("warn", "registration_nonce_conflict", { wallet, nonce: parsed.nonce });
+    log("warn", "registration_nonce_conflict", { wallet: normalizedWallet, nonce: parsed.nonce });
     return Response.json(
       { error: "Nonce already used. Generate a new registration message." },
       { status: 409 },
@@ -132,7 +138,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Upsert into humans table (service role bypasses RLS)
   const { error } = await supabase.from("humans").upsert(
     {
-      wallet: wallet,
+      wallet: normalizedWallet,
       categories: parsed.categories,
       rate_usdc: parsed.rate_usdc,
       availability: "available",
@@ -143,7 +149,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   if (error) {
     log("error", "registration_failed", {
-      wallet,
+      wallet: normalizedWallet,
       error: error.message,
     });
     return Response.json(
@@ -153,10 +159,10 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   log("info", "worker_registered", {
-    wallet,
+    wallet: normalizedWallet,
     categories: parsed.categories,
     rate_usdc: parsed.rate_usdc,
   });
 
-  return Response.json({ ok: true, wallet });
+  return Response.json({ ok: true, wallet: normalizedWallet });
 }
