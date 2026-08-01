@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAccount, useSignMessage } from "wagmi";
 import PageShell from "@/components/PageShell";
+import WalletConnectButton from "@/components/WalletConnectButton";
 import { CATEGORIES, MAX_CATEGORIES } from "@/lib/categories";
 import styles from "./connect.module.css";
 
@@ -88,6 +89,9 @@ export default function ConnectPage() {
             <p className={styles.subtle}>
               No seed phrases. No browser extensions. Just a passkey.
             </p>
+            <div className={styles.heroConnect}>
+              <WalletConnectButton />
+            </div>
           </div>
         ) : status === "success" ? (
           <div className={styles.hero}>

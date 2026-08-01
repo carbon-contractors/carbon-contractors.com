@@ -26,6 +26,12 @@
   color: var(--cc-text-muted);
 }
 
+.heroConnect {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
 .mono {
   font-family: var(--cc-font-mono);
   font-size: 0.8rem;
