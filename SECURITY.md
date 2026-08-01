@@ -64,6 +64,14 @@ platform wallet gas dependency entirely.
 All findings from both sweeps are resolved or closed. Remaining open work (NOR-183
 requester gas stake) is tracked in the Linear backlog as a separate architectural feature.
 
+### Pre-Mainnet Audit — 2026-03-25
+
+Full report: [AUDIT-2026-03-25.md](AUDIT-2026-03-25.md). Operational follow-ups:
+
+| Ref | Category | Severity | Status |
+|-----|----------|----------|--------|
+| AUD-010 | Owner rotation does not cover in-flight `completeTask` calls — recovery procedure documented | Low | ✅ Runbook: [docs/Key-Compromise-Recovery.md](docs/Key-Compromise-Recovery.md) |
+
 ---
 
 ## Platform Security Architecture
