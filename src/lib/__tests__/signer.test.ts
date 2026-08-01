@@ -14,7 +14,6 @@ const stubEnv = () => {
   vi.stubEnv("SUPABASE_URL", "https://test.supabase.co");
   vi.stubEnv("SUPABASE_ANON_KEY", "key");
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
-  vi.stubEnv("NEXT_PUBLIC_ONCHAINKIT_API_KEY", "key");
   vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
   vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
   vi.stubEnv("NEXT_PUBLIC_ESCROW_CONTRACT", "0x1234567890123456789012345678901234567890");

@@ -35,7 +35,6 @@ const REQUIRED_STUBS: Record<string, string> = {
   SUPABASE_URL: "https://stub.supabase.co",
   SUPABASE_ANON_KEY: "stub",
   SUPABASE_SERVICE_ROLE_KEY: "stub",
-  NEXT_PUBLIC_ONCHAINKIT_API_KEY: "stub",
   NEXT_PUBLIC_BASE_NETWORK: "testnet",
   NEXT_PUBLIC_USDC_ADDRESS: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
 };

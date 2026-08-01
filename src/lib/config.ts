@@ -11,7 +11,6 @@ const envSchema = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  NEXT_PUBLIC_ONCHAINKIT_API_KEY: z.string().min(1),
 
   // ── Network (required — no default, must be set explicitly) ──────────────
   NEXT_PUBLIC_BASE_NETWORK: z.enum(["testnet", "mainnet"]),

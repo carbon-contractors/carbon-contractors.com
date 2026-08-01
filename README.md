@@ -100,7 +100,7 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 | Chain | Base L2 (Sepolia testnet) |
 | Escrow | Solidity (OpenZeppelin v5, Hardhat) |
 | Payments | USDC via x402 protocol |
-| Identity | Coinbase Smart Wallet / OnchainKit (passkeys) |
+| Identity | Coinbase Smart Wallet via wagmi + viem (passkeys) |
 | Escrow Ops | Platform signer (viem walletClient) |
 
 ## Project status

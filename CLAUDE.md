@@ -68,12 +68,14 @@ the operator, fix it first, then write it up as found-and-fixed.
 These cost real time to discover. Do not rediscover them.
 
 **The tested wallet path is not the shipped wallet path.** All historical testing used the
-Coinbase Wallet browser extension — a seed-phrase EOA that injects `window.ethereum`. But
-`src/lib/wallet/providers.tsx` configures *no wagmi config and no connectors at all*; it inherits
-OnchainKit's default, which is the `baseAccount` passkey connector. With the extension installed
-the extension wins, so the passkey Smart Wallet flow — the one every mobile user must take, and
-the one the product pitch is built on — has never been executed. Verify wallet changes in a
-profile with **no extension installed**. See CC-055.
+Coinbase Wallet browser extension — a seed-phrase EOA that injects `window.ethereum`. As of CC-043,
+`src/lib/wallet/providers.tsx` has an explicit `createConfig` with an explicit connector list
+(`baseAccount`, `injected`) instead of inheriting OnchainKit's undocumented default — but the
+underlying fact this landmine warns about is unchanged: with the extension installed, the
+`injected` connector wins if a user (or a NavBar dropdown) picks it, so the passkey Smart Wallet
+flow — the one every mobile user must take, and the one the product pitch is built on — still has
+never been executed end-to-end. Verify wallet changes in a profile with **no extension
+installed**, and pick the `baseAccount` connector explicitly when testing. See CC-055.
 
 **CSP failures are invisible when testing with an extension.** The extension signs in its own
 popup and proxies RPC through its background context, so it never touches the page's CSP.

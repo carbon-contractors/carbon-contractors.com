@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Roboto_Mono } from "next/font/google";
 import { WalletProviders } from "@/lib/wallet/providers";
-import "@coinbase/onchainkit/styles.css";
 import "./globals.css";
 
 const robotoMono = Roboto_Mono({
