@@ -463,6 +463,51 @@ is exactly how the second copy quietly stays unauthenticated while the first one
 
 ---
 
+## 14. Three green gates and a broken homepage
+
+**Status:** found and fixed 2026-08-01, during `CC-043`
+
+Migrating off OnchainKit to a standalone wagmi config (`src/lib/wallet/providers.tsx`) meant
+wiring `baseAccount` as an explicit connector for the first time, instead of getting it for free
+from OnchainKit's default. `npm run typecheck` passed. `npm run lint` passed. The full `vitest`
+suite passed, 80 tests, same as before the change. By every check this repo runs in CI, the change
+was done.
+
+The homepage didn't load. `next dev` threw `Module not found: Can't resolve 'bs58'` on every
+request, 500ing `/`. The cause was three layers down: `wagmi/connectors`'s `baseAccount()` pulls in
+`@base-org/account`, whose Node SSR entry (`dist/index.node.js`, via
+`getOrCreateSubscriptionOwnerWallet.js`) bundles a copy of `@coinbase/cdp-sdk` that imports `bs58`
+in three files — and that package's own `package.json` doesn't list `bs58` as a dependency at all.
+Nothing in this repo was wrong. An upstream package was shipping code that only works if some
+*other* dependency in the tree happens to hoist `bs58` to a resolvable location, which it did not.
+
+### Why the gates missed it
+
+None of them render the page. `tsc --noEmit` type-checks; it doesn't bundle. `eslint` reads syntax
+trees; it doesn't resolve a module graph. `vitest` imports individual modules under mocks it
+controls — nothing in the 80-test suite imports `src/lib/wallet/providers.tsx`, because nothing
+needs to unit-test a provider wrapper. The one thing that actually resolves the real import graph
+Next.js will ship — the bundler, walking every `import` starting from `layout.tsx` — is the one
+step that isn't part of any of the three checks. It only ran when a dev server actually started and
+a page actually loaded in a browser.
+
+### What fixed it
+
+Adding `bs58` directly as a top-level dependency. Node's module resolution walks up from the
+nested import site toward the project root looking for `node_modules/bs58` at each level; a
+top-level install satisfies that walk without touching the vendored package. This is a workaround
+for someone else's missing dependency declaration, not a real fix — it will need re-checking if
+`@base-org/account` or `@coinbase/cdp-sdk` bump versions.
+
+**Lesson:** typecheck, lint, and unit tests verify three different, narrower things than "the app
+runs." None of them execute a bundler's module resolution against the actual dependency tree that
+ships. CLAUDE.md already says frontend changes must be checked in a running browser before being
+called done — this is the concrete failure mode that rule exists to catch: a change that is
+correct in every static sense and still 500s on load, because the only thing that would have caught
+it is the thing that was skipped.
+
+---
+
 ## Open questions being tracked rather than answered
 
 Recorded here because pretending to certainty would defeat the purpose of the document.

@@ -96,7 +96,6 @@ const stubEnv = () => {
   vi.stubEnv("SUPABASE_URL", "https://test.supabase.co");
   vi.stubEnv("SUPABASE_ANON_KEY", "key");
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
-  vi.stubEnv("NEXT_PUBLIC_ONCHAINKIT_API_KEY", "key");
   vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
   vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
   vi.stubEnv("GCP_KMS_KEY_PATH", "projects/test/locations/us-central1/keyRings/test/cryptoKeys/test/cryptoKeyVersions/1");
@@ -407,7 +406,6 @@ WfKBWxb4F5hIOtp3JqPEZV2k+/wOEQio/Re0SKaFVBmcR9CP+xDUuA==
       vi.stubEnv("SUPABASE_URL", "https://test.supabase.co");
       vi.stubEnv("SUPABASE_ANON_KEY", "key");
       vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
-      vi.stubEnv("NEXT_PUBLIC_ONCHAINKIT_API_KEY", "key");
       vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
       vi.stubEnv(
         "NEXT_PUBLIC_USDC_ADDRESS",
