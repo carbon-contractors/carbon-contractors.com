@@ -3,6 +3,8 @@ import { verifyMessage } from "viem";
 import { getSupabaseAdmin } from "@/lib/db/client";
 import { log } from "@/lib/logging";
 import { validateCategorySelection } from "@/lib/categories";
+import { isValidEmail } from "@/lib/validation";
+import { registerNotificationChannel } from "@/lib/db/notifications";
 
 /** Maximum age (in seconds) for a registration message to be considered valid. */
 const MAX_MESSAGE_AGE_S = 300; // 5 minutes
@@ -18,6 +20,8 @@ interface RegistrationPayload {
   rate_usdc: number;
   nonce: string;
   timestamp: number;
+  /** Optional contact channel so a worker can be told they've been hired (CC-005). */
+  contact_email?: string;
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -83,6 +87,18 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
+  // Trim/lowercase before validating — the signed payload may carry incidental
+  // whitespace from a form input, and the check should apply to the value
+  // actually written, not the raw one.
+  const contactEmail =
+    typeof parsed.contact_email === "string"
+      ? parsed.contact_email.trim().toLowerCase()
+      : undefined;
+
+  if (contactEmail && !isValidEmail(contactEmail)) {
+    return Response.json({ error: "Invalid contact_email" }, { status: 400 });
+  }
+
   // Validate category selection (min 1, max 2, valid slugs)
   const catResult = validateCategorySelection(parsed.categories);
   if (!catResult.valid) {
@@ -136,16 +152,20 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   // Upsert into humans table (service role bypasses RLS)
-  const { error } = await supabase.from("humans").upsert(
-    {
-      wallet: normalizedWallet,
-      categories: parsed.categories,
-      rate_usdc: parsed.rate_usdc,
-      availability: "available",
-      reputation_score: 50, // default starting reputation
-    },
-    { onConflict: "wallet" },
-  );
+  const { data: humanRow, error } = await supabase
+    .from("humans")
+    .upsert(
+      {
+        wallet: normalizedWallet,
+        categories: parsed.categories,
+        rate_usdc: parsed.rate_usdc,
+        availability: "available",
+        reputation_score: 50, // default starting reputation
+      },
+      { onConflict: "wallet" },
+    )
+    .select("id")
+    .single();
 
   if (error) {
     log("error", "registration_failed", {
@@ -156,6 +176,26 @@ export async function POST(req: NextRequest): Promise<Response> {
       { error: "Registration failed" },
       { status: 500 },
     );
+  }
+
+  // Best-effort: a worker who skipped this, or whose channel write fails, is
+  // still registered — contact capture is a secondary write, not the
+  // transaction that matters. Never log the address itself (it's PII).
+  if (contactEmail) {
+    try {
+      await registerNotificationChannel({
+        contractor_id: humanRow.id,
+        type: "email",
+        address: contactEmail,
+        accepts_auto_booking: false,
+      });
+      log("info", "contact_channel_registered", { wallet: normalizedWallet, type: "email" });
+    } catch (channelErr: unknown) {
+      log("warn", "contact_channel_registration_failed", {
+        wallet: normalizedWallet,
+        error: channelErr instanceof Error ? channelErr.message : String(channelErr),
+      });
+    }
   }
 
   log("info", "worker_registered", {

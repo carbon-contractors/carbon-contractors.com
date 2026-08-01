@@ -15,6 +15,7 @@ export default function ConnectPage() {
 
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [rateUsdc, setRateUsdc] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
   const [status, setStatus] = useState<
     "idle" | "signing" | "submitting" | "success" | "error"
   >("idle");
@@ -49,6 +50,7 @@ export default function ConnectPage() {
         rate_usdc: Number(rateUsdc),
         nonce: crypto.randomUUID(),
         timestamp: Math.floor(Date.now() / 1000),
+        ...(contactEmail.trim() ? { contact_email: contactEmail.trim() } : {}),
       });
 
       const signature = await signMessageAsync({ message });
@@ -136,6 +138,19 @@ export default function ConnectPage() {
               placeholder="e.g. 150"
               value={rateUsdc}
               onChange={(e) => setRateUsdc(e.target.value)}
+              className={styles.input}
+            />
+
+            <h2>Contact Email (optional)</h2>
+            <p>
+              So we can tell you when an agent hires you. We never share it or
+              hand it to agents.
+            </p>
+            <input
+              type="email"
+              placeholder="you@example.com"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
               className={styles.input}
             />
 
