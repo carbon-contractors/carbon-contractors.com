@@ -72,6 +72,18 @@ describe("whitepages", () => {
     expect(result).toEqual(human);
   });
 
+  it("getHumanByWallet queries with a lowercased wallet regardless of input casing (CC-002)", async () => {
+    const chain = makeChain({ data: null, error: null });
+    mockFrom.mockReturnValue(chain);
+
+    await getHumanByWallet("0xAbCdEf1234567890aBcDeF1234567890ABCDEF12");
+
+    expect(chain.eq).toHaveBeenCalledWith(
+      "wallet",
+      "0xabcdef1234567890abcdef1234567890abcdef12",
+    );
+  });
+
   it("getDistinctCategories returns deduplicated sorted categories", async () => {
     const humans = [
       { categories: ["delivery-errands", "cleaning"] },
