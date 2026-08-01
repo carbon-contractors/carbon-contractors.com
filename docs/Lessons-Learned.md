@@ -422,6 +422,47 @@ to be rejected. When tests go flaky, suspect the test before the network.
 
 ---
 
+## 13. Two front doors to the same mutation, and only one got a lock
+
+**Status:** found 2026-07-25, fixed 2026-08-01, tracked as `CC-004`
+
+A task can be flipped to `disputed` through two separate entry points that both end at the same
+`updateTaskStatus(id, "disputed")` call: the `dispute_task` MCP tool, and `POST /api/dispute`, a
+REST endpoint the dashboard calls after submitting the on-chain `disputeTask` transaction. The MCP
+tool has required a verified wallet signature since it was written — `context.callerWallet` must
+match the task's assigned wallet, checked against a nonce minted by
+`/api/basedhuman.mcp/challenge` and consumed via `viem.recoverAddress`. `/api/dispute` had none of
+that. It read a `payment_request_id` straight from an unauthenticated POST body and froze the task.
+And because `middleware.ts` only gates page routes, not `/api/*`, it was reachable on the live site
+the whole time — anyone who could see or guess a `payment_request_id` could freeze payment on any
+task.
+
+### Why it survived
+
+The two call sites were built at different times for different callers (an MCP agent vs. a
+browser dashboard), so they read as unrelated code, not as one security boundary implemented twice.
+The REST endpoint's own docstring undersold what it does — "Updates database status only... the
+worker must also call `escrow.disputeTask()` on-chain" reads like an internal bookkeeping detail,
+not a mutation with no caller identity check in front of it. Nothing forced the two paths to stay
+in parity, so the security work landed on one and was simply never carried over to the other.
+
+### What fixed it
+
+`verifyChallengeSignature` was pulled out of the MCP route handler into
+`src/lib/auth/wallet-challenge.ts` so there is exactly one implementation of the check, not two to
+keep in sync. `/api/dispute` now requires the same `x-caller-wallet` / `x-caller-signature` /
+`x-caller-nonce` headers as the MCP transport, verified against the same nonce table, and rejects
+unless the recovered wallet matches the task's `to_human_wallet` — the assigned worker, since this
+endpoint is worker-initiated (the MCP tool instead checks `from_agent_wallet`, the requesting
+agent; same lock, different key, because the two callers are different parties to the same task).
+
+**Lesson:** when one state mutation is reachable through more than one transport, put the
+authorization check in one shared function that every caller goes through, not in each handler
+separately. "Mirror the pattern" is an instruction to extract and reuse, not to retype — retyping
+is exactly how the second copy quietly stays unauthenticated while the first one gets reviewed.
+
+---
+
 ## Open questions being tracked rather than answered
 
 Recorded here because pretending to certainty would defeat the purpose of the document.
