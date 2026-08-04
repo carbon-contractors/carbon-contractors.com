@@ -1,0 +1,159 @@
+/**
+ * admin/transfer-escrow-ownership.ts
+ *
+ * CC-059 — transfers ownership of CarbonEscrow and ReputationStake from the
+ * raw local deployer key to the GCP KMS/HSM-derived signing address.
+ *
+ * This is a ONE-WAY, IRREVERSIBLE on-chain action: once the HSM address owns
+ * these contracts, the local DEPLOYER_PRIVATE_KEY can no longer arbitrate
+ * disputes. Do not run this with --confirm until `npm run verify:kms` (or an
+ * equivalent check against a live Vercel deployment) has confirmed the KMS
+ * key can actually produce valid signatures — see CC-059's "Fix" section.
+ *
+ * Usage:
+ *   npx hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia
+ *     -> dry run: reads current owners, derives the HSM address, prints what
+ *        WOULD happen. Sends no transactions.
+ *
+ *   npx hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia -- --confirm
+ *     -> actually calls transferOwnership() on both contracts.
+ *
+ * Requires in .env.local:
+ *   DEPLOYER_PRIVATE_KEY=0x...        (must be the CURRENT owner of both contracts)
+ *   NEXT_PUBLIC_ESCROW_CONTRACT=0x...
+ *   NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT=0x...
+ */
+
+import { ethers } from "hardhat";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const PUB_KEY_PATH = join(__dirname, "..", "..", "docs", "carbon-contractors-escrow-signer-1.pub");
+
+/**
+ * Derive an Ethereum address from a secp256k1 SubjectPublicKeyInfo PEM.
+ * The uncompressed EC point (0x04 || x || y) is always the last 65 bytes of
+ * the DER. Mirrors scripts/audit/verify-contract-owner.mjs and
+ * getEthAddressFromKms() in src/lib/contracts/kms-signer.ts — kept as a
+ * derivation, not a hardcoded literal, so a typo can't silently send
+ * ownership somewhere wrong.
+ */
+function addressFromPem(path: string): string {
+  const body = readFileSync(path, "utf8")
+    .replace(/-----BEGIN PUBLIC KEY-----/, "")
+    .replace(/-----END PUBLIC KEY-----/, "")
+    .replace(/\s/g, "");
+  const der = Buffer.from(body, "base64");
+  const point = der.subarray(der.length - 65);
+  if (point[0] !== 0x04) {
+    throw new Error(`Expected uncompressed EC point (0x04 prefix), got 0x${point[0].toString(16)}`);
+  }
+  const hash = ethers.keccak256("0x" + Buffer.from(point.subarray(1)).toString("hex"));
+  return ethers.getAddress("0x" + hash.slice(-40));
+}
+
+const ESCROW_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
+const STAKE_ADDRESS = process.env.NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT;
+
+if (!ESCROW_ADDRESS) throw new Error("NEXT_PUBLIC_ESCROW_CONTRACT must be set in .env.local");
+if (!STAKE_ADDRESS) throw new Error("NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT must be set in .env.local");
+
+const CONFIRM = process.argv.includes("--confirm");
+
+interface TransferResult {
+  name: string;
+  ok: boolean;
+  skipped: boolean;
+  dryRun: boolean;
+}
+
+async function transferOne(
+  contractName: "CarbonEscrow" | "ReputationStake",
+  address: string,
+  newOwner: string,
+  deployerAddress: string,
+): Promise<TransferResult> {
+  console.log(`\n── ${contractName} @ ${address}`);
+  const contract = await ethers.getContractAt(contractName, address);
+  const currentOwner: string = await contract.owner();
+  console.log(`   current owner: ${currentOwner}`);
+
+  if (currentOwner.toLowerCase() === newOwner.toLowerCase()) {
+    console.log("   already owned by the HSM address — nothing to do.");
+    return { name: contractName, ok: true, skipped: true, dryRun: false };
+  }
+
+  if (currentOwner.toLowerCase() !== deployerAddress.toLowerCase()) {
+    console.log(
+      `   ABORT: deployer (${deployerAddress}) is not the current owner. Refusing to proceed.`,
+    );
+    return { name: contractName, ok: false, skipped: false, dryRun: false };
+  }
+
+  if (!CONFIRM) {
+    console.log(
+      `   DRY RUN — would call transferOwnership(${newOwner}). Re-run with -- --confirm to execute.`,
+    );
+    return { name: contractName, ok: true, skipped: false, dryRun: true };
+  }
+
+  console.log(`   Calling transferOwnership(${newOwner})...`);
+  const tx = await contract.transferOwnership(newOwner);
+  console.log(`   tx: ${tx.hash} — waiting for confirmation...`);
+  await tx.wait();
+
+  const confirmedOwner: string = await contract.owner();
+  const ok = confirmedOwner.toLowerCase() === newOwner.toLowerCase();
+  console.log(`   new owner: ${confirmedOwner} — ${ok ? "PASS" : "FAIL, does not match expected"}`);
+  return { name: contractName, ok, skipped: false, dryRun: false };
+}
+
+async function main() {
+  const [deployer] = await ethers.getSigners();
+  console.log("Deployer:", deployer.address);
+
+  const hsmAddress = addressFromPem(PUB_KEY_PATH);
+  console.log(
+    "HSM/KMS target address (derived from docs/carbon-contractors-escrow-signer-1.pub):",
+    hsmAddress,
+  );
+
+  console.log(
+    CONFIRM
+      ? "\n*** LIVE RUN — this will send on-chain transactions. ***"
+      : "\n*** DRY RUN — no transactions will be sent. Pass -- --confirm to execute. ***",
+  );
+
+  // Sequential, not parallel — both transactions come from the same signer
+  // and must not race on nonce assignment.
+  const escrowResult = await transferOne(
+    "CarbonEscrow",
+    // Non-null: checked above.
+    ESCROW_ADDRESS as string,
+    hsmAddress,
+    deployer.address,
+  );
+  const stakeResult = await transferOne(
+    "ReputationStake",
+    STAKE_ADDRESS as string,
+    hsmAddress,
+    deployer.address,
+  );
+
+  console.log("\n" + "=".repeat(60));
+  console.log("SUMMARY");
+  console.log("=".repeat(60));
+  for (const r of [escrowResult, stakeResult]) {
+    const suffix = r.skipped ? " (already transferred)" : r.dryRun ? " (dry run)" : "";
+    console.log(`  ${r.name}: ${r.ok ? "OK" : "FAILED"}${suffix}`);
+  }
+
+  if (!escrowResult.ok || !stakeResult.ok) {
+    process.exitCode = 1;
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

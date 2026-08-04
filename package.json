@@ -12,6 +12,7 @@
     "compile": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat compile",
     "deploy:sepolia": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/escrow.ts --network baseSepolia",
     "deploy:reputation": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/reputation-stake.ts --network baseSepolia",
+    "transfer:ownership": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -60,13 +61,14 @@
     "vite": ">=6.4.3 <7",
     "protobufjs": ">=8.6.6",
     "postcss": ">=8.5.18",
-    "hono": ">=4.12.27",
+    "hono": ">=4.12.34",
     "@hono/node-server": ">=2.0.5",
     "axios": ">=1.18.0",
     "sharp": ">=0.35.0",
     "esbuild": ">=0.28.1",
     "@coinbase/cdp-sdk": "1.46.0",
     "ws": ">=8.21.0",
-    "uuid": ">=11.1.1"
+    "uuid": ">=11.1.1",
+    "socket.io-parser": ">=4.2.7"
   }
 }
