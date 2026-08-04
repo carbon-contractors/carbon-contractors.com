@@ -11,7 +11,7 @@
  *   NEXT_PUBLIC_USDC_ADDRESS=0x...  (USDC contract for target network)
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 
 const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS;
 if (!USDC_ADDRESS) {
@@ -19,6 +19,7 @@ if (!USDC_ADDRESS) {
 }
 
 async function main() {
+  const { ethers } = await network.create();
   const [deployer] = await ethers.getSigners();
   console.log("Deployer:", deployer.address);
 
@@ -32,8 +33,7 @@ async function main() {
   console.log("\nDeploying ReputationStake...");
   console.log("USDC address:", USDC_ADDRESS);
 
-  const ReputationStake = await ethers.getContractFactory("ReputationStake");
-  const stake = await ReputationStake.deploy(USDC_ADDRESS);
+  const stake = await ethers.deployContract("ReputationStake", [USDC_ADDRESS]);
   await stake.waitForDeployment();
 
   const address = await stake.getAddress();

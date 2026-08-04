@@ -9,10 +9,10 @@
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
     "verify:kms": "tsx --env-file-if-exists=.env.local scripts/verify-kms-signer.ts",
-    "compile": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat compile",
-    "deploy:sepolia": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/escrow.ts --network baseSepolia",
-    "deploy:reputation": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/reputation-stake.ts --network baseSepolia",
-    "transfer:ownership": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia",
+    "compile": "hardhat compile",
+    "deploy:sepolia": "hardhat run scripts/deploy/escrow.ts --network baseSepolia",
+    "deploy:reputation": "hardhat run scripts/deploy/reputation-stake.ts --network baseSepolia",
+    "transfer:ownership": "hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -37,18 +37,24 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^7.0.0",
+    "@nomicfoundation/hardhat-ethers": "^4.0.15",
+    "@nomicfoundation/hardhat-ethers-chai-matchers": "^3.0.11",
+    "@nomicfoundation/hardhat-keystore": "^3.0.12",
+    "@nomicfoundation/hardhat-mocha": "^3.1.0",
+    "@nomicfoundation/hardhat-network-helpers": "^3.0.11",
+    "@nomicfoundation/hardhat-typechain": "^3.1.1",
     "@openzeppelin/contracts": "^5.6.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^3.2.4",
-    "cross-env": "^10.1.0",
+    "chai": "^6.2.2",
     "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "hardhat": "^3.2.0",
     "hardhat-deploy": "^2.0.3",
+    "mocha": "^11.8.0",
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^3.2.4"
@@ -69,6 +75,9 @@
     "@coinbase/cdp-sdk": "1.46.0",
     "ws": ">=8.21.0",
     "uuid": ">=11.1.1",
-    "socket.io-parser": ">=4.2.7"
-  }
+    "socket.io-parser": ">=4.2.7",
+    "diff": ">=9.0.0",
+    "serialize-javascript": ">=7.0.5"
+  },
+  "type": "module"
 }

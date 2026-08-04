@@ -1,48 +1,66 @@
-import { HardhatUserConfig } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
+// Individual plugins rather than @nomicfoundation/hardhat-toolbox-mocha-ethers
+// (CC-064): the bundle also pulls in hardhat-verify and hardhat-ignition-ethers,
+// neither of which this repo uses, and hardhat-verify's legacy ethers-v5
+// dependency chain carries an elliptic advisory with no fix available upstream.
+import hardhatEthersPlugin from "@nomicfoundation/hardhat-ethers";
+import hardhatEthersChaiMatchersPlugin from "@nomicfoundation/hardhat-ethers-chai-matchers";
+import hardhatKeystorePlugin from "@nomicfoundation/hardhat-keystore";
+import hardhatMochaPlugin from "@nomicfoundation/hardhat-mocha";
+import hardhatNetworkHelpersPlugin from "@nomicfoundation/hardhat-network-helpers";
+import hardhatTypechainPlugin from "@nomicfoundation/hardhat-typechain";
+import { configVariable, defineConfig } from "hardhat/config";
 import * as dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
 
-// Tell ts-node to use the Hardhat-specific tsconfig (CJS compatible).
-// The main tsconfig.json uses ESM modules for Next.js.
-
-const DEPLOYER_KEY = process.env.DEPLOYER_PRIVATE_KEY ?? "";
 const BASE_SEPOLIA_RPC =
-  process.env.BASE_SEPOLIA_RPC_URL ??
-  "https://sepolia.base.org";
+  process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org";
 const BASE_MAINNET_RPC =
-  process.env.BASE_MAINNET_RPC_URL ??
-  "https://mainnet.base.org";
+  process.env.BASE_MAINNET_RPC_URL ?? "https://mainnet.base.org";
 
-const config: HardhatUserConfig = {
+export default defineConfig({
+  plugins: [
+    hardhatEthersPlugin,
+    hardhatEthersChaiMatchersPlugin,
+    hardhatKeystorePlugin,
+    hardhatMochaPlugin,
+    hardhatNetworkHelpersPlugin,
+    hardhatTypechainPlugin,
+  ],
   solidity: {
-    version: "0.8.24",
-    settings: {
-      optimizer: { enabled: true, runs: 1000 },
-      viaIR: true,
+    profiles: {
+      default: {
+        version: "0.8.24",
+        settings: {
+          optimizer: { enabled: true, runs: 1000 },
+          viaIR: true,
+        },
+      },
     },
   },
   networks: {
+    hardhatMainnet: {
+      type: "edr-simulated",
+      chainType: "l1",
+    },
     hardhat: {
+      type: "edr-simulated",
+      chainType: "op",
       chainId: 84532, // Base Sepolia chain ID for local fork testing
     },
     baseSepolia: {
+      type: "http",
+      chainType: "op",
       url: BASE_SEPOLIA_RPC,
       chainId: 84532,
-      accounts: DEPLOYER_KEY ? [DEPLOYER_KEY] : [],
+      accounts: [configVariable("DEPLOYER_PRIVATE_KEY")],
     },
     base: {
+      type: "http",
+      chainType: "op",
       url: BASE_MAINNET_RPC,
       chainId: 8453,
-      accounts: DEPLOYER_KEY ? [DEPLOYER_KEY] : [],
+      accounts: [configVariable("DEPLOYER_PRIVATE_KEY")],
     },
   },
-  paths: {
-    sources: "./contracts",
-    artifacts: "./artifacts",
-    cache: "./cache",
-  },
-};
-
-export default config;
+});

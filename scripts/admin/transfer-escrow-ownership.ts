@@ -24,10 +24,23 @@
  *   NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT=0x...
  */
 
-import { ethers } from "hardhat";
+import { network } from "hardhat";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
+/** The subset of the HRE-injected ethers namespace this script needs. */
+interface EthersLike {
+  keccak256(data: string): string;
+  getAddress(address: string): string;
+  getSigners(): Promise<Array<{ address: string }>>;
+  getContractAt(name: string, address: string): Promise<{
+    owner(): Promise<string>;
+    transferOwnership(newOwner: string): Promise<{ hash: string; wait(): Promise<unknown> }>;
+  }>;
+}
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUB_KEY_PATH = join(__dirname, "..", "..", "docs", "carbon-contractors-escrow-signer-1.pub");
 
 /**
@@ -38,7 +51,7 @@ const PUB_KEY_PATH = join(__dirname, "..", "..", "docs", "carbon-contractors-esc
  * derivation, not a hardcoded literal, so a typo can't silently send
  * ownership somewhere wrong.
  */
-function addressFromPem(path: string): string {
+function addressFromPem(path: string, ethers: EthersLike): string {
   const body = readFileSync(path, "utf8")
     .replace(/-----BEGIN PUBLIC KEY-----/, "")
     .replace(/-----END PUBLIC KEY-----/, "")
@@ -68,6 +81,7 @@ interface TransferResult {
 }
 
 async function transferOne(
+  ethers: EthersLike,
   contractName: "CarbonEscrow" | "ReputationStake",
   address: string,
   newOwner: string,
@@ -109,10 +123,14 @@ async function transferOne(
 }
 
 async function main() {
+  // No network/chainType args: connects using whatever --network was passed
+  // on the CLI (baseSepolia or base), matching the existing deploy scripts'
+  // convention.
+  const { ethers } = await network.create();
   const [deployer] = await ethers.getSigners();
   console.log("Deployer:", deployer.address);
 
-  const hsmAddress = addressFromPem(PUB_KEY_PATH);
+  const hsmAddress = addressFromPem(PUB_KEY_PATH, ethers);
   console.log(
     "HSM/KMS target address (derived from docs/carbon-contractors-escrow-signer-1.pub):",
     hsmAddress,
@@ -127,6 +145,7 @@ async function main() {
   // Sequential, not parallel — both transactions come from the same signer
   // and must not race on nonce assignment.
   const escrowResult = await transferOne(
+    ethers,
     "CarbonEscrow",
     // Non-null: checked above.
     ESCROW_ADDRESS as string,
@@ -134,6 +153,7 @@ async function main() {
     deployer.address,
   );
   const stakeResult = await transferOne(
+    ethers,
     "ReputationStake",
     STAKE_ADDRESS as string,
     hsmAddress,
