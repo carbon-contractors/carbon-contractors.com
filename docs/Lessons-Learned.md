@@ -508,6 +508,62 @@ it is the thing that was skipped.
 
 ---
 
+## 15. A dependency can go quietly unusable while every other check stays green
+
+**Status:** found and fixed 2026-08-04, tracked as `CC-064`
+
+Discovered by accident, trying to dry-run an unrelated script for `CC-059`: every single Hardhat
+command in this repo — `npm run compile`, both deploy scripts, a brand-new script that had never
+run before — failed identically with `Hardhat only supports ESM projects`. Not a regression from
+that session's own work; reproduced with the pre-existing `scripts/deploy/escrow.ts` untouched.
+`hardhat` had drifted from `^3.2.0` to `3.12.0`, a major version that dropped CommonJS support
+outright, and this repo had never been updated to match.
+
+### Why it survived
+
+Nobody had run a Hardhat script in long enough that nobody noticed. Same shape as entry #12's
+flaky test and CC-057's schema drift: `npm ci`, `npm run typecheck`, `npm run lint`, `npx vitest
+run`, and `npm run build` all stayed green through this the entire time, because none of them
+touch the contracts toolchain at all — it is exercised only by a human (or an agent) actually
+running `npx hardhat run` or `npm run compile`, which per `CC-061`'s own investigation hadn't
+happened since well before the last CI run on `master`.
+
+It got worse on inspection. The installed `@nomicfoundation/hardhat-toolbox@^7.0.0` — the
+"recommended bundle" pinned in `package.json` — turned out to be a deprecated stub: its own
+`package.json` `homepage` field pointed at a `github.com/.../tree/deprecated-versions/...` branch,
+and simply installing it printed a warning that it "does not work with Hardhat 2 nor 3." `npm
+install` had been silently satisfying `^7.0.0` with a package the Hardhat team themselves had
+already end-of-lifed, for however long that range had been in `package.json`. A pinned major
+version range is not the same claim as "this major version is maintained and correct" — nothing
+in `npm install`'s own output flags a resolved package as abandoned.
+
+### What fixed it, and what it took
+
+Not a config flag. The docs site's own migration guide was accurate on the shape of the change
+(`"type": "module"`, `defineConfig()`, a real ethers-based replacement package) but thin on
+specifics; the reliable source turned out to be the framework's own GitHub repo — its committed
+example templates and internal test fixtures showed the actual `network.create()` API, the
+`configVariable()` resolution behaviour, and the `ChainType` values in working, current code,
+which the rendered docs pages didn't. `gh search code` against the upstream repo did more to
+unblock this than three attempts at the hosted docs.
+
+Fixing it surfaced a second, separate finding: the deprecated toolbox's dependency tree carried an
+`elliptic` advisory with **no fixed version available at all** — the latest release still has it.
+The advisory only reached this repo through `hardhat-verify` and `hardhat-ignition`, two plugins
+bundled into the toolbox that nothing here calls (no contract-explorer verification, no
+Ignition-based deployments). Swapping the toolbox meta-package for the specific plugins actually
+used dropped that entire vulnerable subtree — turning an "accept the risk, no fix exists" situation
+into zero unresolved findings, by removing surface area instead of waiting for upstream.
+
+**Lesson:** a dependency range that resolves cleanly and installs without error is not the same
+claim as "this is a maintained, working version" — `npm install` has no concept of "this package
+is abandoned," only "this range is satisfied." And a toolchain that nothing in CI actually
+exercises can go completely unusable while every automated check stays green, because green checks
+only prove what they run. If a whole class of tooling (here: anything touching contracts) isn't
+exercised by CI, treat "nobody's complained" as "nobody's tried," not as "it works."
+
+---
+
 ## Open questions being tracked rather than answered
 
 Recorded here because pretending to certainty would defeat the purpose of the document.

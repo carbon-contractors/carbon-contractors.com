@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Hardhat build artifacts — generated, not authored (CC-064).
+    "artifacts/**",
+    "cache/**",
+    "typechain-types/**",
+    "types/ethers-contracts/**",
   ]),
 ]);
 

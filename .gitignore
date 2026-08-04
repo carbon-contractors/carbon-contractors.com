@@ -47,3 +47,4 @@ next-env.d.ts
 /artifacts
 /cache
 /typechain-types
+/types/ethers-contracts
