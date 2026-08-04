@@ -37,6 +37,7 @@
     "cache",
     "typechain-types",
     "hardhat.config.ts",
-    "scripts/deploy"
+    "scripts/deploy",
+    "scripts/admin"
   ]
 }

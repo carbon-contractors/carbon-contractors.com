@@ -12,6 +12,7 @@
     "compile": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat compile",
     "deploy:sepolia": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/escrow.ts --network baseSepolia",
     "deploy:reputation": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/deploy/reputation-stake.ts --network baseSepolia",
+    "transfer:ownership": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
