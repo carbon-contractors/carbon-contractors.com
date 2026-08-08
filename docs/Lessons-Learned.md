@@ -629,7 +629,7 @@ trusting it as proof the grant is right.
 
 ## 17. A function can be correct and still never run
 
-**Status:** found 2026-08-08 while closing `CC-059`; filed as `CC-065`
+**Status:** found 2026-08-08 while closing `CC-059`; filed and fixed same day as `CC-065`
 
 Once `CC-059`'s fix (escrow ownership transferred to the KMS key) needed proving, the obvious test
 was: does `resolveDisputeOnChain` actually work now? Writing that test meant first checking how the

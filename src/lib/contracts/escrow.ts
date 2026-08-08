@@ -120,6 +120,33 @@ export async function getTotalLocked(): Promise<bigint> {
   });
 }
 
+/**
+ * Look up how a task was actually resolved on-chain, from the TaskResolved event.
+ * Used for partial-failure recovery: if a prior resolveDispute call succeeded on-chain
+ * but the DB update afterward failed, this recovers the true outcome instead of trusting
+ * a possibly-stale or mismatched retry argument.
+ */
+export async function getTaskResolvedOutcome(
+  paymentRequestId: string,
+): Promise<{ releasedToWorker: boolean; amount: bigint } | null> {
+  const taskId = toTaskId(paymentRequestId);
+  const logs = await getPublicClient().getLogs({
+    address: getEscrowAddress(),
+    event: parseAbiItem(
+      "event TaskResolved(bytes32 indexed taskId, bool releasedToWorker, uint256 amount)"
+    ),
+    args: { taskId },
+    fromBlock: BigInt(0),
+    toBlock: "latest",
+  });
+  const last = logs.at(-1);
+  if (!last) return null;
+  return {
+    releasedToWorker: last.args.releasedToWorker as boolean,
+    amount: last.args.amount as bigint,
+  };
+}
+
 // ── Event queries (on-chain reputation) ─────────────────────────────────────
 
 const USDC_DECIMALS = 6;

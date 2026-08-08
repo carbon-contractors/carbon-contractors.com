@@ -28,8 +28,9 @@ import {
   getOnChainTask,
   getEscrowConfig,
   toTaskId,
+  getTaskResolvedOutcome,
 } from "@/lib/contracts/escrow";
-import { completeTaskOnChain } from "@/lib/contracts/signer";
+import { completeTaskOnChain, resolveDisputeOnChain } from "@/lib/contracts/signer";
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { log } from "@/lib/logging";
 
@@ -806,7 +807,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   // ─── Tool: resolve_dispute ──────────────────────────────────────────────
   server.tool(
     "resolve_dispute",
-    "Resolve a disputed task. Sets status to 'completed' (release to worker) or 'expired' (refund agent). The platform owner should also call escrow.resolveDispute(taskId, releaseToWorker) on-chain.",
+    "Resolve a disputed task: releases escrowed USDC on-chain (to the worker or back to the agent) via the platform signer, then sets status to 'completed' or 'expired'.",
     {
       payment_request_id: z
         .string()
@@ -890,17 +891,82 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
-        const newStatus = release_to_worker ? "completed" : "expired";
-        await updateTaskStatus(payment_request_id, newStatus);
-
         const taskIdBytes32 = toTaskId(payment_request_id);
         const escrowConfig = getEscrowConfig();
+        let actualReleaseToWorker = release_to_worker;
+        let txHash: string | null = null;
+
+        // Check on-chain state first — handles partial-failure recovery where a previous
+        // call resolved on-chain but the DB update afterward failed. Recover the TRUE
+        // outcome from the TaskResolved event rather than trusting a possibly-mismatched
+        // retry argument.
+        let alreadyResolvedOnChain = false;
+        if (escrowConfig.address) {
+          try {
+            const onChainTask = await getOnChainTask(payment_request_id);
+            if (onChainTask.state === "Resolved") {
+              alreadyResolvedOnChain = true;
+              const outcome = await getTaskResolvedOutcome(payment_request_id);
+              if (outcome) actualReleaseToWorker = outcome.releasedToWorker;
+              log("info", "signer_resolve_dispute_already_done", {
+                payment_request_id,
+                onChainState: onChainTask.state,
+                actualReleaseToWorker,
+              });
+            } else if (onChainTask.state !== "Disputed") {
+              // DB says disputed but chain disagrees and it isn't already Resolved either —
+              // don't guess, surface it.
+              return {
+                isError: true,
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify({
+                      ok: false,
+                      error: `DB/chain state mismatch: DB says disputed, on-chain state is ${onChainTask.state}`,
+                    }),
+                  },
+                ],
+              };
+            }
+          } catch {
+            // Contract may not be deployed yet — proceed with the on-chain call attempt below.
+          }
+        }
+
+        if (!alreadyResolvedOnChain) {
+          try {
+            txHash = await resolveDisputeOnChain(taskIdBytes32, release_to_worker);
+          } catch (chainErr: unknown) {
+            const chainMsg = chainErr instanceof Error ? chainErr.message : String(chainErr);
+            log("error", "signer_resolve_dispute_failed", {
+              payment_request_id,
+              error: chainMsg,
+            });
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({
+                    ok: false,
+                    error: `On-chain resolveDispute failed: ${chainMsg}`,
+                  }),
+                },
+              ],
+            };
+          }
+        }
+
+        const newStatus = actualReleaseToWorker ? "completed" : "expired";
+        await updateTaskStatus(payment_request_id, newStatus);
 
         log("info", "dispute_resolved", {
           payment_request_id,
-          release_to_worker,
+          release_to_worker: actualReleaseToWorker,
           resolution_note,
           amount_usdc: task.amount_usdc,
+          txHash,
         });
 
         return {
@@ -911,10 +977,10 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                 ok: true,
                 payment_request_id,
                 status: newStatus,
-                release_to_worker,
+                release_to_worker: actualReleaseToWorker,
                 task_id_bytes32: taskIdBytes32,
                 escrow_contract: escrowConfig.address,
-                note: `Database updated. Call escrow.resolveDispute(taskId, ${release_to_worker}) on-chain to ${release_to_worker ? "release USDC to worker" : "refund USDC to agent"}.`,
+                tx_hash: txHash,
               }),
             },
           ],
