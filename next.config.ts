@@ -42,7 +42,7 @@ const nextConfig: NextConfig = {
               "img-src 'self' data: https:",
               "font-src 'self' data:",
               "connect-src 'self' https://*.supabase.co https://sepolia.base.org https://mainnet.base.org wss://*.supabase.co https://cca-lite.coinbase.com",
-              "frame-src https://keys.coinbase.com",
+              `frame-src https://keys.coinbase.com${vercelToolbarSrc}`,
               "frame-ancestors 'none'",
             ].join("; "),
           },
