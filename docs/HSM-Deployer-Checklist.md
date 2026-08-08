@@ -268,9 +268,10 @@ The testnet raw key is irrelevant to production security. The mainnet key is bor
       verified 2026-08-08 via `scripts/audit/verify-contract-owner.mjs` (PASS on both contracts,
       after `transferOwnership()`; see `Security-Trust-Disclosure.md` and `CC-059`)
 - [ ] **Local fallback works:** Raw key path still functions for testnet development
-- [ ] **DEPLOYER_PRIVATE_KEY removed:** Not present in any deployed environment variables — the
-      raw key no longer holds owner authority as of 2026-08-08, but the env var itself has not yet
-      been removed from Vercel; tracked as the remaining step of `CC-059`
+- [x] **DEPLOYER_PRIVATE_KEY removed:** Not present in any deployed environment variables — checked
+      via `vercel env ls` on 2026-08-08 (Development, Preview, Production all listed; the var is
+      not among them). It never needed removing — it was never added to Vercel in the first place.
+      The raw key no longer holds owner authority as of 2026-08-08 either way (`CC-059`).
 
 ---
 

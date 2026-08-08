@@ -48,3 +48,6 @@ next-env.d.ts
 /cache
 /typechain-types
 /types/ethers-contracts
+
+.vercel
+.env*

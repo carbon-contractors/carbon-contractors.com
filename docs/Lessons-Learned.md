@@ -627,6 +627,41 @@ trusting it as proof the grant is right.
 
 ---
 
+## 17. A function can be correct and still never run
+
+**Status:** found 2026-08-08 while closing `CC-059`; filed as `CC-065`
+
+Once `CC-059`'s fix (escrow ownership transferred to the KMS key) needed proving, the obvious test
+was: does `resolveDisputeOnChain` actually work now? Writing that test meant first checking how the
+product itself calls it, so the test would exercise the same path a real dispute takes. It doesn't
+call it at all. `resolveDisputeOnChain` (`src/lib/contracts/signer.ts`) is exported, has a
+docstring, has type signatures that all line up, and is never imported into `src/lib/mcp/server.ts`.
+The `resolve_dispute` MCP tool updates the database row and returns a text note asking the *caller*
+to go call the contract themselves. It reads like a TODO that got left as shipped behaviour.
+
+This is a different shape of bug from `CC-037` in the same file, `completeTaskOnChain`, which *is*
+called but fails on-chain every time because of an access-control mismatch. That one fails loudly —
+a revert, a thrown error, something to notice. This one fails silently: the database says
+`completed`, the caller gets a success response, and nothing on-chain ever moves. Nothing crashes.
+Nothing logs a warning. The only way to notice is to go looking for the call site and find that it
+isn't there.
+
+Both bugs survived in the same file, in adjacent functions, for the same underlying reason: the
+on-chain write half of a two-system operation (database + contract) was designed and documented but
+the wiring was never finished, and nothing forced a check that the two systems actually agree after
+the "success" response. Tests exist for `completeTaskOnChain` (`signer.test.ts`) — not because
+`resolveDisputeOnChain` was judged safe, but because nobody wrote a test that would have needed to
+call it, which is exactly the gap that let it go unnoticed.
+
+**Lesson:** verifying a fix to a function is not the same as verifying the *product* uses that
+function. Before treating "the code now does X correctly" as done, check that something in the
+actual call graph reaches that code — `grep` for real call sites, not just the definition and its
+own tests. A correct function with no caller is not a smaller bug than an incorrect function with a
+caller; for a two-system operation like escrow state, it's the same bug — the two systems can
+diverge — with a quieter failure mode.
+
+---
+
 ## Open questions being tracked rather than answered
 
 Recorded here because pretending to certainty would defeat the purpose of the document.
