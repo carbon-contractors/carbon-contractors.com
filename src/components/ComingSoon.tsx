@@ -85,7 +85,10 @@ export default function ComingSoon() {
               {error && <p className={styles.error}>{error}</p>}
               <p className={styles.consent}>
                 Just your email, nothing else. See our{' '}
-                <Link href="/privacy" className={styles.consentLink}>privacy policy</Link>.
+                <Link href="/privacy" className={styles.consentLink}>privacy policy</Link>
+                {' '}or{' '}
+                <Link href="/unsubscribe" className={styles.consentLink}>unsubscribe</Link>
+                {' '}any time.
               </p>
             </>
           )}
@@ -120,6 +123,8 @@ export default function ComingSoon() {
           <Link href="/privacy" className={styles.legalLink}>PRIVACY</Link>
           &nbsp;&middot;&nbsp;
           <Link href="/terms" className={styles.legalLink}>TERMS</Link>
+          &nbsp;&middot;&nbsp;
+          <Link href="/unsubscribe" className={styles.legalLink}>UNSUBSCRIBE</Link>
         </footer>
       </div>
     </div>

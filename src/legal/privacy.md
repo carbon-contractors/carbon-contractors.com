@@ -29,8 +29,9 @@ your email into the form and clicking submit.
 
 We do not currently send any marketing or promotional email from the waitlist — right now it's a
 list, not a mailing pipeline. If that ever changes, every email will carry a working unsubscribe
-link, honoured within 5 business days, per the *Spam Act 2003 (Cth)*. Until then, email us (below)
-and we'll remove you immediately.
+link, honoured within 5 business days, per the *Spam Act 2003 (Cth)*. You don't have to wait for
+that to remove yourself: **[carbon-contractors.com/unsubscribe](/unsubscribe)** takes your email
+off the list immediately, no account, no confirmation email, no waiting on us.
 
 ### If you register as a worker
 Your **wallet address**, the **service categories** you pick (up to two), and your **hourly rate
