@@ -6,8 +6,8 @@
  *
  * This is a ONE-WAY, IRREVERSIBLE on-chain action: once the HSM address owns
  * these contracts, the local DEPLOYER_PRIVATE_KEY can no longer arbitrate
- * disputes. Do not run this with --confirm until `npm run verify:kms` (or an
- * equivalent check against a live Vercel deployment) has confirmed the KMS
+ * disputes. Do not run this with CONFIRM=true until `npm run verify:kms` (or
+ * an equivalent check against a live Vercel deployment) has confirmed the KMS
  * key can actually produce valid signatures — see CC-059's "Fix" section.
  *
  * Usage:
@@ -15,8 +15,13 @@
  *     -> dry run: reads current owners, derives the HSM address, prints what
  *        WOULD happen. Sends no transactions.
  *
- *   npx hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia -- --confirm
+ *   CONFIRM=true npx hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia
  *     -> actually calls transferOwnership() on both contracts.
+ *
+ * (Hardhat 3's `run` task validates CLI arguments strictly against its own
+ * defined parameters and rejects anything else — the Hardhat 2-era
+ * `-- --flag` passthrough to the script's own argv no longer works, hence the
+ * env var instead.)
  *
  * Requires in .env.local:
  *   DEPLOYER_PRIVATE_KEY=0x...        (must be the CURRENT owner of both contracts)
@@ -71,7 +76,7 @@ const STAKE_ADDRESS = process.env.NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT;
 if (!ESCROW_ADDRESS) throw new Error("NEXT_PUBLIC_ESCROW_CONTRACT must be set in .env.local");
 if (!STAKE_ADDRESS) throw new Error("NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT must be set in .env.local");
 
-const CONFIRM = process.argv.includes("--confirm");
+const CONFIRM = process.env.CONFIRM === "true";
 
 interface TransferResult {
   name: string;
@@ -106,7 +111,7 @@ async function transferOne(
 
   if (!CONFIRM) {
     console.log(
-      `   DRY RUN — would call transferOwnership(${newOwner}). Re-run with -- --confirm to execute.`,
+      `   DRY RUN — would call transferOwnership(${newOwner}). Re-run with CONFIRM=true to execute.`,
     );
     return { name: contractName, ok: true, skipped: false, dryRun: true };
   }
@@ -139,7 +144,7 @@ async function main() {
   console.log(
     CONFIRM
       ? "\n*** LIVE RUN — this will send on-chain transactions. ***"
-      : "\n*** DRY RUN — no transactions will be sent. Pass -- --confirm to execute. ***",
+      : "\n*** DRY RUN — no transactions will be sent. Set CONFIRM=true to execute. ***",
   );
 
   // Sequential, not parallel — both transactions come from the same signer

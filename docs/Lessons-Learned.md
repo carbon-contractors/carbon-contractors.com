@@ -564,6 +564,69 @@ exercised by CI, treat "nobody's complained" as "nobody's tried," not as "it wor
 
 ---
 
+## 16. The most dangerous kind of failure message is the one that's wrong
+
+**Status:** happened and correctly caught 2026-08-08, closing `CC-059`
+
+`CC-059` had been open since 2026-07-30: the deployed escrow contracts were owned by a raw local
+key, not the HSM address Vercel actually signs as, so `resolveDisputeOnChain` reverted in
+production. The fix was a one-way, irreversible on-chain `transferOwnership()` call — exactly the
+kind of action this project's own rules require explicit go-ahead for, immediately before running
+it. That approval was given. The script ran, sent two real transactions, and printed:
+
+```
+CarbonEscrow: FAILED
+ReputationStake: FAILED
+```
+
+Both had actually succeeded. `transferOwnership()` was confirmed on-chain for both contracts —
+independently verified against Basescan directly, `OwnershipTransferred` emitted, no reverts. The
+script's own `contract.owner()` re-read, executed immediately after `tx.wait()` resolved, against
+the same public `sepolia.base.org` RPC endpoint used to send the transaction, returned the *old*
+owner — a stale read on a load-balanced public gateway with no read-your-writes guarantee across
+its backend nodes. The write landed on one node; the very next read a few milliseconds later hit a
+different one that hadn't caught up yet.
+
+### Why this is worse than a script that just crashes
+
+A script that throws an exception announces "something is wrong, go look." A script that prints a
+clean, confident `FAILED` in a well-formatted summary table announces "something is wrong, and I
+already looked, and here's the answer" — which invites trusting it instead of checking further. On
+an irreversible action, believing a false negative can be actively worse than believing a false
+positive: the natural next move after "it failed" is often "try again," and this project's own
+history (`Lessons-Learned.md` #10, #12) is full of exactly this shape of problem — a check that
+looks authoritative but is answering a narrower question than it appears to.
+
+It was caught here specifically because the result was checked against a *second, independent*
+source — the transaction hash on a block explorer — rather than trusted or re-run. Re-running would
+likely have been harmless in this specific case: the script's own safety check
+(`currentOwner !== deployerAddress → ABORT`) would have refused to proceed on a second attempt,
+since by then the real owner was already the HSM address, not the deployer key signing the retry.
+But that safety margin was a property of this particular script, not something to rely on in
+general — the instinct to independently verify before reacting is the actual lesson, not "it would
+have been fine anyway."
+
+**Lesson:** for any check that reads state immediately after writing it, on infrastructure you
+don't control the consistency model of (a public RPC gateway, a load-balanced API, anything without
+an explicit read-your-writes guarantee), do not trust that immediate read as the verdict — verify
+independently, or wait and re-read, before concluding failure. This applies with the most force
+exactly when the stakes are highest and the temptation to act immediately on the reported result is
+strongest.
+
+### A smaller version of the same mistake, earlier in the same evening
+
+Getting to the point of running that script required granting a Google Cloud IAM permission
+(`Service Account Token Creator`) so a personal account could impersonate the signing service
+account for local testing. The first attempt granted it on the **project-level** IAM page — which,
+read at a glance, looked like the right principal had gained the right role. It hadn't: that page
+put the role on the *service account itself* rather than on the human account, backwards from what
+was needed, and the actual permission error on the next attempt (`iam.serviceAccounts.getAccessToken
+denied`) was the thing that surfaced it. Same shape as the stale RPC read: a console screenshot that
+looks authoritative is still worth checking by principal, not just by "does a row exist," before
+trusting it as proof the grant is right.
+
+---
+
 ## Open questions being tracked rather than answered
 
 Recorded here because pretending to certainty would defeat the purpose of the document.
