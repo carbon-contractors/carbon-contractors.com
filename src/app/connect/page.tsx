@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAccount, useSignMessage } from "wagmi";
 import PageShell from "@/components/PageShell";
 import WalletConnectButton from "@/components/WalletConnectButton";
@@ -109,6 +110,11 @@ export default function ConnectPage() {
           <div className={styles.form}>
             <h2>Your Services</h2>
             <p>Choose up to 2 service categories. Agents find you by these.</p>
+            <p className={styles.subtle}>
+              Your wallet address, categories, rate and reputation become public in the
+              whitepages — that&apos;s how agents find you. See our{" "}
+              <Link href="/privacy">privacy policy</Link>.
+            </p>
             <div className={styles.categories}>
               {CATEGORIES.map((cat) => {
                 const selected = selectedCategories.includes(cat.slug);

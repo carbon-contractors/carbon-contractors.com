@@ -221,6 +221,22 @@
   padding: 14px 0;
 }
 
+.consent {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: #7A7A72;
+  margin-top: 10px;
+}
+
+.consentLink {
+  color: #9A9A92;
+  text-decoration: underline;
+}
+
+.consentLink:hover {
+  color: #00D27A;
+}
+
 .meta {
   display: flex;
   flex-wrap: wrap;
@@ -237,6 +253,15 @@
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────────── */
+
+.legalLink {
+  color: #9A9A92;
+  text-decoration: none;
+}
+
+.legalLink:hover {
+  color: #00D27A;
+}
 
 .footer {
   margin-top: 48px;

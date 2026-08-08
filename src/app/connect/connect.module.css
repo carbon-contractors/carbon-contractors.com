@@ -26,6 +26,15 @@
   color: var(--cc-text-muted);
 }
 
+.subtle a {
+  color: var(--cc-text-secondary);
+  text-decoration: underline;
+}
+
+.subtle a:hover {
+  color: var(--cc-green);
+}
+
 .heroConnect {
   display: flex;
   justify-content: center;

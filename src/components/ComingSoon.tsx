@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import styles from './ComingSoon.module.css'
 
 export default function ComingSoon() {
@@ -82,6 +83,10 @@ export default function ComingSoon() {
                 </button>
               </div>
               {error && <p className={styles.error}>{error}</p>}
+              <p className={styles.consent}>
+                Just your email, nothing else. See our{' '}
+                <Link href="/privacy" className={styles.consentLink}>privacy policy</Link>.
+              </p>
             </>
           )}
         </main>
@@ -111,6 +116,10 @@ export default function ComingSoon() {
           </a>
           <br />
           CARBON&#8209;CONTRACTORS.COM &nbsp;&middot;&nbsp; EST. 2026
+          <br />
+          <Link href="/privacy" className={styles.legalLink}>PRIVACY</Link>
+          &nbsp;&middot;&nbsp;
+          <Link href="/terms" className={styles.legalLink}>TERMS</Link>
         </footer>
       </div>
     </div>

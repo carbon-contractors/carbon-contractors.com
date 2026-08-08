@@ -41,6 +41,8 @@ export default function Footer() {
           >
             GITHUB
           </a>
+          <Link href="/privacy" className={styles.link}>PRIVACY</Link>
+          <Link href="/terms" className={styles.link}>TERMS</Link>
         </div>
 
         <div className={styles.copyright}>

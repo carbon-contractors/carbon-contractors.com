@@ -1,0 +1,43 @@
+.container {
+  max-width: 720px;
+}
+
+.backLink {
+  font-family: var(--cc-font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--cc-text-muted);
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: color 0.15s;
+  display: inline-block;
+  margin-bottom: 32px;
+}
+
+.backLink:hover {
+  color: var(--cc-green);
+}
+
+.prompt {
+  font-family: var(--cc-font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--cc-green);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+}
+
+.title {
+  font-size: clamp(28px, 5vw, 44px);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--cc-text);
+  margin-bottom: 40px;
+}
+
+.article {
+  margin-bottom: 48px;
+}
