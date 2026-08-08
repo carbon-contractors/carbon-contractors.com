@@ -382,6 +382,28 @@ WfKBWxb4F5hIOtp3JqPEZV2k+/wOEQio/Re0SKaFVBmcR9CP+xDUuA==
       _resetKmsClients();
     });
 
+    it("uses ADC, not WIF, when VERCEL_OIDC_TOKEN is set but VERCEL is not (CC-066)", async () => {
+      // `vercel link` / `vercel env pull` write VERCEL_OIDC_TOKEN into a developer's local
+      // .env.local as a matter of course. That alone must not flip local KMS signing into
+      // the Vercel-only WIF branch — only the actual Vercel runtime flag should.
+      stubEnv();
+      vi.stubEnv("VERCEL", "");
+      vi.stubEnv("VERCEL_OIDC_TOKEN", "some-local-dev-token-from-vercel-link");
+
+      mockGetPublicKey.mockResolvedValue([{ pem: TEST_PEM }]);
+
+      const { IdentityPoolClient } = await import("google-auth-library");
+      const { getEthAddressFromKms, _resetKmsClients } = await import(
+        "@/lib/contracts/kms-signer"
+      );
+
+      await getEthAddressFromKms();
+
+      expect(IdentityPoolClient).not.toHaveBeenCalled();
+
+      _resetKmsClients();
+    });
+
     it("uses WIF (IdentityPoolClient) when VERCEL=1", async () => {
       stubEnv();
       vi.stubEnv("VERCEL", "1");

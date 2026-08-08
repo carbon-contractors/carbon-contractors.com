@@ -57,9 +57,15 @@ let _cachedAddress: Address | null = null;
  * The WIF path cannot be exercised locally — @vercel/oidc has no token
  * to return outside Vercel's infrastructure. End-to-end WIF validation
  * only happens on a real Vercel deployment.
+ *
+ * Deliberately does NOT also check VERCEL_OIDC_TOKEN: `vercel link`/`vercel env pull`
+ * write that var into a developer's local .env.local as a matter of course, which would
+ * false-positive this into the WIF branch on a machine that has never run in Vercel at
+ * all. VERCEL is the one flag Vercel's own runtime sets and a local shell never does. See
+ * CC-066.
  */
 function isVercelRuntime(): boolean {
-  return Boolean(process.env.VERCEL) || Boolean(process.env.VERCEL_OIDC_TOKEN);
+  return Boolean(process.env.VERCEL);
 }
 
 async function getKmsClient(): Promise<KeyManagementServiceClient> {
