@@ -1,0 +1,106 @@
+.container {
+  max-width: 480px;
+}
+
+.backLink {
+  font-family: var(--cc-font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--cc-text-muted);
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: color 0.15s;
+  display: inline-block;
+  margin-bottom: 32px;
+}
+
+.backLink:hover {
+  color: var(--cc-green);
+}
+
+.prompt {
+  font-family: var(--cc-font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--cc-green);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+}
+
+.title {
+  font-size: clamp(28px, 5vw, 40px);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--cc-text);
+  margin-bottom: 12px;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: var(--cc-text-secondary);
+  line-height: 1.6;
+  margin-bottom: 32px;
+}
+
+.subtitle a {
+  color: var(--cc-text);
+  text-decoration: underline;
+}
+
+.subtitle a:hover {
+  color: var(--cc-green);
+}
+
+.input {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid var(--cc-border);
+  background: var(--cc-bg-surface);
+  color: var(--cc-text);
+  font-size: 0.9rem;
+  font-family: var(--cc-font-mono);
+  outline: none;
+  margin-bottom: 1.5rem;
+}
+
+.input:focus {
+  border-color: var(--cc-green);
+}
+
+.submit {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: none;
+  background: var(--cc-green);
+  color: #0a0b0d;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.submit:hover:not(:disabled) {
+  background: var(--cc-green-hover);
+}
+
+.submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.error {
+  color: var(--cc-red);
+  font-size: 0.85rem;
+  margin-top: 1rem;
+}
+
+.success {
+  color: var(--cc-green);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}

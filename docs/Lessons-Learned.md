@@ -662,6 +662,50 @@ diverge — with a quieter failure mode.
 
 ---
 
+## 18. The error handler swallowed the error, in exactly the case that mattered most
+
+**Status:** found and fixed 2026-08-08 while shipping `CC-067`
+
+Adding a self-serve waitlist unsubscribe (`CC-067`) meant testing it against the real Supabase
+project, not just a mock — and the local environment's `SUPABASE_SERVICE_ROLE_KEY` is a documented
+placeholder (see `CLAUDE.md`'s own landmine list), so the test correctly failed with an auth
+rejection. The UI showed the failure as the literal string **`[object Object]`**.
+
+`safeErrorResponse` (`src/lib/errors.ts`, used by six routes) computed its message as `err
+instanceof Error ? err.message : String(err)`. Supabase's client doesn't always throw a real
+`Error`/`PostgrestError` instance — a gateway-level rejection (bad API key, and plausibly other
+edge-of-infrastructure failures) comes back as a plain `{ message, hint }` object instead. Plain
+objects fail `instanceof Error`, and `String()` on a plain object with no custom `toString` always
+produces `"[object Object]"` — dropping a perfectly good `.message` property on the floor.
+
+### The part that matters more than the broken UI text
+
+The same `String(err)` computation fed the **server-side log line**
+(`log("error", context, { error: message })`), not just the dev-mode client response. That means
+every one of the six routes using this helper was silently logging `"[object Object]"` instead of
+the real error, for exactly this class of failure — and this class of failure (auth/gateway
+rejections: an expired key, a rotated credential, a misconfigured environment) is precisely the
+kind of incident where good server logs matter most and are hardest to reconstruct after the fact.
+A bug in a client-facing message is a UX papercut; the same bug in the log line is lost incident
+forensics, and it was the *same line of code* causing both.
+
+This had been live in five existing routes (`waitlist`, `dispute`, `tasks`, `reputation`,
+`fund-task`) the entire time — `CC-067` didn't introduce it, it just happened to be the first
+piece of work whose manual verification path ran straight into a gateway-level Supabase error
+rather than a normal query error.
+
+**Lesson:** error-handling helpers that branch on `instanceof Error` will misfire on any thrown
+value shaped like an error but not descended from one — which includes a specific, common,
+non-hypothetical case: REST/gateway API clients that return plain error objects for
+infrastructure-level failures, as distinct from the well-typed error classes they use for
+domain-level ones. Check for a usable `.message` property structurally, not just via `instanceof`,
+before falling back to `String()`. And more generally: local dev's known-broken credentials (the
+ones everyone works around and stops thinking about) are a free, standing test case for exactly
+this kind of failure path — this bug was sitting there waiting to be found by anyone who ever
+manually clicked through a form far enough to hit it.
+
+---
+
 ## Open questions being tracked rather than answered
 
 Recorded here because pretending to certainty would defeat the purpose of the document.
