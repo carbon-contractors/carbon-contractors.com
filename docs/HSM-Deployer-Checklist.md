@@ -4,6 +4,11 @@ This document outlines the steps to create a non-exportable, hardware-protected 
 
 **Design principle:** No JSON key files. No long-lived secrets. Every authentication path uses OIDC federation with short-lived tokens.
 
+> **Note (2026-08-08):** this document originally named the service account `kms-deployer-svc`
+> throughout. The one actually created is `kms-signer-svc@carbon-contractors.iam.gserviceaccount.com`
+> — confirmed against the live GCP IAM console while resolving `CC-059`. Corrected below rather than
+> left silently wrong.
+
 ---
 
 ## Part 1: GCP Infrastructure Setup
@@ -28,7 +33,7 @@ Navigate to **APIs & Services > Library** and enable:
 
 ### 3. Create the Service Account
 
-- **Name:** `kms-deployer-svc`
+- **Name:** `kms-signer-svc`
 - **Role:** `Cloud KMS CryptoKey Signer/Verifier` (grants `cloudkms.cryptoKeyVersions.useToSign` only)
 - **DO NOT create a JSON key.** Authentication is handled entirely via Workload Identity Federation. There should be zero keys listed under this service account at all times.
 
@@ -59,7 +64,7 @@ Instead of JSON key files that can be stolen, we link both **Vercel** (runtime s
 | `vercel-runtime` | Runtime escrow signing (completeTask, resolveDispute, etc.) | `https://oidc.vercel.com/[TEAM_SLUG]` | Every MCP tool call that triggers a blockchain transaction |
 | `github-actions` | Contract deployment and upgrades | `https://token.actions.githubusercontent.com` | CI/CD deploy workflow only |
 
-Both providers impersonate the same service account (`kms-deployer-svc`) and sign with the same HSM key. They are independently constrained by attribute conditions.
+Both providers impersonate the same service account (`kms-signer-svc`) and sign with the same HSM key. They are independently constrained by attribute conditions.
 
 ### Create the Workload Identity Pool
 
@@ -83,7 +88,7 @@ This is the **primary signing path** — every escrow transaction in production 
    ```
    This ensures only production deployments of the correct project can request signatures. Preview, development, and other environments are blocked.
 
-3. **Grant impersonation:** Allow this provider to impersonate `kms-deployer-svc`.
+3. **Grant impersonation:** Allow this provider to impersonate `kms-signer-svc`.
 
 #### How it works at runtime:
 
@@ -106,7 +111,7 @@ Vercel function invoked (e.g. MCP completeTask)
 | `GCP_PROJECT_NUMBER` | `012345678901` | No |
 | `GCP_WORKLOAD_IDENTITY_POOL_ID` | `carbon-contractors-pool` | No |
 | `GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID` | `vercel-runtime` | No |
-| `GCP_SERVICE_ACCOUNT_EMAIL` | `kms-deployer-svc@project.iam.gserviceaccount.com` | No |
+| `GCP_SERVICE_ACCOUNT_EMAIL` | `kms-signer-svc@project.iam.gserviceaccount.com` | No |
 | `GCP_KMS_KEY_PATH` | `projects/.../keyRings/.../cryptoKeys/.../cryptoKeyVersions/1` | No |
 
 An attacker who reads all of these cannot sign anything. They need a valid OIDC token from the correct Vercel team/project/environment, which only Vercel's infrastructure can issue.
@@ -147,7 +152,7 @@ const kmsClient = new KeyManagementServiceClient({ authClient });
    assertion.repository == "north-metro-tech/carbon-contractors"
    ```
 
-3. **Grant impersonation:** Allow this provider to impersonate `kms-deployer-svc`.
+3. **Grant impersonation:** Allow this provider to impersonate `kms-signer-svc`.
 
 #### GitHub Actions workflow:
 
@@ -165,7 +170,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: 'projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/carbon-contractors-pool/providers/github-actions'
-          service_account: 'kms-deployer-svc@PROJECT_ID.iam.gserviceaccount.com'
+          service_account: 'kms-signer-svc@PROJECT_ID.iam.gserviceaccount.com'
 
       - name: Deploy to Base
         run: |
@@ -180,7 +185,7 @@ jobs:
 
 ### Permissions
 
-- Service account `kms-deployer-svc` has **ONLY** `cloudkms.cryptoKeyVersions.useToSign`
+- Service account `kms-signer-svc` has **ONLY** `cloudkms.cryptoKeyVersions.useToSign`
 - Cannot create keys, delete keys, list keys, or read key material
 - Cannot modify IAM policies
 
@@ -213,7 +218,7 @@ Google Cloud generates a **Signed Attestation Statement** from the HSM hardware.
 
 Publish the following verifiable facts:
 
-- **No service account JSON keys exist** — verifiable in GCP IAM console (zero keys listed under `kms-deployer-svc`)
+- **No service account JSON keys exist** — verifiable in GCP IAM console (zero keys listed under `kms-signer-svc`)
 - **WIF attribute conditions** — publish the exact conditions showing only the correct Vercel project/environment and GitHub repo can authenticate
 - **Audit log summary** — periodic publication of signing activity showing all signatures correlate to legitimate escrow operations
 
@@ -251,7 +256,7 @@ The testnet raw key is irrelevant to production security. The mainnet key is bor
 
 ## Part 6: Final Security Checklist
 
-- [ ] **No JSON keys:** Verify zero keys exist under `kms-deployer-svc` in GCP IAM
+- [ ] **No JSON keys:** Verify zero keys exist under `kms-signer-svc` in GCP IAM
 - [ ] **Protection level:** Key version shows **"Hardware"** in KMS console
 - [ ] **Vercel WIF locked:** Attribute condition restricts to correct team + project + production environment
 - [ ] **GitHub WIF locked:** Attribute condition restricts to correct repository
@@ -259,9 +264,13 @@ The testnet raw key is irrelevant to production security. The mainnet key is bor
 - [ ] **Audit logging enabled:** Admin Read, Data Write, Data Read on KMS key
 - [ ] **Rate alerts configured:** Anomaly detection on signing request volume
 - [ ] **Attestation downloaded:** HSM attestation bundle available for user verification
-- [ ] **Ethereum address derived:** KMS public key → Ethereum address matches contract owner
+- [x] **Ethereum address derived:** KMS public key → Ethereum address matches contract owner —
+      verified 2026-08-08 via `scripts/audit/verify-contract-owner.mjs` (PASS on both contracts,
+      after `transferOwnership()`; see `Security-Trust-Disclosure.md` and `CC-059`)
 - [ ] **Local fallback works:** Raw key path still functions for testnet development
-- [ ] **DEPLOYER_PRIVATE_KEY removed:** Not present in any deployed environment variables
+- [ ] **DEPLOYER_PRIVATE_KEY removed:** Not present in any deployed environment variables — the
+      raw key no longer holds owner authority as of 2026-08-08, but the env var itself has not yet
+      been removed from Vercel; tracked as the remaining step of `CC-059`
 
 ---
 
