@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const isDev = process.env.NODE_ENV === "development";
+const isProduction = process.env.VERCEL_ENV === "production";
+
+// Vercel injects its own review-feedback toolbar script (vercel.live) on preview
+// deployments only — it never loads in production. Scope the allowance accordingly
+// rather than widening production's CSP for a script it will never serve.
+const vercelToolbarSrc = isProduction ? "" : " https://vercel.live";
 
 const nextConfig: NextConfig = {
   // MCP route needs Node.js runtime for WebStandardStreamableHTTPServerTransport
@@ -11,8 +17,8 @@ const nextConfig: NextConfig = {
     // scripts and style injection. 'unsafe-eval' is dev-only (React Fast
     // Refresh). TODO: implement nonce-based CSP for stricter production policy.
     const scriptSrc = isDev
-      ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-      : "script-src 'self' 'unsafe-inline'";
+      ? `script-src 'self' 'unsafe-inline' 'unsafe-eval'${vercelToolbarSrc}`
+      : `script-src 'self' 'unsafe-inline'${vercelToolbarSrc}`;
     const styleSrc = "style-src 'self' 'unsafe-inline'";
 
     return [
@@ -34,7 +40,9 @@ const nextConfig: NextConfig = {
               scriptSrc,
               styleSrc,
               "img-src 'self' data: https:",
-              "connect-src 'self' https://*.supabase.co https://sepolia.base.org https://mainnet.base.org wss://*.supabase.co",
+              "font-src 'self' data:",
+              "connect-src 'self' https://*.supabase.co https://sepolia.base.org https://mainnet.base.org wss://*.supabase.co https://cca-lite.coinbase.com",
+              `frame-src https://keys.coinbase.com${vercelToolbarSrc}`,
               "frame-ancestors 'none'",
             ].join("; "),
           },
