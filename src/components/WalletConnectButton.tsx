@@ -8,6 +8,18 @@ function truncateAddress(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+// wagmi's built-in connectors ship developer-facing default names ("Injected") that
+// mean nothing to a non-crypto user. Override by connector id, which is stable across
+// wagmi versions — connector.name is the very thing being overridden, so it can't also
+// be the lookup key.
+const CONNECTOR_LABELS: Record<string, string> = {
+  injected: "Other Wallet",
+};
+
+function connectorLabel(connector: { id: string; name: string }): string {
+  return CONNECTOR_LABELS[connector.id] ?? connector.name;
+}
+
 interface WalletConnectButtonProps {
   onAction?: () => void;
   /** Which edge the dropdown hangs from — "left" avoids off-screen overflow
@@ -79,7 +91,7 @@ export default function WalletConnectButton({
                 onAction?.();
               }}
             >
-              {connector.name}
+              {connectorLabel(connector)}
             </button>
           ))}
         </div>
