@@ -706,7 +706,49 @@ manually clicked through a form far enough to hit it.
 
 ---
 
-## Open questions being tracked rather than answered
+## 19. The one path we couldn't test was the one path that was actually broken
+
+**Status:** found and fixed 2026-08-08, live re-verification pending — `CC-069`
+
+`CC-055` had sat open since launch prep began, worded deliberately: "not known to be broken. It
+is unknown, which for a launch is worse." Every prior test of the wallet flow used the Coinbase
+browser extension — an EOA, a seed-phrase wallet — because that's what was installed on every
+development machine. The product's actual pitch, the passkey-based Smart Wallet (Base Account),
+had never once been exercised end to end, because doing so meant a phone, or a browser with no
+extension, and testing kept defaulting to whatever was already open.
+
+Closing `CC-003` (the CSP blocker) finally made a real attempt possible. On a real phone, with a
+real Base Account, the flow got further than ever before — a genuine Coinbase login-code email,
+a genuine passkey signing prompt at `keys.coinbase.com`, a tap on **Sign**. Then: "Signature
+verification failed."
+
+The cause wasn't a phone setting, a browser quirk, or bad luck. `verifyMessage` from viem's
+top-level export — used to check the signed registration message — carries this in its own
+docstring: *"Only supports Externally Owned Accounts. Does not support Contract Accounts."* Base
+Account is a smart contract account (ERC-4337). Its signatures are ERC-6492/ERC-1271, not raw
+ECDSA recoverable to the wallet's own address by `ecrecover`. The exact account type the entire
+onboarding pitch is built on was, structurally, the one type this check could never accept — and
+the identical mistake (`recoverAddress`/`hashMessage`, same EOA-only limitation) was independently
+present in the MCP/dispute authentication path too, found by grepping for the same pattern once
+the first instance was understood.
+
+### Why "untested" turned out to mean "broken," not "probably fine"
+
+It is tempting to read "nobody has tried this yet" as neutral — an open question, weighted maybe
+50/50. It wasn't. The two wallet types this app supports are architecturally different enough
+(EOA vs. smart contract account) that code correct for one has no statistical tendency to also be
+correct for the other; there was no reason to expect the untested path to work just because the
+tested one did. A code review would not have caught this either — `verifyMessage({ address,
+message, signature })` reads as obviously correct, type-checks, and the bug is entirely in *which*
+function with that exact name and shape got imported.
+
+**Lesson:** when a product has two structurally different ways of doing the same thing (two
+account types, two payment rails, two auth methods) and only one has ever been exercised, do not
+treat the other as "probably fine, just unverified." Treat it as a coin flip at best, and budget
+time to actually flip it — ideally by grep'ing for every other call site sharing the same
+underlying primitive (`verifyMessage`, `recoverAddress`) the moment the first failure explains why,
+since a mistake made once by not knowing a library's own documented limitation is a mistake very
+likely made twice.
 
 Recorded here because pretending to certainty would defeat the purpose of the document.
 

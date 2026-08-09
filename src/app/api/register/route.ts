@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { verifyMessage } from "viem";
+import { verifyWalletSignature } from "@/lib/wallet/verify";
 import { getSupabaseAdmin } from "@/lib/db/client";
 import { log } from "@/lib/logging";
 import { validateCategorySelection } from "@/lib/categories";
@@ -41,10 +41,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  // Verify the signature matches the claimed wallet
+  // Verify the signature matches the claimed wallet. Must go through a public
+  // client (ERC-6492/1271-aware) rather than pure offline ecrecover -- Base
+  // Account / Coinbase Smart Wallet is a contract account, not an EOA.
   let valid: boolean;
   try {
-    valid = await verifyMessage({
+    valid = await verifyWalletSignature({
       address: wallet,
       message,
       signature,
