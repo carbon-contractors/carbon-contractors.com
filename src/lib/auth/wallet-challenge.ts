@@ -6,7 +6,7 @@
  * (the MCP transport, /api/dispute).
  */
 
-import { recoverAddress, hashMessage } from "viem";
+import { verifyWalletSignature } from "@/lib/wallet/verify";
 import { getSupabaseAdmin } from "@/lib/db/client";
 
 /**
@@ -45,12 +45,16 @@ export async function verifyChallengeSignature(
   const timestamp = Math.floor(new Date(challenge.created_at).getTime() / 1000);
   const challengeMessage = `carbon-contractors.com wants to verify wallet ownership\nNonce: ${nonce}\nTimestamp: ${timestamp}`;
 
-  const recovered = await recoverAddress({
-    hash: hashMessage(challengeMessage),
+  // Must go through a public client (ERC-6492/1271-aware) rather than pure
+  // offline ecrecover -- Base Account / Coinbase Smart Wallet is a contract
+  // account, not an EOA, and would fail signature verification otherwise.
+  const valid = await verifyWalletSignature({
+    address: claimedWallet as `0x${string}`,
+    message: challengeMessage,
     signature,
   });
 
-  if (recovered.toLowerCase() !== claimedWallet.toLowerCase()) {
+  if (!valid) {
     throw new Error("Signature does not match claimed wallet");
   }
 

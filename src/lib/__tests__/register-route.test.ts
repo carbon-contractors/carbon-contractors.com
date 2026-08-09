@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
 
-const mockVerifyMessage = vi.fn();
-vi.mock("viem", () => ({
-  verifyMessage: (...args: unknown[]) => mockVerifyMessage(...args),
+const mockVerifyWalletSignature = vi.fn();
+vi.mock("@/lib/wallet/verify", () => ({
+  verifyWalletSignature: (...args: unknown[]) => mockVerifyWalletSignature(...args),
 }));
 
 const mockFrom = vi.fn();
@@ -73,7 +73,7 @@ function stubHappyPathChain() {
 describe("POST /api/register (CC-002 wallet casing)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockVerifyMessage.mockResolvedValue(true);
+    mockVerifyWalletSignature.mockResolvedValue(true);
   });
 
   it("normalizes a mixed-case wallet to lowercase before writing to humans and used_nonces", async () => {
@@ -100,13 +100,13 @@ describe("POST /api/register (CC-002 wallet casing)", () => {
     );
 
     // Verification itself must use the original (signed) casing, not the lowercased one.
-    expect(mockVerifyMessage).toHaveBeenCalledWith(
+    expect(mockVerifyWalletSignature).toHaveBeenCalledWith(
       expect.objectContaining({ address: MIXED_CASE_WALLET }),
     );
   });
 
   it("rejects an invalid signature regardless of wallet casing", async () => {
-    mockVerifyMessage.mockResolvedValue(false);
+    mockVerifyWalletSignature.mockResolvedValue(false);
     const { POST } = await import("@/app/api/register/route");
 
     const res = await POST(
@@ -125,7 +125,7 @@ describe("POST /api/register (CC-002 wallet casing)", () => {
 describe("POST /api/register (CC-005 contact capture)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockVerifyMessage.mockResolvedValue(true);
+    mockVerifyWalletSignature.mockResolvedValue(true);
     mockRegisterNotificationChannel.mockResolvedValue({ id: "chan-1" });
   });
 

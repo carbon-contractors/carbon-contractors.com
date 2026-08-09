@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { verifyMessage } from "viem";
+import { verifyWalletSignature } from "@/lib/wallet/verify";
 import { getSupabaseAdmin } from "@/lib/db/client";
 import { log } from "@/lib/logging";
 import { validateCategorySelection } from "@/lib/categories";
@@ -41,19 +41,38 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  // Verify the signature matches the claimed wallet
+  // Verify the signature matches the claimed wallet. Must go through a public
+  // client (ERC-6492/1271-aware) rather than pure offline ecrecover -- Base
+  // Account / Coinbase Smart Wallet is a contract account, not an EOA.
   let valid: boolean;
   try {
-    valid = await verifyMessage({
+    valid = await verifyWalletSignature({
       address: wallet,
       message,
       signature,
     });
-  } catch {
-    return Response.json({ error: "Signature verification failed" }, { status: 400 });
+  } catch (err: unknown) {
+    // This used to swallow the real reason entirely -- fine once this path was
+    // known-working, actively harmful while diagnosing CC-069. The verification
+    // failure reason (RPC/ERC-6492 detail, not user data) is safe to return as-is.
+    const detail = err instanceof Error ? err.message : String(err);
+    log("error", "register_signature_verification_error", { wallet, error: detail });
+    return Response.json(
+      { error: "Signature verification failed", detail },
+      { status: 400 },
+    );
   }
 
   if (!valid) {
+    // viem's public-client verifyMessage converts most on-chain verification
+    // failures (ERC-6492/1271 revert, etc.) into a clean `false` rather than
+    // throwing -- this is the path most likely to actually fire, not the catch
+    // above. Log enough to diagnose which verification mode was attempted.
+    log("warn", "register_invalid_signature", {
+      wallet,
+      messageLength: message.length,
+      signatureLength: signature.length,
+    });
     return Response.json({ error: "Invalid signature" }, { status: 401 });
   }
 

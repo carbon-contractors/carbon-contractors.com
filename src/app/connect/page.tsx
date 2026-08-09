@@ -66,7 +66,8 @@ export default function ConnectPage() {
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Registration failed");
+        const errorText = err.detail ? `${err.error}: ${err.detail}` : err.error;
+        throw new Error(errorText || "Registration failed");
       }
 
       setStatus("success");
