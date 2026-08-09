@@ -16,6 +16,7 @@
 import { createPublicClient, http, type SignableMessage } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import { getConfig } from "@/lib/config";
+import { log } from "@/lib/logging";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _publicClient: any = null;
@@ -43,7 +44,26 @@ export async function verifyWalletSignature(params: {
   signature: `0x${string}`;
 }): Promise<boolean> {
   const client = getPublicClient();
-  return client.verifyMessage(params);
+  try {
+    const result = await client.verifyMessage(params);
+    log("info", "wallet_signature_verified", {
+      address: params.address,
+      chain: client.chain?.name,
+      result,
+    });
+    return result;
+  } catch (err: unknown) {
+    // CC-069 diagnostics: viem's on-chain ERC-6492/1271 path usually converts a
+    // failed check into a clean `false`, not a throw -- if we land here instead,
+    // it's the RPC call itself (or something upstream of the validator) failing,
+    // not a genuinely-invalid signature. Worth telling those two apart.
+    log("error", "wallet_signature_verify_threw", {
+      address: params.address,
+      chain: client.chain?.name,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 }
 
 /** Reset the cached client (for testing). */

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockVerifyMessage = vi.fn();
-const mockCreatePublicClient = vi.fn((..._args: unknown[]) => ({
+const mockCreatePublicClient = vi.fn((args: { chain?: { name: string } }) => ({
+  chain: args.chain,
   verifyMessage: mockVerifyMessage,
 }));
 
@@ -9,7 +10,8 @@ vi.mock("viem", async () => {
   const actual = await vi.importActual<typeof import("viem")>("viem");
   return {
     ...actual,
-    createPublicClient: (...args: unknown[]) => mockCreatePublicClient(...args),
+    createPublicClient: (args: { chain?: { name: string } }) =>
+      mockCreatePublicClient(args),
   };
 });
 
@@ -63,6 +65,21 @@ describe("verifyWalletSignature (CC-069)", () => {
     });
 
     expect(result).toBe(false);
+  });
+
+  it("re-throws (rather than swallowing) when the underlying RPC call itself fails", async () => {
+    stubEnv();
+    mockVerifyMessage.mockRejectedValue(new Error("RPC request failed"));
+
+    const { verifyWalletSignature } = await import("@/lib/wallet/verify");
+
+    await expect(
+      verifyWalletSignature({
+        address: "0x3bE93502BF48bFbbB4f6c065E7f663a97DF5ce44",
+        message: "hello",
+        signature: "0xsig",
+      }),
+    ).rejects.toThrow("RPC request failed");
   });
 
   it("reuses the cached client across calls", async () => {
