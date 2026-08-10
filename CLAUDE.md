@@ -10,9 +10,16 @@ over MCP, fund tasks with USDC through x402, and the escrow contract releases pa
 completion. Next.js 16 App Router on Vercel, Supabase for off-chain state, Solidity on Base
 Sepolia. See `README.md` for the product narrative.
 
-**Status as of July 2026:** deployed and running on Sepolia, but the whole site sits behind a
-coming-soon gate. The project was dormant from May to July 2026. The immediate goal is a public,
-promotable site that collects real worker signups. Mainnet is a separate, later effort.
+**Status as of August 2026:** deployed and running on Sepolia, but the whole site sits behind a
+coming-soon gate. The project was dormant from May to July 2026.
+
+**Launch sequence (confirmed 2026-08-10, do not reorder):** build and test everything possible
+on Sepolia first (`docs/backlog/CC-076.md`) → migrate to Base mainnet and re-run the full
+lifecycle with Aaron's own real funds (`docs/backlog/CC-039.md`) → only once that mainnet re-test
+is clean does the coming-soon gate lift for the public (`docs/backlog/CC-014.md`, the literal
+last gate). The public's first look at the site happens on mainnet, not on Sepolia — "finish the
+Sepolia checklist" does not mean "go public," it means "ready to attempt the one-way mainnet
+migration." Do not treat opening the coming-soon gate as a testnet milestone.
 
 ## Start here every session
 

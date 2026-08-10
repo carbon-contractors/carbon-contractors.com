@@ -5,7 +5,7 @@ Edit the `CC-*.md` files, then regenerate.
 
 **76 issues** — 47 to do, 28 done, 1 won't fix
 
-Open by priority: **P0** 5 · **P1** 23 · **P2** 17 · **P3** 2
+Open by priority: **P0** 5 · **P1** 24 · **P2** 16 · **P3** 2
 
 ## Open
 
@@ -17,19 +17,13 @@ Open by priority: **P0** 5 · **P1** 23 · **P2** 17 · **P3** 2
 | [CC-039](CC-039.md) | P1 | To do | infra | Mainnet go-live gate checklist (hub) |
 | [CC-048](CC-048.md) | P3 | To do | infra | Self-hosted Sepolia node on the Z220 |
 
-### mcp-package (1)
-
-| ID | P | Status | Area | Title |
-| :-- | :-- | :-- | :-- | :-- |
-| [CC-046](CC-046.md) | P2 | To do | backend | MCP production readiness: idempotency, pre-set params, retry semantics |
-
 ### process (1)
 
 | ID | P | Status | Area | Title |
 | :-- | :-- | :-- | :-- | :-- |
 | [CC-051](CC-051.md) | P1 | To do | compliance | AU Digital Assets Framework — classify the platform and track thresholds |
 
-### public-launch (42)
+### public-launch (43)
 
 | ID | P | Status | Area | Title |
 | :-- | :-- | :-- | :-- | :-- |
@@ -51,6 +45,7 @@ Open by priority: **P0** 5 · **P1** 23 · **P2** 17 · **P3** 2
 | [CC-041](CC-041.md) | P1 | To do | security | Enforce YubiKey-only 2FA on GCP |
 | [CC-044](CC-044.md) | P1 | To do | backend | Build the standalone basedhuman-mcp server package |
 | [CC-045](CC-045.md) | P1 | To do | security | MCP supply chain and STDIO hardening before publishing |
+| [CC-046](CC-046.md) | P1 | To do | backend | MCP production readiness: idempotency, pre-set params, retry semantics |
 | [CC-057](CC-057.md) | P1 | To do | infra | No migration tooling — which is why exec_sql exists |
 | [CC-060](CC-060.md) | P1 | To do | testing | The test suite broadcasts real Base Sepolia transactions and is therefore flaky |
 | [CC-070](CC-070.md) | P1 | To do | contracts | Every eth_getLogs query in escrow.ts exceeds the public RPC's 2000-block range limit |
