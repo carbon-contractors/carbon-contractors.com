@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useResumableConnector } from "@/lib/wallet/useResumableConnector";
 import styles from "./WalletConnectButton.module.css";
 
 function truncateAddress(addr: string): string {
@@ -37,9 +38,11 @@ export default function WalletConnectButton({
   dropdownAlign = "right",
 }: WalletConnectButtonProps) {
   const { address, isConnected } = useAccount();
-  const { connect, connectors, isPending } = useConnect();
+  const { connect, connectors, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
+  const resumable = useResumableConnector();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
 
   const dropdownClass = `${styles.walletDropdown} ${dropdownAlign === "left" ? styles.walletDropdownLeft : ""}`;
 
@@ -67,6 +70,31 @@ export default function WalletConnectButton({
             </button>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // A previously-authorized session exists (CC-071) — offer to resume it with one tap,
+  // a real user gesture, so the connector's own connect() is allowed to open a popup if it
+  // needs to. Falls through to the normal picker if the user wants a different wallet, or if
+  // resuming itself fails.
+  if (resumable && !showPicker) {
+    return (
+      <div className={styles.wallet}>
+        <button
+          className={styles.walletButton}
+          onClick={() => connect({ connector: resumable })}
+          disabled={isPending}
+        >
+          {isPending ? "Resuming..." : "Resume Session"}
+        </button>
+        <button
+          className={styles.walletSwitchLink}
+          onClick={() => setShowPicker(true)}
+        >
+          Use a different wallet
+        </button>
+        {error && <p className={styles.walletError}>{error.message}</p>}
       </div>
     );
   }

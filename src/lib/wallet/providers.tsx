@@ -33,7 +33,12 @@ const queryClient = new QueryClient();
 
 export function WalletProviders({ children }: { children: ReactNode }) {
   return (
-    <WagmiProvider config={wagmiConfig}>
+    // reconnectOnMount is off deliberately (CC-071): wagmi's default reconnect calls
+    // connector.connect() even for an already-authorized session, and for baseAccount that
+    // always fires a popup-opening RPC call. A reconnect triggered by page load, not a user
+    // click, gets blocked by mobile browsers' popup blockers every time. See
+    // useResumableConnector.ts for the popup-free replacement.
+    <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
       <QueryClientProvider client={queryClient}>
         {children}
       </QueryClientProvider>
