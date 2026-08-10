@@ -42,9 +42,9 @@ When your crypto sits on an exchange (Coinbase the exchange, Binance, etc.), the
 ## How to set up your wallet
 
 1. **Go to [carbon-contractors.com](https://carbon-contractors.com)** and hit Register.
-2. **Tap "Create Wallet"** — this triggers the Coinbase Smart Wallet flow.
+2. **Tap "Connect Wallet," then choose "Base Account"** — this triggers the Coinbase Smart Wallet flow. (You'll see an "Other Wallet" option too — that's for a browser extension wallet like MetaMask, not the passkey flow this module is about.)
 3. **Authenticate with your passkey** — FaceID, fingerprint, or screen lock. Whatever your device supports.
-4. **Done.** You now have a wallet on Base (Coinbase's L2 network). Zero gas fees for transactions.
+4. **Done.** You now have a wallet on Base (Coinbase's L2 network).
 
 No app to download. No extension to install. No seed phrase to lose. Your passkey *is* your key.
 

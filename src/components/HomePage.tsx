@@ -56,8 +56,8 @@ export default function HomePage() {
             <div className={styles.stepContent}>
               <h3 className={styles.stepTitle}>Settle</h3>
               <p className={styles.stepDesc}>
-                Complete the task, get an onchain attestation, and USDC releases
-                to your wallet.
+                Complete the task and USDC releases to your wallet — a
+                permanent onchain record, not a star rating that disappears.
               </p>
             </div>
           </div>

@@ -25,7 +25,7 @@ You do the work
         ↓
 You submit your deliverable
         ↓
-Attestation is recorded on-chain (proof the work happened)
+Task completion is recorded on-chain (proof the work happened)
         ↓
 USDC releases from escrow to your wallet
         ↓
@@ -62,20 +62,21 @@ When an agent sends a work request, the USDC is locked in a smart contract **bef
 
 The money is committed upfront. You do the work. The money releases. That's the deal, enforced by code.
 
-## Attestation: your on-chain reputation
+## Your on-chain reputation
 
-Every completed job creates an **attestation** — a permanent, public, on-chain record that this work happened. Think of it as a verified review that can't be deleted, edited, or faked.
+Every completed job emits a **permanent, public event on the Base blockchain** — proof that this task existed, was funded, and was completed. Think of it as a verified record that can't be deleted, edited, or faked, because it isn't sitting in Carbon Contractors' database at all — it's on the chain.
 
-Over time, your attestations build into a **reputation score.** This is your track record, visible to every agent on the network.
+Your **reputation score** is computed from that real on-chain history: how many jobs you've completed, how recently, and how they went. Anyone can independently recompute it from the same public events — it's not a number we hand you on trust.
 
 What this means in practice:
 
-- **More attestations = more work.** Agents prefer contractors with proven track records.
-- **Quality matters.** Attestations aren't just "completed" stamps — they carry context about the work.
-- **It's portable.** Your reputation lives on-chain, not on a platform. If you leave Carbon Contractors tomorrow, your reputation comes with you.
-- **It's trustless.** No one has to take your word for it. The blockchain is the receipt.
+- **More completed jobs = more work.** Agents prefer contractors with a proven track record.
+- **It's portable.** Your history lives on-chain, not on a platform. If you leave Carbon Contractors tomorrow, the record of every job you completed comes with you.
+- **It's trustless.** No one has to take your word for it, or ours. The blockchain is the receipt.
 
-This is the opposite of gig platforms where your 4.9-star rating disappears the moment you switch to a competitor. Your on-chain reputation is **yours.**
+This is the opposite of gig platforms where your 4.9-star rating disappears the moment you switch to a competitor. Your on-chain history is **yours.**
+
+*(A more formal attestation system — signed, structured records with more detail than a bare completion event — is landing before launch, not live in this build yet. What's described above is what actually exists on-chain today.)*
 
 ## Why instant and auditable matters
 
@@ -83,7 +84,7 @@ Two things traditional payment systems can't give you simultaneously:
 
 **Instant** — USDC settles on Base in seconds. Not "pending." Not "processing." Not "1–3 business days." In your wallet, spendable, done.
 
-**Auditable** — Every payment, every escrow lock, every attestation is recorded on a public blockchain. You can verify any transaction yourself. No trust required — just look it up.
+**Auditable** — Every payment, every escrow lock, every completed task is recorded on a public blockchain. You can verify any transaction yourself. No trust required — just look it up.
 
 For a contractor, this means no more wondering if the client actually sent the payment, no more waiting for bank processing, and a permanent receipt for every dollar earned.
 
@@ -92,7 +93,7 @@ For a contractor, this means no more wondering if the client actually sent the p
 Three things:
 
 1. **The money is locked before you work.** Escrow means you're never chasing payment.
-2. **Every job builds your reputation.** Attestations are permanent, portable, and verifiable.
+2. **Every job builds your reputation.** The record is on-chain — permanent, portable, and verifiable by anyone.
 3. **Set up your notification channel.** You need to know when work comes in.
 
 ---
