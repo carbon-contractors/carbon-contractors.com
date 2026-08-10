@@ -23,6 +23,36 @@
   border-color: var(--cc-green);
 }
 
+.walletButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.walletSwitchLink {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--cc-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cc-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.walletSwitchLink:hover {
+  color: var(--cc-text-secondary);
+}
+
+.walletError {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--cc-red);
+  max-width: 220px;
+}
+
 .walletDropdown {
   position: absolute;
   top: calc(100% + 6px);
