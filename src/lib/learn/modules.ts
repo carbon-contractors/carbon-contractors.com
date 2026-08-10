@@ -48,9 +48,9 @@ export const LEARN_MODULES: LearnModule[] = [
     slug: "let-your-agent-handle-it",
     title: "Let Your Agent Handle It",
     moduleNumber: 5,
-    readTime: "4 min",
+    readTime: "5 min",
     description:
-      "Automate job notifications, auto-booking, and calendar integration. Work smarter.",
+      "What auto-booking actually is, why it's an MCP call and not a dashboard toggle, and how to set up an agent that can use it.",
     filename: "module-5-let-your-agent-handle-it.md",
   },
   {
