@@ -102,23 +102,36 @@ the string `false`. See CC-014.
 **`/api/*` is not behind the coming-soon gate.** `middleware.ts` bypasses it, so every API route
 is publicly reachable right now even though the site looks dark. Treat API routes as live.
 
-**The local signer IS the contract owner — the raw key, not the HSM key.** This entry previously
-said the opposite, as a guess; it was measured on 2026-07-30 and the guess was backwards.
-`CarbonEscrow.owner()` and `ReputationStake.owner()` are both
-`0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b`, which is the address of `DEPLOYER_PRIVATE_KEY` in
-`.env.local`. The HSM key `0xa8931097540e69B474013D294d0bA6A2cC853e4b` was generated and funded but
-never received ownership — `transferOwnership()` was never called.
+**The HSM key owns the contracts. This entry has now been wrong in both directions — do not guess
+it a third time.** `CarbonEscrow.owner()` and `ReputationStake.owner()` are
+`0xa8931097540e69B474013D294d0bA6A2cC853e4b`, the KMS/HSM address. CC-059 called
+`transferOwnership()` on 2026-07-30 and it was confirmed by an independent Basescan read of tx
+`0x08cd2e3…`, which also shows the HSM address as the sender of a real 1 USDC dispute resolution —
+so the KMS signer demonstrably works against the live contracts.
 
-So local escrow writes work, and the exposure runs the other way: if Vercel has `GCP_KMS_KEY_PATH`
-set, *production* signs as the HSM address, which is not the owner, so `resolveDisputeOnChain`
-reverts in production. `docs/Security-Trust-Disclosure.md` also claimed publicly that the HSM key
-owns the escrow. Both are CC-059. Do not re-derive this by guessing — run
-`node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`; it exits non-zero while this
-is wrong.
+The history, because this keeps flipping: the entry first guessed the HSM key was the owner; the
+2026-07-30 measurement found the raw `DEPLOYER_PRIVATE_KEY` address
+`0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b` was, and the entry was rewritten to say so; then
+CC-059 actually performed the transfer, which made that rewrite stale within the same session. The
+raw key is no longer the owner.
 
-**`completeTaskOnChain` cannot work, for an unrelated reason.** `CarbonEscrow.completeTask` requires
-`msg.sender == task.agent` (`contracts/CarbonEscrow.sol:128`, confirmed present in the deployed
-bytecode), but `signer.ts:102` calls it as the platform signer. No key fixes that. See CC-037.
+Consequence: production (KMS) signs as the owner and `resolveDisputeOnChain` works there. A **local**
+run using `DEPLOYER_PRIVATE_KEY` is now the one that reverts on owner-only functions, which is the
+opposite of what it was. `docs/Security-Trust-Disclosure.md`'s public claim that the HSM key owns the
+escrow is now true. Never re-derive this by reading — run
+`node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`.
+
+**`completeTaskOnChain` cannot work, and it is a design contradiction rather than a key problem.**
+`CarbonEscrow.completeTask` requires `msg.sender == task.agent`
+(`contracts/CarbonEscrow.sol:128`, confirmed present in the deployed bytecode), and
+`createTask` sets `agent: msg.sender` (`:107`). Nothing server-side calls the contract's
+`createTask` — the agent funds the escrow from its own wallet, so `task.agent` is the *agent's*
+address, while `signer.ts:102` calls `completeTask` as the platform signer. So
+`confirm_task_completion` (`src/lib/mcp/server.ts:391`) reverts with `"only agent"` on every task,
+and always has: **the core hire→pay loop has never worked.** It fails safely — the handler returns
+`isError` without flipping the DB to `completed`, so no worker was ever falsely marked paid. Aaron's
+ruling is that agent-signed completion is the intended design, so the fix is app-side with no
+redeploy. See CC-080 (the fix) and CC-037 (the verification).
 
 **`tasks_public` bypasses RLS on purpose — do not "fix" it.** `tasks` has RLS enabled with zero
 policies, so anon is denied. Anon reads the `tasks_public` view instead, which excludes
@@ -134,13 +147,33 @@ safety of this arrangement rests entirely on the view's column list, so **never 
 resource has a field allowlist, but that does not protect direct anon queries against the table.
 Never put anything on `humans` that should not be world-readable.
 
-**"Anon is denied" and "anon reads zero rows" are different things.** `waitlist`, `tasks`,
-`notification_channels`, `used_nonces` and `mcp_challenges` return **HTTP 200 with an empty array**
-to the anon key, not a 403. Anon holds the table-level `SELECT` grant (Supabase grants it by
-default); RLS alone filters the rows. So RLS is singly load-bearing over real email addresses — one
-`DISABLE ROW LEVEL SECURITY` or one over-broad policy exposes them with no second barrier. See
-CC-062. When reading audit notes, treat "denied" claims as "returned no rows" unless a
-`has_table_privilege` result is quoted.
+**"Anon is denied" and "anon reads zero rows" are different things — and as of migration 014 the
+answer differs per table.** Supabase applies `GRANT ALL ON ALL TABLES IN SCHEMA public TO anon,
+authenticated` by default, so a table can return **HTTP 200 with an empty array** where you expected
+a 403: the grant is present and RLS alone is filtering. That was true of every table here until
+2026-08-11.
+
+Migration `014_revoke_anon_grants.sql` (CC-062, done) revoked it. Current, measured state:
+
+| object | anon | on a denied read |
+| :-- | :-- | :-- |
+| `waitlist`, `tasks`, `notification_channels`, `used_nonces`, `mcp_challenges` | no privileges | `401` + SQLSTATE `42501` — a real ACL denial, before RLS |
+| `humans` | `SELECT` only | n/a — reads are intended (whitepages, CC-030) |
+| `tasks_public` | `SELECT` only | n/a — the public task feed |
+
+So those five now have two independent barriers, and the emails are no longer protected by RLS alone.
+`authenticated` is deliberately left intact on `humans` so migration 005's dormant
+`humans_update_self` policy still works if wallet-based Supabase Auth is ever added.
+
+Two things still follow from the original warning. **Anything written before 2026-08-11** — including
+`AUDIT-2026-03-25.md` and the old audit notes — describes the pre-revoke posture, so treat its
+"denied" claims as "returned no rows" unless a `has_table_privilege` result is quoted. And when you
+add a table, it inherits the default `GRANT ALL` again: revoke it explicitly in the same migration,
+or it lands single-layered like these did.
+
+Do not revoke anon `SELECT` on `humans` or `tasks_public` — that breaks the whitepages and the public
+task feed. Verify any grant change against the live database rather than reasoning from the
+migrations; `scripts/audit/inspect-live-schema.sql` block 4 is the query.
 
 **Local Supabase credentials are asymmetric.** `.env.local` has a valid anon key but the
 `SUPABASE_SERVICE_ROLE_KEY` is the literal placeholder `placeholder…`. Anything needing the service
@@ -208,7 +241,7 @@ supabase/migrations/   001-011, applied in order. Add new ones, never edit old o
 
 ```bash
 npm run dev            # Next dev server
-npm test               # Vitest (52 tests)
+npm test               # Vitest (116 tests — and see CC-060: not hermetic, so it is flaky)
 npm run typecheck      # tsc --noEmit
 npm run lint
 npm run build

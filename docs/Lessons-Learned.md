@@ -750,6 +750,109 @@ underlying primitive (`verifyMessage`, `recoverAddress`) the moment the first fa
 since a mistake made once by not knowing a library's own documented limitation is a mistake very
 likely made twice.
 
+---
+
+## 20. The core hire→pay loop has never worked, and correct error handling is why nobody noticed
+
+**Status:** found 2026-08-11, **not yet fixed** — `CC-080`. Published as found, per §8.
+
+The function that pays people has never once succeeded. Not "is fragile", not "fails under load" —
+structurally cannot succeed, and has never been able to, for the entire life of the project.
+
+`CarbonEscrow.completeTask` requires `msg.sender == task.agent`
+(`contracts/CarbonEscrow.sol:128`), and `createTask` sets `agent: msg.sender` (`:107`). Nothing
+server-side calls the contract's `createTask` — the agent funds the escrow client-side from its own
+wallet, which both `src/lib/payments/x402.ts:45` and `src/lib/contracts/escrow.ts:6` state plainly.
+So `task.agent` is the *agent's* address. But `confirm_task_completion`
+(`src/lib/mcp/server.ts:391`) settles the task **server-side as the platform signer**, via
+`completeTaskOnChain` (`src/lib/contracts/signer.ts:102`). The platform signer is not the agent, so
+every call reverts with `"only agent"`.
+
+Two designs — agent-signed client-side writes, and platform-signed server-side writes — coexist in
+the codebase, and the payout path is assembled from one half of each.
+
+### Why it survived, and this is the part worth generalising
+
+**Because the error handling is correct.** `server.ts:389-409` catches the revert, logs
+`signer_complete_task_failed`, returns `isError: true` with the chain error text, and returns
+*before* `updateTaskStatus`. That is exactly right — it is AUD-005 and AUD-006 doing their job, and
+it is why no worker was ever falsely marked paid and no USDC was ever stranded. The failure mode is
+genuinely safe.
+
+It is also why nobody noticed. A permanently dead code path, wrapped in well-behaved error handling,
+is indistinguishable from a healthy error path that simply hasn't fired yet. Defensive code did what
+it was supposed to do and, in doing so, made a structural defect look like a runtime condition.
+
+**Because nothing ever drove the flow far enough to reach it.** Every test to date has been
+worker-side: wallet connection, registration, site functionality (`CC-069`, `CC-071`, `CC-055`).
+Nobody had pressed the button, because the agent side had no consumer pressing it.
+
+**Because the ticket that would have caught it was too big to start.** `CC-032` existed from
+2026-07-25 specifically to run this lifecycle end to end. It sat open for seventeen days with zero
+progress, because it was scoped as one ticket covering the happy path, six unhappy paths and three
+edge cases across the entire product. That is not a task, it is a wish. It was split four ways during
+the triage that found this.
+
+And it was found by *reading a call path during a backlog review*, not by testing — the third defect
+in this area found that way, after `CC-059` found `CC-065` and after §17.
+
+**Lesson:** an error branch that has never been observed *not* firing is not evidence the happy path
+works — it is the absence of evidence in either direction, and it deserves active suspicion rather
+than the comfort its tidiness invites. If a catch block has never been proven unnecessary, treat the
+path it guards as unproven. This is a sharper form of §17: there, a correct function had no caller;
+here, the caller exists and the call can never succeed. Both survived for the same underlying reason
+— nobody had executed the path — and in both cases reading the call graph found in an afternoon what
+months of green checks had not.
+
+Corollary, and the cheaper half of the fix: **size a verification ticket so that one person can
+finish it in one sitting.** A test ticket spanning an entire lifecycle will be deferred every time it
+is considered, and its permanent open status will read as "tracked" rather than "never attempted."
+
+---
+
+## 21. Closing one issue re-introduced the defect another open issue was describing
+
+**Status:** found 2026-08-11, **not yet fixed** — `CC-009`. Published as found.
+
+`CC-009` was filed on 2026-07-25: the waitlist route logs the signup event including the email
+address, and `maskMeta` (`src/lib/logging.ts`) masks only values matching
+`/^0x[0-9a-fA-F]{40}$/`, so emails pass straight through into the Vercel log stream. Real personal
+data, in logs with a different retention and access model to the database. P1, open, unambiguous.
+
+On 2026-08-08, `CC-067` shipped self-serve waitlist unsubscribe and added:
+
+```js
+log("info", "waitlist_unsubscribed", { email });
+```
+
+Forty lines below the line `CC-009` was already about, in the same file. The defect did not survive
+review — it was *recreated* by it. There are now two cleartext-email log sites where there was one.
+
+### Why an open issue was no protection
+
+Because open issues are read when triaging the backlog, not when writing a log line. Nobody greps
+`docs/backlog/` before adding an observability call, and there is nothing in the code, the types or
+CI that would have objected. The defect class was documented. It was not *controlled*.
+
+Worth noting how well-scrutinised this particular commit was: the same piece of work produced §18's
+finding, because someone actually ran it against real infrastructure and chased a `[object Object]`
+to its root cause. Care was not the missing ingredient.
+
+**Lesson:** a ticket describing a defect is documentation, not a control. If a defect class can
+recur — and "someone adds a log line" always can — the fix has to live in the chokepoint everything
+passes through, or in CI, not in prose describing where the defect currently is. `CC-009`'s own Fix
+section already said the right thing: *add an email branch to `maskMeta`*. Had that been done when it
+was filed rather than left as a described intention, `CC-067`'s new line would have been safe the
+moment it was written, and this entry would not exist.
+
+Generalised: when a fix can be made either at the call sites or in the shared helper they all route
+through, the helper is not merely tidier — it is the only version that also protects the call sites
+nobody has written yet.
+
+---
+
+## Open questions
+
 Recorded here because pretending to certainty would defeat the purpose of the document.
 
 - Whether the escrow design constitutes a Digital Asset Platform under the Australian framework

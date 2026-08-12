@@ -124,7 +124,7 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] Zod-validated environment configuration
 - [x] Session management with timeout and capacity limits
 - [x] Enhanced health check (DB + contract connectivity)
-- [x] Full test suite (74 tests, Vitest — see the caveat in *Local development* below)
+- [x] Full test suite (116 tests, Vitest — see the caveat in *Local development* below)
 - [x] GitHub Actions CI pipeline (lint, typecheck, test, build)
 - [x] Vercel deployment configuration
 - [x] `/learn` educational content (6 modules — crypto rails onboarding)
