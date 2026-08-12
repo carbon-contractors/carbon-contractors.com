@@ -147,13 +147,33 @@ safety of this arrangement rests entirely on the view's column list, so **never 
 resource has a field allowlist, but that does not protect direct anon queries against the table.
 Never put anything on `humans` that should not be world-readable.
 
-**"Anon is denied" and "anon reads zero rows" are different things.** `waitlist`, `tasks`,
-`notification_channels`, `used_nonces` and `mcp_challenges` return **HTTP 200 with an empty array**
-to the anon key, not a 403. Anon holds the table-level `SELECT` grant (Supabase grants it by
-default); RLS alone filters the rows. So RLS is singly load-bearing over real email addresses — one
-`DISABLE ROW LEVEL SECURITY` or one over-broad policy exposes them with no second barrier. See
-CC-062. When reading audit notes, treat "denied" claims as "returned no rows" unless a
-`has_table_privilege` result is quoted.
+**"Anon is denied" and "anon reads zero rows" are different things — and as of migration 014 the
+answer differs per table.** Supabase applies `GRANT ALL ON ALL TABLES IN SCHEMA public TO anon,
+authenticated` by default, so a table can return **HTTP 200 with an empty array** where you expected
+a 403: the grant is present and RLS alone is filtering. That was true of every table here until
+2026-08-11.
+
+Migration `014_revoke_anon_grants.sql` (CC-062, done) revoked it. Current, measured state:
+
+| object | anon | on a denied read |
+| :-- | :-- | :-- |
+| `waitlist`, `tasks`, `notification_channels`, `used_nonces`, `mcp_challenges` | no privileges | `401` + SQLSTATE `42501` — a real ACL denial, before RLS |
+| `humans` | `SELECT` only | n/a — reads are intended (whitepages, CC-030) |
+| `tasks_public` | `SELECT` only | n/a — the public task feed |
+
+So those five now have two independent barriers, and the emails are no longer protected by RLS alone.
+`authenticated` is deliberately left intact on `humans` so migration 005's dormant
+`humans_update_self` policy still works if wallet-based Supabase Auth is ever added.
+
+Two things still follow from the original warning. **Anything written before 2026-08-11** — including
+`AUDIT-2026-03-25.md` and the old audit notes — describes the pre-revoke posture, so treat its
+"denied" claims as "returned no rows" unless a `has_table_privilege` result is quoted. And when you
+add a table, it inherits the default `GRANT ALL` again: revoke it explicitly in the same migration,
+or it lands single-layered like these did.
+
+Do not revoke anon `SELECT` on `humans` or `tasks_public` — that breaks the whitepages and the public
+task feed. Verify any grant change against the live database rather than reasoning from the
+migrations; `scripts/audit/inspect-live-schema.sql` block 4 is the query.
 
 **Local Supabase credentials are asymmetric.** `.env.local` has a valid anon key but the
 `SUPABASE_SERVICE_ROLE_KEY` is the literal placeholder `placeholder…`. Anything needing the service
