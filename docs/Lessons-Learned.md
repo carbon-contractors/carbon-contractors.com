@@ -851,6 +851,80 @@ nobody has written yet.
 
 ---
 
+---
+
+## 22. The ticket's own fix would not have worked, and the fallback is why nobody knew
+
+**Status:** found and fixed 2026-08-11 — `CC-070`
+
+`/api/reputation` is supposed to compute a worker's reputation from on-chain escrow events. It never
+once did. Every `getLogs` call in `src/lib/contracts/escrow.ts` defaulted `fromBlock` to `0`, and the
+RPC provider caps a single `eth_getLogs` at a fixed block span, so every query failed the moment the
+contract was more than a couple of hours old — which is to say, for essentially the whole life of the
+project.
+
+### Why nobody knew: the fallback had a reassuring name
+
+The failure was caught and handled. On error, the code fell back to the database and logged:
+
+```
+reputation_onchain_fallback
+```
+
+That reads like a designed degradation — a fast path and a safe path, with the safe path occasionally
+taking over. It was not. The fast path had a 100% failure rate, and the log line was the only evidence,
+phrased in a way that made permanent total failure look like an intermittent, anticipated condition.
+`CC-070` was only filed because someone happened to read that log line during unrelated live testing of
+`CC-069` and wondered why it was there at all.
+
+This is the same shape as §20, from the other direction. There, correct error handling made a dead code
+path look like a healthy error path. Here, a correct *fallback* made a dead primary look like a healthy
+secondary. In both cases the defensive code worked exactly as designed, and that is precisely what hid
+the defect. **A fallback that fires every single time is not a fallback, it is the implementation** —
+and nothing in the code, the logs, or the tests distinguished those two cases.
+
+### The part that is genuinely humbling: the fix in the ticket was wrong
+
+`CC-070` diagnosed the problem and proposed a fix: chunk the queries into 2,000-block windows and
+aggregate. That is the standard workaround, it sounds right, and it was written by someone looking at
+the actual error message. Two things were wrong with it, both found only by measuring before building.
+
+**The limit was not 2,000.** The ticket quoted a live error saying `max block range 2000`. Probed
+against the same endpoint two weeks later: 10,000 is accepted, 50,000 is rejected, and the rejection
+message says *"eth_getLogs is limited to a 10,000 range"*. Whatever moved — a raised limit, or
+different limits behind a load balancer — a hardcoded `2000` would have been wrong immediately, and
+wrong in the silent direction: five times slower than necessary, with nothing failing to reveal it.
+
+**Chunking was necessary and nowhere near sufficient.** Base Sepolia was ~45.4M blocks deep. Chunking
+from genesis in 10,000-block windows is ~22,700 requests *per query*, and the reputation summary made
+four queries. Even bounded at the contract's deploy block — a number nobody had measured, and which
+took a binary search over `eth_getCode` to find — it is ~635 requests per query, ~2,540 per dashboard
+load, roughly thirteen minutes. **Implementing the ticket's fix as written would have replaced a fast,
+loud failure with a slow, quiet one**, and it would have looked like progress: the code would have been
+demonstrably "chunked", the tests would have passed, and the endpoint would have timed out instead of
+erroring.
+
+The actual fix had to change the *range*, not just the window size: read candidate task ids cheaply
+from the database, then read each task's authoritative state from the contract in a single multicall.
+Zero event queries on the request path. That was an architectural decision, not a workaround, and it
+was only visible once the arithmetic was on the table.
+
+**Lesson, two parts.**
+
+A **fallback needs a success-rate signal, not just a log line.** If the primary path can fail silently
+into a secondary, then "how often does the primary actually succeed" has to be observable — a counter, a
+`source` field in the response, anything. Otherwise the fallback becomes load-bearing and nobody notices
+for months. Note the fix retains a `source: "on-chain" | "database"` field for exactly this reason; that
+field existed before and was the one thing that could have surfaced this, if anything had looked at it.
+
+And **a backlog ticket's proposed fix is a hypothesis, not a plan.** These issue files are written to be
+handed to a fresh session that starts by reading them, which is their value and also the risk: a
+confidently-worded Fix section is very easy to implement without re-deriving whether it is adequate.
+The cheapest defence is to put the numbers on the table first — how many requests, over how many
+blocks, how long. That took about twenty minutes here and changed the entire design. It is worth
+noting that this repo's own convention says to "read the referenced code before proposing a plan";
+the missing half is to re-check the *proposed fix* against measurement, not only the problem statement.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.

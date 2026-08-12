@@ -12,6 +12,7 @@ import { createPublicClient, http, keccak256, toHex, parseAbiItem, type Address 
 import { baseSepolia, base } from "viem/chains";
 import { CARBON_ESCROW_ABI } from "./escrow-abi";
 import { getConfig } from "@/lib/config";
+import { log } from "@/lib/logging";
 
 // ── Lazy-initialized client ─────────────────────────────────────────────────
 
@@ -25,8 +26,109 @@ function getPublicClient() {
   const rpcUrl = config.NEXT_PUBLIC_BASE_NETWORK === "mainnet"
     ? (config.BASE_MAINNET_RPC_URL ?? chain.rpcUrls.default.http[0])
     : (config.BASE_SEPOLIA_RPC_URL ?? chain.rpcUrls.default.http[0]);
-  _publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
+  _publicClient = createPublicClient({
+    chain,
+    transport: http(rpcUrl),
+    // CC-070: collapses concurrent readContract calls into a single multicall3
+    // request. getOnChainReputationSummary reads getTask() once per task, so a
+    // worker with 20 tasks costs one HTTP round trip rather than 20.
+    batch: { multicall: true },
+  });
   return _publicClient;
+}
+
+/** Test seam — drops the memoised client so config changes take effect. */
+export function __resetEscrowClientForTests() {
+  _publicClient = null;
+}
+
+// ── Block-range bounds (CC-070) ─────────────────────────────────────────────
+
+/**
+ * Lower bound for every event query: the block the escrow was deployed at.
+ *
+ * Without this, queries start at genesis. Base Sepolia was ~45.4M blocks deep on
+ * 2026-08-11 against a deploy block of 39,032,720 — so genesis costs ~22,700
+ * chunked requests per query versus ~635 from the deploy block. Neither is fast,
+ * which is why the request-time reputation path no longer uses events at all; but
+ * the bound still matters for the recovery path that does.
+ */
+function getDefaultFromBlock(): bigint {
+  const configured = getConfig().ESCROW_DEPLOY_BLOCK;
+  if (configured === undefined) {
+    log("warn", "escrow_deploy_block_unset", {
+      hint: "Set ESCROW_DEPLOY_BLOCK — see scripts/audit/find-deploy-block.mjs. Falling back to genesis.",
+    });
+    return BigInt(0);
+  }
+  return BigInt(configured);
+}
+
+interface ChunkedLogsOptions {
+  address: Address;
+  // viem's parseAbiItem return type is structurally awkward to name here, and the
+  // client is already `any` for the same reason.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  event: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  args?: any;
+  fromBlock?: bigint;
+  toBlock?: bigint;
+  /** Walk newest-to-oldest. Pair with stopWhen to exit before scanning history. */
+  newestFirst?: boolean;
+  /** Called after each chunk; return true to stop early. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  stopWhen?: (accumulated: any[]) => boolean;
+}
+
+/**
+ * eth_getLogs, split into windows the RPC provider will actually accept.
+ *
+ * Providers cap the span of a single eth_getLogs call. The public Base Sepolia
+ * endpoint rejects anything over 10,000 blocks with "eth_getLogs is limited to a
+ * 10,000 range"; CC-070 was filed when that limit read 2,000, so the cap comes from
+ * RPC_MAX_BLOCK_RANGE rather than a constant.
+ *
+ * Results are returned in ascending block order regardless of scan direction.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getLogsChunked(opts: ChunkedLogsOptions): Promise<any[]> {
+  const pub = getPublicClient();
+  const span = BigInt(getConfig().RPC_MAX_BLOCK_RANGE);
+
+  const from = opts.fromBlock ?? getDefaultFromBlock();
+  const to = opts.toBlock ?? (await pub.getBlockNumber());
+  if (to < from) return [];
+
+  // Half-open windows of at most `span` blocks, inclusive of both ends.
+  const windows: Array<[bigint, bigint]> = [];
+  for (let start = from; start <= to; start += span) {
+    const end = start + span - BigInt(1);
+    windows.push([start, end > to ? to : end]);
+  }
+  if (opts.newestFirst) windows.reverse();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const collected: any[] = [];
+  for (const [fromBlock, toBlock] of windows) {
+    const logs = await pub.getLogs({
+      address: opts.address,
+      event: opts.event,
+      ...(opts.args ? { args: opts.args } : {}),
+      fromBlock,
+      toBlock,
+    });
+    collected.push(...logs);
+    if (opts.stopWhen?.(collected)) break;
+  }
+
+  collected.sort((a, b) => {
+    const ab = BigInt(a.blockNumber ?? 0);
+    const bb = BigInt(b.blockNumber ?? 0);
+    if (ab !== bb) return ab < bb ? -1 : 1;
+    return Number(a.logIndex ?? 0) - Number(b.logIndex ?? 0);
+  });
+  return collected;
 }
 
 function getEscrowAddr(): Address | undefined {
@@ -130,15 +232,24 @@ export async function getTaskResolvedOutcome(
   paymentRequestId: string,
 ): Promise<{ releasedToWorker: boolean; amount: bigint } | null> {
   const taskId = toTaskId(paymentRequestId);
-  const logs = await getPublicClient().getLogs({
+
+  // Scanned newest-first with an early exit. This is a recovery path for a
+  // resolution that just failed to persist, so the event is almost always in the
+  // most recent window — which turns the common case into one request instead of
+  // the ~635 a full ascending scan of the deployed range would cost. A task that
+  // was never resolved still costs the full scan, correctly returning null.
+  const logs = await getLogsChunked({
     address: getEscrowAddress(),
     event: parseAbiItem(
       "event TaskResolved(bytes32 indexed taskId, bool releasedToWorker, uint256 amount)"
     ),
     args: { taskId },
-    fromBlock: BigInt(0),
-    toBlock: "latest",
+    newestFirst: true,
+    stopWhen: (found) => found.length > 0,
   });
+
+  // taskId is indexed and a task can only be resolved once, so at most one log
+  // matches — but take the last in block order rather than assuming that.
   const last = logs.at(-1);
   if (!last) return null;
   return {
@@ -152,144 +263,165 @@ export async function getTaskResolvedOutcome(
 const USDC_DECIMALS = 6;
 
 /**
- * Fetch all TaskCreated events for a given worker address.
- * Returns the set of taskIds assigned to this worker.
+ * Every taskId ever assigned to a worker, discovered from TaskCreated events.
+ *
+ * **Do not call this on a request path.** It scans the full deployed block range in
+ * RPC_MAX_BLOCK_RANGE windows — about 635 requests against Base Sepolia as of
+ * 2026-08-11, and it grows with chain length forever. It exists as an offline
+ * completeness check: it is the only way to find a task that exists on-chain but is
+ * absent from the `tasks` table, which is the one blind spot of the DB-discovery
+ * approach getOnChainReputationSummary now uses.
+ *
+ * Use it from a script or an audit, and compare its output against the DB.
  */
-async function getTaskIdsForWorker(
+export async function getTaskIdsForWorkerFromEvents(
   worker: Address,
-  fromBlock: bigint = BigInt(0),
+  fromBlock?: bigint,
 ): Promise<`0x${string}`[]> {
-  const logs = await getPublicClient().getLogs({
+  const logs = await getLogsChunked({
     address: getEscrowAddress(),
     event: parseAbiItem(
       "event TaskCreated(bytes32 indexed taskId, address indexed agent, address indexed worker, uint256 amount, uint256 deadline)"
     ),
     args: { worker },
     fromBlock,
-    toBlock: "latest",
   });
   return logs.map((l: { args: { taskId: `0x${string}` } }) => l.args.taskId);
 }
 
-/**
- * Query on-chain escrow events to build a reputation summary for a worker.
- * No DB dependency — purely reads contract event logs.
- */
-export async function getOnChainReputationSummary(
-  wallet: string,
-  fromBlock: bigint = BigInt(0),
-): Promise<{
+export interface OnChainReputationSummary {
   total_tasks: number;
   completed: number;
+  /** Disputes raised but not yet arbitrated (on-chain state `Disputed`). */
   disputed: number;
+  /** Disputes arbitrated by the owner (on-chain state `Resolved`). */
+  resolved: number;
   expired: number;
   funded: number;
   total_earned_usdc: number;
-  recentCompletions: number;
-  midCompletions: number;
-}> {
+  /**
+   * payment_request_ids the chain confirms as `Completed`. The caller pairs these
+   * with its own timestamps for recency scoring — see the note below on why the
+   * timestamps do not come from here.
+   */
+  completedPaymentRequestIds: string[];
+  /**
+   * ids that were offered for verification but which the chain does not corroborate:
+   * no task at that id, or a task whose `worker` is someone else. These are excluded
+   * from every count above. A non-empty list means the DB and the chain disagree.
+   */
+  unverified: string[];
+}
+
+/**
+ * Build a reputation summary for a worker from authoritative on-chain state.
+ *
+ * **Why this takes ids instead of discovering them (CC-070).** It used to scan
+ * TaskCreated events to find a worker's tasks, with `fromBlock` defaulting to
+ * genesis. Every such query failed against the block-range cap, so `/api/reputation`
+ * silently fell back to the DB for the entire life of the project. Chunking alone
+ * does not rescue it: Base Sepolia is ~6.35M blocks past the escrow's deploy block,
+ * which is ~635 requests per query and four queries per summary.
+ *
+ * So discovery and authority are now separated. The caller supplies candidate
+ * `payment_request_id`s — cheaply, from the `tasks` table — and this function reads
+ * the real state of each one from the contract with `getTask()`, batched into a single
+ * multicall. **Every fact that matters for money still comes from the chain:** state,
+ * amount, and the worker address, which is re-checked against `wallet` so a DB row
+ * cannot attribute someone else's task. The DB only proposes which ids to look at.
+ * That keeps the "DB is not the authority on money" rule in CLAUDE.md intact.
+ *
+ * The blind spot, stated plainly: a task that exists on-chain but not in the `tasks`
+ * table is invisible here. `getTaskIdsForWorkerFromEvents` is the offline check for
+ * that, and CC-081 Defect 3 is the drift it guards against.
+ *
+ * Two deliberate gaps:
+ *  - **Recency has no on-chain timestamp.** `getTask()` returns no block or time, and
+ *    fetching a block per completion would reintroduce per-task round trips. The
+ *    caller scores recency from its own timestamps, over the set of completions the
+ *    chain confirms. Soft ordering from the DB, hard facts from the chain.
+ *  - **`Resolved` tasks are excluded from earnings.** The state alone does not say
+ *    which way the owner arbitrated; only the `TaskResolved` event does, and that is
+ *    a per-task event lookup. They are counted separately rather than guessed at.
+ */
+export async function getOnChainReputationSummary(
+  wallet: string,
+  paymentRequestIds: string[],
+): Promise<OnChainReputationSummary> {
+  const empty: OnChainReputationSummary = {
+    total_tasks: 0,
+    completed: 0,
+    disputed: 0,
+    resolved: 0,
+    expired: 0,
+    funded: 0,
+    total_earned_usdc: 0,
+    completedPaymentRequestIds: [],
+    unverified: [],
+  };
+  if (paymentRequestIds.length === 0) return empty;
+
   const escrow = getEscrowAddress();
   const pub = getPublicClient();
-  const workerAddr = wallet as Address;
+  const workerLower = wallet.toLowerCase();
 
-  // Step 1: Get all tasks assigned to this worker
-  const taskIds = await getTaskIdsForWorker(workerAddr, fromBlock);
-  if (taskIds.length === 0) {
-    return {
-      total_tasks: 0,
-      completed: 0,
-      disputed: 0,
-      expired: 0,
-      funded: 0,
-      total_earned_usdc: 0,
-      recentCompletions: 0,
-      midCompletions: 0,
-    };
-  }
-
-  // Step 2: Fetch completion, dispute, and expiry events in parallel
-  const [completedLogs, disputedLogs, expiredLogs] = await Promise.all([
-    pub.getLogs({
-      address: escrow,
-      event: parseAbiItem(
-        "event TaskCompleted(bytes32 indexed taskId, uint256 amount)"
-      ),
-      fromBlock,
-      toBlock: "latest",
-    }),
-    pub.getLogs({
-      address: escrow,
-      event: parseAbiItem(
-        "event TaskDisputed(bytes32 indexed taskId, address by)"
-      ),
-      fromBlock,
-      toBlock: "latest",
-    }),
-    pub.getLogs({
-      address: escrow,
-      event: parseAbiItem(
-        "event TaskExpired(bytes32 indexed taskId, uint256 refunded)"
-      ),
-      fromBlock,
-      toBlock: "latest",
-    }),
-  ]);
-
-  // Build sets of taskIds that belong to this worker
-  const workerTaskSet = new Set(taskIds.map((id) => id.toLowerCase()));
-
-  // Filter events to only this worker's tasks
-  const completions = completedLogs.filter(
-    (l: { args: { taskId: string } }) => workerTaskSet.has(l.args.taskId.toLowerCase()),
-  );
-  const disputes = disputedLogs.filter(
-    (l: { args: { taskId: string } }) => workerTaskSet.has(l.args.taskId.toLowerCase()),
-  );
-  const expiries = expiredLogs.filter(
-    (l: { args: { taskId: string } }) => workerTaskSet.has(l.args.taskId.toLowerCase()),
+  // One multicall3 round trip — the client is configured with batch.multicall.
+  const states = await Promise.all(
+    paymentRequestIds.map((id) =>
+      pub.readContract({
+        address: escrow,
+        abi: CARBON_ESCROW_ABI,
+        functionName: "getTask",
+        args: [toTaskId(id)],
+      }),
+    ),
   );
 
-  // Step 3: Calculate earned USDC and recency from block timestamps
-  const now = Math.floor(Date.now() / 1000);
-  const thirtyDays = 30 * 24 * 60 * 60;
-  const ninetyDays = 90 * 24 * 60 * 60;
+  const summary: OnChainReputationSummary = { ...empty };
 
-  let totalEarnedUsdc = 0;
-  let recentCompletions = 0;
-  let midCompletions = 0;
+  for (let i = 0; i < paymentRequestIds.length; i++) {
+    const id = paymentRequestIds[i];
+    const task = states[i];
+    const stateRaw = Number(task.state);
 
-  for (const log of completions) {
-    const amount = Number(log.args.amount) / 10 ** USDC_DECIMALS;
-    totalEarnedUsdc += amount;
+    // state None means no such task on-chain; a worker mismatch means the DB row
+    // claims a task that on-chain belongs to somebody else. Neither is countable.
+    if (stateRaw === 0 || String(task.worker).toLowerCase() !== workerLower) {
+      summary.unverified.push(id);
+      continue;
+    }
 
-    // Get block timestamp for recency scoring
-    if (log.blockNumber) {
-      try {
-        const block = await pub.getBlock({ blockNumber: log.blockNumber });
-        const age = now - Number(block.timestamp);
-        if (age <= thirtyDays) recentCompletions++;
-        else if (age <= ninetyDays) midCompletions++;
-      } catch {
-        // If we can't get timestamp, don't count for recency
-      }
+    summary.total_tasks++;
+
+    switch (TaskStateEnum[stateRaw as keyof typeof TaskStateEnum]) {
+      case "Completed":
+        summary.completed++;
+        summary.total_earned_usdc += Number(task.amount) / 10 ** USDC_DECIMALS;
+        summary.completedPaymentRequestIds.push(id);
+        break;
+      case "Disputed":
+        summary.disputed++;
+        break;
+      case "Resolved":
+        summary.resolved++;
+        break;
+      case "Expired":
+        summary.expired++;
+        break;
+      case "Funded":
+        summary.funded++;
+        break;
     }
   }
 
-  const completed = completions.length;
-  const disputed = disputes.length;
-  const expired = expiries.length;
-  const funded = taskIds.length - completed - disputed - expired;
+  if (summary.unverified.length > 0) {
+    log("warn", "reputation_onchain_unverified_tasks", {
+      count: summary.unverified.length,
+      offered: paymentRequestIds.length,
+    });
+  }
 
-  return {
-    total_tasks: taskIds.length,
-    completed,
-    disputed,
-    expired,
-    funded: Math.max(0, funded),
-    total_earned_usdc: totalEarnedUsdc,
-    recentCompletions,
-    midCompletions,
-  };
+  return summary;
 }
 
 /**
