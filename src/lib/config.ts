@@ -64,8 +64,12 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60_000), // 1 min
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(60),
 
-  // ── /learn + Stables affiliate (optional — set when affiliate approved) ──
-  NEXT_PUBLIC_STABLES_AFFILIATE_URL: z.string().optional(),
+  // NEXT_PUBLIC_STABLES_AFFILIATE_URL was removed by CC-029. Nothing ever read it,
+  // the affiliate relationship it anticipated never existed, and the provider was
+  // winding down. There are deliberately no affiliate or referral vars here — if a
+  // commercial relationship is ever added, it gets disclosed in the /learn copy
+  // rather than represented only by a config key. Remove it from the Vercel
+  // environment too.
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

@@ -41,7 +41,7 @@ export const LEARN_MODULES: LearnModule[] = [
     moduleNumber: 4,
     readTime: "3 min",
     description:
-      "Turn USDC into spendable AUD in minutes with a Visa card. Tap and go at any terminal.",
+      "Getting AUD out of USDC, without the week-long wait. Plus what to check before you trust anyone with it.",
     filename: "module-4-spending-your-usdc-in-australia.md",
   },
   {
