@@ -151,6 +151,15 @@ Before touching anything in the money path, run
 `USDC.balanceOf(escrow) == totalLocked` and is the only way to detect stranded funds. See CC-081 and
 CC-037.
 
+**`ESCROW_DEPLOY_BLOCK` must be set or every event query silently gets ~36× slower.** Added by
+CC-070. It bounds `getLogs` queries below, instead of starting at genesis. Unset, queries still return
+correct results but scan from block 0 and log `escrow_deploy_block_unset` — ~22,700 chunked requests
+per query against Base Sepolia rather than ~635. Current Sepolia value is `39032720`; re-derive after
+the mainnet deploy with `node --env-file=.env.local scripts/audit/find-deploy-block.mjs`. It is not a
+`NEXT_PUBLIC_` var, so it takes effect at runtime without a rebuild. `RPC_MAX_BLOCK_RANGE` (default
+`10000`) is the provider's per-call span cap — a provider property, not a protocol one, and it has
+already moved once: CC-070 was filed against a limit of 2,000.
+
 **The agent both raises and resolves its own disputes; the worker can do neither.** The *contract* is
 fine — `resolveDispute` is `onlyOwner` and can only pay `task.worker` or `task.agent`, both fixed
 on-chain at funding, so no arbitrary destination is reachable by anyone (this is the load-bearing fact

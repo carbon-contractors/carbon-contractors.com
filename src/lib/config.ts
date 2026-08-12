@@ -21,6 +21,23 @@ const envSchema = z.object({
   BASE_SEPOLIA_RPC_URL: z.string().optional(),
   BASE_MAINNET_RPC_URL: z.string().optional(),
 
+  // ── Event-query bounds (CC-070) ───────────────────────────────────────────
+  // The block CarbonEscrow was deployed at. Every getLogs query starts here
+  // instead of genesis: at ~45M blocks deep, scanning from 0 in 10k windows is
+  // ~22,700 requests per query, versus ~635 from the deploy block. Derive it with
+  //   node --env-file=.env.local scripts/audit/find-deploy-block.mjs
+  // and re-derive it after the mainnet deploy (CC-034). If unset, queries fall
+  // back to genesis and log a warning — correct, but far slower than necessary.
+  ESCROW_DEPLOY_BLOCK: z.coerce.number().int().nonnegative().optional(),
+
+  // Maximum block span a single eth_getLogs call may cover. This is a property of
+  // the RPC provider, not the protocol. Measured 2026-08-11 on the public
+  // sepolia.base.org endpoint: 10,000 accepted, 50,000 rejected with
+  // "eth_getLogs is limited to a 10,000 range". CC-070 was originally filed
+  // against a 2,000 limit, so this moves — hence config, not a constant. Paid
+  // providers generally allow much larger spans; raise this when one is in use.
+  RPC_MAX_BLOCK_RANGE: z.coerce.number().int().positive().default(10_000),
+
   // ── USDC contract address (required — differs per network) ────────────────
   NEXT_PUBLIC_USDC_ADDRESS: z.string().min(1),
 
