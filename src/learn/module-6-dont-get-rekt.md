@@ -49,7 +49,7 @@ Your real operational identity. Clean email accounts with **no phone number atta
 
 - **Purpose:** Your day-to-day working identity for trusted platforms.
 - **Key rule:** No SMS recovery. Anywhere. On anything.
-- **Use for:** Carbon Contractors, your Stables account, your primary crypto accounts.
+- **Use for:** Carbon Contractors, your exchange account, your primary crypto accounts.
 
 ### Tier 3 — The Nuclear Layer (Recovery)
 

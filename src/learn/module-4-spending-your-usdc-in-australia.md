@@ -8,55 +8,47 @@
 
 You did the work. The USDC hit your wallet. Great — but you can't tap your Coinbase Smart Wallet at Coles. Yet.
 
-This module covers how to turn USDC into something you can spend at any terminal in Australia, today.
+This module covers how to turn USDC into AUD you can actually spend, and it's deliberately boring about it. Getting paid in crypto is the interesting part. Cashing out should be dull, cheap and predictable.
 
-## The old way: painful
+## The honest position
 
-Here's what spending crypto used to look like in Australia:
+There is no magic card we're going to tell you to sign up for. Getting AUD out of USDC means going through a regulated exchange, and that means a bank account and an identity check. That's the trade-off, and pretending otherwise would be doing you a disservice.
 
-1. Transfer USDC from your wallet to an exchange (Coinbase, Swyftx, etc.)
-2. Convert USDC to AUD on the exchange
+The good news is the boring path got a lot faster than it used to be.
+
+## The route we'd take: Coinbase Australia
+
+1. Transfer USDC from your wallet to your Coinbase account
+2. Sell USDC for AUD
 3. Withdraw AUD to your bank account
-4. Wait 1–3 business days for the bank transfer to clear
-5. Spend from your bank account like normal
 
-**Time:** 2–5 days.
-**Fees:** Exchange trading fee + withdrawal fee + FX spread.
-**Friction:** High. Multiple logins, multiple platforms, multiple waits.
+Steps 1 and 2 take minutes. Step 3 is usually near-instant in Australia thanks to PayID and Osko, rather than the 1–3 business days a bank transfer used to mean.
 
-This is why most people just left their crypto sitting there. Spending it was a chore.
+**Why Coinbase specifically?** Two reasons, and only one of them is about convenience.
 
-## The Stables way: done in minutes
+- **It's the same rails the rest of this stack already runs on.** Your wallet is a Coinbase Smart Wallet, the escrow is on Base, and Base is built by Coinbase. Fewer moving parts, fewer addresses to get wrong.
+- **Regulatory standing.** Coinbase Australia was granted an Australian Financial Services Licence directly by ASIC in April 2026 — the first crypto exchange to receive one that way. That's a meaningful signal about the entity you're handing money to.
 
-[Stables](https://stables.money) is an Australian company that gives you a **Visa debit card funded directly by USDC.** No exchange. No conversion queue. No bank transfer wait.
+Be precise about what that second point means, though: an AFSL says something about the *company's* regulatory obligations. It is not a guarantee about any particular product, fee, or feature, and it is not protection against you making a mistake with an address.
 
-Here's the new flow:
+## One thing that trips people up
 
-1. USDC arrives in your wallet from a completed job
-2. Transfer USDC to your Stables account
-3. Tap your Stables Visa card at any terminal — Woolies, servo, pub, wherever
+**USDC tracks the US dollar, not the Australian dollar.** One USDC is about one USD. What that's worth in AUD moves with the exchange rate — so if you're quoting an hourly rate in USDC, you're effectively quoting in USD. Check the rate before you set your rate.
 
-**Time:** Minutes.
-**Fees:** Stables handles the USDC→AUD conversion at the point of sale.
-**Friction:** Basically none. It's a Visa card. You already know how to use a Visa card.
+## Do your own research
 
-The mental model is simple: **USDC in, AUD out, tap to pay.**
+This is the part we'd rather over-emphasise than under-emphasise.
 
-## Setting up Stables: step by step
+**We are not financial advisers, and this module is not financial advice.** We don't have a commercial relationship with Coinbase or with anyone else mentioned here. We're not paid to send you anywhere, and if that ever changes we'll say so on this page in plain language.
 
-1. **Go to [stables.money](https://stables.money)** and create an account.
-2. **Complete KYC** — standard Australian identity verification. Drivers licence or passport. Takes a few minutes.
-3. **Order your card** — physical Visa card shipped to your door, plus a virtual card available immediately.
-4. **Link your wallet** — connect your Coinbase Smart Wallet or transfer USDC to your Stables deposit address.
-5. **Load and spend** — transfer USDC to your Stables balance, and the Visa card is live.
+Before you move money anywhere:
 
-That's it. Next time you get paid through Carbon Contractors, you're a few taps away from buying groceries with it.
+- **Check the fees yourself, today.** Spreads, conversion fees and withdrawal fees change. The number you find on the provider's own pricing page beats anything we could write here.
+- **Check the provider still operates the way you expect.** This page can go stale. An earlier version of this module recommended a card provider that was winding down — which is exactly why it now says less and asks you to verify more.
+- **Understand the tax position.** Converting crypto to AUD is generally a disposal for Australian tax purposes, and being paid in crypto is generally income. The ATO publishes guidance on both. If the amounts matter to you, talk to an accountant rather than to us.
+- **Never send funds to an address you haven't verified.** No provider will ever ask you for your seed phrase or passkey. See Module 6.
 
-*When you sign up through our link, you're supporting Carbon Contractors directly — we're a Stables affiliate partner.*
-
-## What about self-custody options?
-
-If keeping funds in a third-party account isn't your style, [Vield](https://vield.io) offers a self-custody alternative for spending crypto in Australia. Worth a look if you want to maintain full wallet control right up to the point of purchase.
+Other exchanges operate in Australia, and self-custody spending options exist too. We're not going to name providers we haven't verified — do your own research and pick what suits you.
 
 ## The bigger picture
 
@@ -65,17 +57,17 @@ This is why the entire Carbon Contractors stack exists:
 - **Module 1:** You already use digital money — USDC is just a better version.
 - **Module 2:** Your wallet is yours — self-custody without the headaches.
 - **Module 3:** AI agents pay you in USDC — instantly, with escrow guarantees.
-- **Module 4 (you are here):** Spend that USDC anywhere Visa is accepted.
+- **Module 4 (you are here):** Turn that USDC into AUD without a week of waiting.
 
-The loop is closed. Work comes in, money comes in, money goes out at the shops. No banks in the middle taking days and fees to move numbers between databases.
+The loop is closed. Work comes in, money comes in, money goes out at the shops.
 
 ## What you need to know right now
 
 Three things:
 
-1. **Stables gives you a Visa card funded by USDC.** That's the fastest path from earning to spending in Australia.
-2. **KYC is required.** This is a regulated financial product — that's a good thing.
-3. **Your next step is Module 5** — or go get your Stables card now and come back.
+1. **Exchange, sell, withdraw.** USDC to your exchange, sell for AUD, withdraw to your bank. Coinbase Australia is where we'd start, for the reasons above.
+2. **Identity verification is required.** These are regulated financial products. That's a feature, not an obstacle.
+3. **Verify everything yourself.** Fees, providers and tax rules change. This page is a starting point, not advice.
 
 ---
 
