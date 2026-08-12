@@ -102,23 +102,36 @@ the string `false`. See CC-014.
 **`/api/*` is not behind the coming-soon gate.** `middleware.ts` bypasses it, so every API route
 is publicly reachable right now even though the site looks dark. Treat API routes as live.
 
-**The local signer IS the contract owner — the raw key, not the HSM key.** This entry previously
-said the opposite, as a guess; it was measured on 2026-07-30 and the guess was backwards.
-`CarbonEscrow.owner()` and `ReputationStake.owner()` are both
-`0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b`, which is the address of `DEPLOYER_PRIVATE_KEY` in
-`.env.local`. The HSM key `0xa8931097540e69B474013D294d0bA6A2cC853e4b` was generated and funded but
-never received ownership — `transferOwnership()` was never called.
+**The HSM key owns the contracts. This entry has now been wrong in both directions — do not guess
+it a third time.** `CarbonEscrow.owner()` and `ReputationStake.owner()` are
+`0xa8931097540e69B474013D294d0bA6A2cC853e4b`, the KMS/HSM address. CC-059 called
+`transferOwnership()` on 2026-07-30 and it was confirmed by an independent Basescan read of tx
+`0x08cd2e3…`, which also shows the HSM address as the sender of a real 1 USDC dispute resolution —
+so the KMS signer demonstrably works against the live contracts.
 
-So local escrow writes work, and the exposure runs the other way: if Vercel has `GCP_KMS_KEY_PATH`
-set, *production* signs as the HSM address, which is not the owner, so `resolveDisputeOnChain`
-reverts in production. `docs/Security-Trust-Disclosure.md` also claimed publicly that the HSM key
-owns the escrow. Both are CC-059. Do not re-derive this by guessing — run
-`node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`; it exits non-zero while this
-is wrong.
+The history, because this keeps flipping: the entry first guessed the HSM key was the owner; the
+2026-07-30 measurement found the raw `DEPLOYER_PRIVATE_KEY` address
+`0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b` was, and the entry was rewritten to say so; then
+CC-059 actually performed the transfer, which made that rewrite stale within the same session. The
+raw key is no longer the owner.
 
-**`completeTaskOnChain` cannot work, for an unrelated reason.** `CarbonEscrow.completeTask` requires
-`msg.sender == task.agent` (`contracts/CarbonEscrow.sol:128`, confirmed present in the deployed
-bytecode), but `signer.ts:102` calls it as the platform signer. No key fixes that. See CC-037.
+Consequence: production (KMS) signs as the owner and `resolveDisputeOnChain` works there. A **local**
+run using `DEPLOYER_PRIVATE_KEY` is now the one that reverts on owner-only functions, which is the
+opposite of what it was. `docs/Security-Trust-Disclosure.md`'s public claim that the HSM key owns the
+escrow is now true. Never re-derive this by reading — run
+`node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`.
+
+**`completeTaskOnChain` cannot work, and it is a design contradiction rather than a key problem.**
+`CarbonEscrow.completeTask` requires `msg.sender == task.agent`
+(`contracts/CarbonEscrow.sol:128`, confirmed present in the deployed bytecode), and
+`createTask` sets `agent: msg.sender` (`:107`). Nothing server-side calls the contract's
+`createTask` — the agent funds the escrow from its own wallet, so `task.agent` is the *agent's*
+address, while `signer.ts:102` calls `completeTask` as the platform signer. So
+`confirm_task_completion` (`src/lib/mcp/server.ts:391`) reverts with `"only agent"` on every task,
+and always has: **the core hire→pay loop has never worked.** It fails safely — the handler returns
+`isError` without flipping the DB to `completed`, so no worker was ever falsely marked paid. Aaron's
+ruling is that agent-signed completion is the intended design, so the fix is app-side with no
+redeploy. See CC-080 (the fix) and CC-037 (the verification).
 
 **`tasks_public` bypasses RLS on purpose — do not "fix" it.** `tasks` has RLS enabled with zero
 policies, so anon is denied. Anon reads the `tasks_public` view instead, which excludes
@@ -208,7 +221,7 @@ supabase/migrations/   001-011, applied in order. Add new ones, never edit old o
 
 ```bash
 npm run dev            # Next dev server
-npm test               # Vitest (52 tests)
+npm test               # Vitest (116 tests — and see CC-060: not hermetic, so it is flaky)
 npm run typecheck      # tsc --noEmit
 npm run lint
 npm run build
