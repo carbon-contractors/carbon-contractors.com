@@ -133,6 +133,33 @@ and always has: **the core hire→pay loop has never worked.** It fails safely �
 ruling is that agent-signed completion is the intended design, so the fix is app-side with no
 redeploy. See CC-080 (the fix) and CC-037 (the verification).
 
+**Funding a task through `/api/fund-task` strands the USDC permanently. Do not run the funding path
+until CC-081 is fixed.** The route is `withX402(handler, getPlatformWallet(), …)` and
+`getPlatformWallet()` returns `NEXT_PUBLIC_ESCROW_CONTRACT`, so an x402 settlement is a **bare ERC-20
+transfer straight to the escrow contract** — `createTask` is never called. No task struct is written,
+`totalLocked` is not incremented, and `CarbonEscrow` has no `receive`, `fallback`, sweep, rescue or
+owner-withdraw. The money is unrecoverable by anyone, owner included. The handler then flips the DB to
+`active`, so the platform reports the task as funded while no on-chain task exists.
+
+Measured 2026-08-11: balance and `totalLocked` are both 0, so nothing is stranded yet — the path has
+simply never been run. **First real use loses the money.** Note `src/lib/payments/x402.ts` documents
+both designs and ships the wrong one: its header says agent-side `approve` + `createTask` (correct),
+its returned `instructions` say to auto-pay `/api/fund-task` (loses funds).
+
+Before touching anything in the money path, run
+`node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs` — it checks
+`USDC.balanceOf(escrow) == totalLocked` and is the only way to detect stranded funds. See CC-081 and
+CC-037.
+
+**The agent both raises and resolves its own disputes; the worker can do neither.** The *contract* is
+fine — `resolveDispute` is `onlyOwner` and can only pay `task.worker` or `task.agent`, both fixed
+on-chain at funding, so no arbitrary destination is reachable by anyone (this is the load-bearing fact
+for CC-051, verified). But `resolve_dispute` **and** `dispute_task` in `src/lib/mcp/server.ts` both
+authorise `task.from_agent_wallet == context.callerWallet`, so the agent can dispute a delivered task
+and refund itself, and the worker has no dispute right at all even though the contract grants one. The
+owner key only rubber-stamps. Design deliberately undecided — CC-081 Defect 2 holds the options. Do not
+"fix" this by guessing.
+
 **`tasks_public` bypasses RLS on purpose — do not "fix" it.** `tasks` has RLS enabled with zero
 policies, so anon is denied. Anon reads the `tasks_public` view instead, which excludes
 `task_description` by an explicit column list (migration 011). The view has **no**
