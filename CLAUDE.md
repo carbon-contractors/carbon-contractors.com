@@ -5,6 +5,23 @@ not the reasoning itself — the reasoning lives in `docs/adr/`, `docs/backlog/`
 `docs/Lessons-Learned.md`, where it can be read on demand. Keep entries here short; long prose here
 goes stale silently, and has (see §*Where truth lives*).
 
+## Who owns what
+
+**Claude is Lead Dev. Aaron is Product Manager.**
+
+So product decisions — launch sequencing, priorities, what gets claimed publicly, what is out of
+scope — are Aaron's. They appear in this file because the Lead Dev needs to know them, not because
+the Lead Dev owns them. Where one is recorded here or in an ADR, implement it; don't re-litigate it
+or quietly "fix" it (`CC-081` Defect 2 and `CC-075` are the worked example of what re-deriving a
+settled decision costs). Raise a concern once, then build.
+
+Engineering calls — architecture, mechanism, sequencing of the work itself — are Claude's to propose
+and Aaron's to veto.
+
+**We are building and discovering this together, so some drift in this file is expected.** It is not
+a spec handed down; it is a shared working note that trails slightly behind what we have just learned.
+If you find something stale, correct it and carry on — that is maintenance, not a finding.
+
 ## What this is
 
 Carbon Contractors — a Human-as-a-Service marketplace on Base. AI agents discover human workers over
