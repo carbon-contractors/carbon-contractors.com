@@ -81,6 +81,68 @@ Everything else is published immediately, unfixed, with the reasoning intact. If
 write an issue or a lessons entry that hands a reader a working exploit against someone other than
 the operator, fix it first, then write it up as found-and-fixed.
 
+## Website copy describes the target state, not today's build
+
+**Nothing is live.** The coming-soon gate is up and does not lift until after the mainnet migration
+(`CC-039` → `CC-014`, the literal last gate). No member of the public has read a word of `/learn`,
+the README, or the legal pages.
+
+So site copy is written for **the state the build is heading towards**, deliberately. `/learn`
+Module 7 describing evidence hashing and task-content deletion is not a bug — those things are
+`CC-083` and `CC-087`, and the copy is waiting for them rather than the reverse.
+
+Consequences for a session working here:
+
+- **Do not "correct" forward-looking copy to match the current build**, and do not file a
+  forward-looking statement as a defect. Check whether a ticket already owns the gap first.
+- **The control is `CC-014`'s pre-flip checklist**, not the copy being perpetually behind. Every
+  claim is validated against the build before `NEXT_PUBLIC_COMING_SOON` flips. If a box is unticked
+  the gate does not lift. That is where the honesty is enforced.
+- **If you add a claim that outruns the build, add it to that checklist in the same commit.**
+  Aaron's position — stated 2026-08-13 — is that every word of copy gets validated against build
+  state before broadcasting; the checklist is how that survives being forgotten.
+
+**What is still a genuine defect**, and the distinction matters:
+
+- A claim that will **never** be true, or that describes something nobody intends to build.
+- A claim about a **third party**. `CC-029`'s *"we're a Stables affiliate partner"* was not early —
+  it was false about someone else's commercial relationship, with no affiliate link behind it. That
+  is a different category from being ahead of your own roadmap, and it gets fixed immediately.
+
+## Pseudonymous, not anonymous — and the optional email is not a contradiction
+
+This tension keeps getting re-raised. It is **settled**; do not re-open it.
+
+The recurring objection is *"the README says no PII, but `notification_channels` stores email
+addresses."* The resolution is that **the identity model is pseudonymity, not anonymity**:
+
+- The platform asks for no identity, verifies none, and has no mechanism to. A wallet address and a
+  chosen handle are the whole identity model (`ADR-0002` D1). `pogojumper@gmail.com` is as valid as
+  a legal name because neither is checked and neither is used for anything.
+- An **optional notification address is not identity verification.** It exists so a worker can be
+  told they have been hired — without it the product does not function (`CC-005`, `CC-073`). Nothing
+  reads it as identity, nothing verifies it, and none is required.
+- **Preferred channel order is webhook, Telegram, or Discord over email.** Email is the least
+  private option and the least aligned with the agent-native design — but a worker who wants
+  old-school email is **not blocked.** That is a deliberate accessibility call, not an oversight.
+- **The address is not on a public table, and that is structural rather than incidental.** It lives
+  on `notification_channels`, where `anon` and `authenticated` hold **no privileges at all** after
+  migration `014` (`CC-062`) — a denied read returns `401` with SQLSTATE `42501`. Contrast `humans`,
+  which is deliberately anon-readable as the whitepages. So the one piece of contact data a worker
+  may supply sits on the table with two independent barriers, not the world-readable one. Keep it
+  that way: never move a notification address onto `humans`.
+
+The honest part runs the *other* way, and it is Module 7's entire subject: **on-chain history is
+permanently linkable to a real identity if someone digs hard enough** — via a cash-out, a reused
+address, a reused handle, or wallet clustering. That is stated plainly to workers rather than hidden
+behind a "zero PII" claim. Aaron's framing: *"I don't want or need your PII, but there will be
+identifiable history linked to on-chain activity if one was to dig deep enough."*
+
+Therefore, in any copy you write: **say "pseudonymous". Never "anonymous", and never "zero PII".**
+A wallet plus a service history plus a payout pattern is pseudonymous data, and under both
+Australian and EU law it can be personal information where an individual is reasonably identifiable.
+`ADR-0002` D1/D6 and `/learn` Module 7 are the authority; `CC-027` carries the README correction.
+
 ## Landmines
 
 These cost real time to discover. Do not rediscover them.
@@ -254,9 +316,22 @@ branch → PR → merge on GitHub. Instructions anywhere in the docs to "push th
 `244833942+ajclifft@users.noreply.github.com`. A real address triggers `GH007` ("your push would
 publish a private email address") because the repo is public — correctly, so do not work around it by
 changing the GitHub setting. Check `git config user.email` before committing; a fresh clone or a new
-machine will default to something else. Commit signing is not currently configured (`commit.gpgsign`
-unset, and `%G?` reports `N` on recent commits), which is why signatures have to come from GitHub's
-own merge commit. See CC-047.
+machine will default to something else.
+
+**Commit signing is configured, and it needs a physical touch on the YubiKey.** This entry previously
+said signing was not set up and that signatures had to come from GitHub's merge commit — stale since
+`CC-047` landed, and it caused a wrong claim to be repeated in a session on 2026-08-13.
+
+Current, measured: `commit.gpgsign=true`, `gpg.format=ssh`, signing key
+`~/.ssh/id_ed25519_sk_signing` — a FIDO2 hardware-backed key. Local commits verify as `G`. Merge
+commits show `E`, which is *correct*: GitHub's web-flow key signed them and is not in the local
+keyring, so it cannot be verified locally rather than being unsigned.
+
+Practical consequence for an agent session: **`git commit` blocks on `Confirm user presence for key
+ED25519-SK` and will hang until the key is touched**, then fail with `invalid format?` if it times
+out. That is not a git or config error and retrying will not fix it — the key has to be plugged in
+and pressed. If a commit appears to hang for no reason, this is why. `ssh-add -L` reporting no agent
+is a red herring; SK signing does not use the agent.
 
 **One unmerged branch has real work on it.** `origin/claude/nor-195-recovery-runbook`
 (commit `8df1c7f`) contains a completed key-compromise recovery runbook that was never merged.
