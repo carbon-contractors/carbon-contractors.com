@@ -1,6 +1,6 @@
 # You Already Use Digital Money
 
-**Module 1 of 6 · 3 min read**
+**Module 1 of 7 · 3 min read**
 
 ---
 

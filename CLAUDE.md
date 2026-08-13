@@ -29,6 +29,17 @@ deliberately temporary — delete it once its queue is cleared, rather than lett
 second, contradictory source of truth.
 
 
+**Design decisions live in `docs/adr/`, not in the backlog.** Three ADRs were accepted 2026-08-13 and
+they restructure the money path, the privacy posture and the monitoring scope. `docs/adr/README.md`
+explains the convention and the reading order — **ADR-0001 first, the other two depend on it.** Read
+them before touching escrow, task content, or anything that publishes a claim about what the platform
+stores. `ADR-0001` also carries an **Amendment 1** that restates several of its own decisions
+(verdicts became off-chain EIP-712 signatures; settlement became worker-claimed pull-payment) — read
+the amendment, or you will implement the superseded version.
+
+An issue that gets stuck on a design question gets an ADR; the issue then records the consequence and
+stays open until the work is done. `CC-081` Defect 2 and `CC-075` are the worked example.
+
 The backlog is the source of truth for what needs doing:
 
 ```bash
@@ -160,14 +171,25 @@ the mainnet deploy with `node --env-file=.env.local scripts/audit/find-deploy-bl
 `10000`) is the provider's per-call span cap — a provider property, not a protocol one, and it has
 already moved once: CC-070 was filed against a limit of 2,000.
 
-**The agent both raises and resolves its own disputes; the worker can do neither.** The *contract* is
-fine — `resolveDispute` is `onlyOwner` and can only pay `task.worker` or `task.agent`, both fixed
-on-chain at funding, so no arbitrary destination is reachable by anyone (this is the load-bearing fact
-for CC-051, verified). But `resolve_dispute` **and** `dispute_task` in `src/lib/mcp/server.ts` both
-authorise `task.from_agent_wallet == context.callerWallet`, so the agent can dispute a delivered task
-and refund itself, and the worker has no dispute right at all even though the contract grants one. The
-owner key only rubber-stamps. Design deliberately undecided — CC-081 Defect 2 holds the options. Do not
-"fix" this by guessing.
+**The agent both raises and resolves its own disputes; the worker can do neither — and the fix is
+decided, so do not re-derive it.** The *contract* is fine: `resolveDispute` is `onlyOwner` and can
+only pay `task.worker` or `task.agent`, both fixed on-chain at funding, so no arbitrary destination is
+reachable by anyone (the load-bearing fact for CC-051, verified). But `resolve_dispute` **and**
+`dispute_task` in `src/lib/mcp/server.ts` both authorise
+`task.from_agent_wallet == context.callerWallet`, so today an agent can dispute a delivered task and
+refund itself, and the worker has no dispute right even though the contract grants one.
+
+**ADR-0001 D2 settles it:** `dispute_task` permits either party; `resolve_dispute` loses agent
+authority; `completeTask` stays agent-only. Control over release ≠ authority over adjudication — an
+agent may always pay early, it may not refuse after verified delivery. "Agent resolves its own
+dispute" was explicitly **rejected**, because it blocks `slash()` permanently and forces removal of
+the escrow and staking claims from public copy. See CC-081 and CC-082.
+
+**There is a worse case than the inversion, which no issue named before ADR-0001: agent AWOL.** The
+worker delivers, the agent never calls `completeTask`, the deadline passes, `expireTask` refunds the
+agent. The worker has delivered and been paid nothing, automatically, with no bad actor required.
+`CarbonEscrow` has exactly one clock, so silence always resolves in the agent's favour. Fixed by
+ADR-0001 D1's `submitWork` plus a review window — CC-082.
 
 **`tasks_public` bypasses RLS on purpose — do not "fix" it.** `tasks` has RLS enabled with zero
 policies, so anon is denied. Anon reads the `tasks_public` view instead, which excludes

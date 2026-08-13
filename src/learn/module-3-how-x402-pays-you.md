@@ -1,6 +1,6 @@
 # How x402 Pays You
 
-**Module 3 of 6 · 4 min read**
+**Module 3 of 7 · 4 min read**
 
 ---
 

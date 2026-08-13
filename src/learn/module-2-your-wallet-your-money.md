@@ -1,6 +1,6 @@
 # Your Wallet, Your Money
 
-**Module 2 of 6 · 3 min read**
+**Module 2 of 7 · 3 min read**
 
 ---
 

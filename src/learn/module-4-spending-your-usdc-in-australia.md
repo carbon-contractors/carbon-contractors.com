@@ -1,6 +1,6 @@
 # Spending Your USDC in Australia
 
-**Module 4 of 6 · 3 min read**
+**Module 4 of 7 · 3 min read**
 
 ---
 

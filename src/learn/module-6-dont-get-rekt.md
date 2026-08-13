@@ -1,6 +1,6 @@
 # Don't Get Rekt: Hardening Your Attack Surface as a Crypto Contractor
 
-**Module 6 of 6 · 5 min read**
+**Module 6 of 7 · 5 min read**
 
 ---
 
@@ -134,8 +134,4 @@ Three things:
 
 ---
 
-**That's all six modules.** You now understand the full stack: what USDC is, how your wallet works, how agents pay you, how to spend it in Australia, how to automate your intake, and how to keep it all secure.
-
-Welcome to Carbon Contractors. Time to get to work.
-
-**→ [Back to Dashboard](/dashboard)**
+**Next → [Pseudonymous Is Not Anonymous](/learn/pseudonymous-is-not-anonymous)** — We never ask who you are. That is not the same as nobody being able to work it out.

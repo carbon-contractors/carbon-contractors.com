@@ -1,6 +1,6 @@
 # Let Your Agent Handle It
 
-**Module 5 of 6 · 5 min read**
+**Module 5 of 7 · 5 min read**
 
 ---
 
