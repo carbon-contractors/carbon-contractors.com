@@ -124,10 +124,10 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] Zod-validated environment configuration
 - [x] Session management with timeout and capacity limits
 - [x] Enhanced health check (DB + contract connectivity)
-- [x] Full test suite (116 tests, Vitest — see the caveat in *Local development* below)
+- [x] Full test suite (Vitest, hermetic — no network access, see *Local development*)
 - [x] GitHub Actions CI pipeline (lint, typecheck, test, build)
 - [x] Vercel deployment configuration
-- [x] `/learn` educational content (6 modules — crypto rails onboarding)
+- [x] `/learn` educational content (crypto rails onboarding, incl. pseudonymity)
 - [x] `/services` page (10 service categories with examples and disruption notes)
 - [x] Service category selection (max 2 per worker) with API validation
 - [x] Server-side platform signer for escrow operations (completeTask, resolveDispute, expireTask)
@@ -163,10 +163,15 @@ It exits non-zero while ownership is wrong.
 `completeTaskOnChain` cannot succeed under any key — `CarbonEscrow.completeTask` requires the caller
 to be the task's agent, not the platform signer (`CC-037`).
 
-**`npm test` is not hermetic.** The suite makes live calls to the public Base Sepolia RPC and can
-broadcast real transactions, so results vary with network latency and rate limiting. Expect
-occasional spurious failures until `CC-060` lands. `BASE_SEPOLIA_RPC_URL` is unset, which means the
-shared public endpoint.
+**`npm test` is hermetic, and enforced as such.** `vitest.setup.ts` strips every signing key, RPC
+URL and live contract address from the environment and blocks global `fetch`, so no test can reach the
+network or broadcast a transaction. A test that tries fails loudly and logs `[CC-060 BLOCKED]`.
+
+It was not always so: the suite broadcast a real transaction on every run for weeks while reporting
+all green, because the offending test asserted only that a mock had been reached, inside a
+`try/catch`. `docs/Lessons-Learned.md` §12 has the full account, including why three consecutive
+green runs were not evidence that the fix had worked. If you need a live call, write it as a script
+under `scripts/audit/` rather than as a unit test.
 
 ## Design constraints
 

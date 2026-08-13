@@ -1,13 +1,42 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Hoisted mocks — vi.mock factories are hoisted so referenced values must be too
-const { mockCreateKmsAccount } = vi.hoisted(() => ({
+const { mockCreateKmsAccount, mockSimulateContract, mockWriteContract } = vi.hoisted(() => ({
   mockCreateKmsAccount: vi.fn(),
+  mockSimulateContract: vi.fn(),
+  mockWriteContract: vi.fn(),
 }));
 
 vi.mock("@/lib/contracts/kms-signer", () => ({
   createKmsAccount: mockCreateKmsAccount,
 }));
+
+/**
+ * CC-060: viem's clients are mocked so this file cannot reach the network.
+ *
+ * It previously could, and did. The KMS test called completeTaskOnChain inside a bare
+ * try/catch and asserted only that createKmsAccount had been reached, on the stated
+ * assumption that simulateContract "will fail since there's no RPC". There is an RPC —
+ * getChainConfig() falls back to the public Base Sepolia endpoint — and an eth_call
+ * against a codeless address succeeds rather than reverting, so writeContract ran and
+ * broadcast a real transaction (0x1cc38f04…, block 44801606).
+ *
+ * The suite stayed green throughout, because "a mock was reached, inside a try/catch"
+ * remained true after the behaviour underneath it changed shape entirely.
+ *
+ * Mocking the transport is what makes that impossible rather than unlikely. The
+ * assertions below check the *intent* — that simulateContract is called with the right
+ * arguments and its prepared request is what gets written — instead of relying on a
+ * throw that turned out never to happen.
+ */
+vi.mock("viem", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("viem")>();
+  return {
+    ...actual,
+    createPublicClient: () => ({ simulateContract: mockSimulateContract }),
+    createWalletClient: () => ({ writeContract: mockWriteContract }),
+  };
+});
 
 // Env stubs shared across tests
 const stubEnv = () => {
@@ -28,6 +57,11 @@ describe("signer", () => {
     vi.resetModules();
     vi.unstubAllEnvs();
     mockCreateKmsAccount.mockReset();
+    mockSimulateContract.mockReset();
+    mockWriteContract.mockReset();
+    // Default happy path: simulate returns a prepared request, write returns a hash.
+    mockSimulateContract.mockResolvedValue({ request: { __prepared: true } });
+    mockWriteContract.mockResolvedValue("0x" + "ff".repeat(32));
   });
 
   it("throws when NEXT_PUBLIC_ESCROW_CONTRACT is not set", async () => {
@@ -89,20 +123,67 @@ describe("signer", () => {
       signTypedData: vi.fn(),
     });
 
-    // Trigger account creation by calling an on-chain function.
-    // It will fail at simulateContract since there's no RPC, but
-    // createKmsAccount should have been called.
+    // The transport is mocked, so this completes rather than throwing. No try/catch —
+    // if it rejects, that is a real failure and the test should say so.
     const { completeTaskOnChain } = await import("@/lib/contracts/signer");
     const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
-    try {
-      await completeTaskOnChain(taskId);
-    } catch {
-      // Expected: no RPC node, but KMS account was created
-    }
+    const hash = await completeTaskOnChain(taskId);
 
     expect(mockCreateKmsAccount).toHaveBeenCalled();
+    expect(hash).toBe("0x" + "ff".repeat(32));
   });
 
-  // Note: integration tests for completeTaskOnChain/resolveDisputeOnChain/expireTaskOnChain
-  // require a running RPC node (Hardhat or fork) and are covered in e2e tests.
+  it("simulates completeTask with the expected arguments before writing", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+
+    const { completeTaskOnChain } = await import("@/lib/contracts/signer");
+    const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
+    await completeTaskOnChain(taskId);
+
+    // Asserting the intent, which is what the old try/catch could not do.
+    expect(mockSimulateContract).toHaveBeenCalledTimes(1);
+    expect(mockSimulateContract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: "0x1234567890123456789012345678901234567890",
+        functionName: "completeTask",
+        args: [taskId],
+      }),
+    );
+  });
+
+  it("writes exactly the request simulateContract prepared", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+    const prepared = { __prepared: "only-this" };
+    mockSimulateContract.mockResolvedValue({ request: prepared });
+
+    const { completeTaskOnChain } = await import("@/lib/contracts/signer");
+    await completeTaskOnChain(("0x" + "ab".repeat(32)) as `0x${string}`);
+
+    // The simulate → write handoff is the step that turns a dry run into a real
+    // transaction, so it is worth asserting rather than assuming.
+    expect(mockWriteContract).toHaveBeenCalledTimes(1);
+    expect(mockWriteContract).toHaveBeenCalledWith(prepared);
+  });
+
+  it("does not write when simulateContract rejects", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+    mockSimulateContract.mockRejectedValue(new Error("execution reverted: only agent"));
+
+    const { completeTaskOnChain } = await import("@/lib/contracts/signer");
+    await expect(
+      completeTaskOnChain(("0x" + "ab".repeat(32)) as `0x${string}`),
+    ).rejects.toThrow("only agent");
+
+    // This is the property the original test assumed and never checked. It is also the
+    // live behaviour of completeTask today — CC-080, ADR-0001 D2 — so a revert here is
+    // the expected path, not an edge case.
+    expect(mockWriteContract).not.toHaveBeenCalled();
+  });
+
+  // Integration coverage for these functions against a real chain belongs in
+  // scripts/audit/, not here: a unit test that reaches the network is
+  // non-deterministic and can broadcast. See vitest.setup.ts.
 });
