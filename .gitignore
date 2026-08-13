@@ -25,6 +25,14 @@
 *.pem
 .claude/settings.local.json
 
+# Devlog and content artefacts — deliberately local.
+# Generated post-mortems and devlog script briefs (persona voice notes, retention
+# beats, production guidance) are working material, not project documentation. The
+# repo is public by design (CC-056), so the published trust artefact is
+# docs/Lessons-Learned.md — keep content-production drafts out of it rather than
+# relying on nobody staging them by accident.
+/devlog/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
