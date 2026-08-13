@@ -176,10 +176,11 @@ exists rather than reasoning from this file.**
   correct, not unsigned.
 - **Line endings are pinned** (`* text=auto eol=lf`). If `git status` shows every file modified, that
   is the cause. **Python's `write_text` silently writes CRLF on Windows — use `write_bytes`.**
-- **`npm test` is not hermetic** — it broadcasts real Sepolia transactions and is measurably flaky
-  (10 then 13 failures observed on unchanged trees, each followed by a clean run). Re-run before
-  investigating a failure, and do not treat "tests pass" as evidence during launch validation.
-  → `CC-060`
+- **The test suite is hermetic by enforcement, not convention.** `vitest.setup.ts` strips every
+  signing key, RPC URL and live contract address from the environment and blocks global `fetch`. A
+  test that reaches the network fails loudly and logs `[CC-060 BLOCKED]`. If you need a real call, it
+  belongs in `scripts/audit/`, not a unit test. `ALLOW_TEST_NETWORK=1` bypasses the guard locally —
+  never in CI. → `CC-060`
 
 ## Where truth lives
 
@@ -227,7 +228,7 @@ scripts/audit/         Read-only verification scripts. Run these instead of trus
 
 ```bash
 npm run dev            # Next dev server
-npm test               # Vitest — 128 tests, and see CC-060: not hermetic, so it is flaky
+npm test               # Vitest. Hermetic — vitest.setup.ts blocks the network (CC-060)
 npm run typecheck      # tsc --noEmit
 npm run lint
 npm run build

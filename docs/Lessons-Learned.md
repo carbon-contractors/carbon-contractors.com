@@ -12,7 +12,7 @@ transferable lesson. Entries are added as issues close — see `docs/backlog/` f
 Nothing is removed once written, including the embarrassing ones.
 
 **On "vibe coded."** Much of this codebase was written with AI assistance. That is not the
-interesting risk. Plenty of it has a 52-test suite, a CI pipeline that fails on high-severity
+interesting risk. Plenty of it has a hermetic test suite, a CI pipeline that fails on high-severity
 audit findings, eleven RLS migrations, and an HSM-backed signer — that is not what unexamined code
 looks like. The actual risk, visible repeatedly below, is narrower and more mundane: **code that
 was generated, appeared to work, and was then never re-read.** Generation is cheap; verification is
@@ -370,7 +370,8 @@ requiring proof that the test could have come back positive.
 
 ## 12. The test passed because doing nothing succeeded
 
-**Status:** found 2026-07-30, fix tracked as `CC-060`, not yet done
+**Status:** found 2026-07-30, **fixed 2026-08-13** — `CC-060`. See *"Three green runs proved
+nothing"* at the end of this entry, which is the part worth reading if you already know the story.
 
 `src/lib/__tests__/signer.test.ts` sets a deliberately fake escrow address
 (`0x1234567890123456789012345678901234567890`) and Hardhat account #0's publicly known private key,
@@ -419,6 +420,48 @@ single stubbed variable.
 and a test that reaches the network can do real work while reporting success. If a unit test can
 transact, it is not a unit test; make the transport unreachable rather than trusting a fake address
 to be rejected. When tests go flaky, suspect the test before the network.
+
+### Fixed 2026-08-13 — and one correction to the above
+
+`vitest.setup.ts` now strips every signing key, real RPC URL and live contract address from
+`process.env`, and replaces global `fetch` with a thrower. Every client in this codebase — viem,
+supabase-js — goes through `fetch`, so a real request is now impossible rather than merely
+discouraged. `signer.test.ts` mocks `createPublicClient`/`createWalletClient` and asserts the
+*intent*: that `simulateContract` is called with the right arguments, that the prepared request is
+exactly what gets written, and that a simulate rejection means no write happens.
+
+**Correction:** the paragraph above says Vitest loads `.env.local` into `process.env`. Measured on
+2026-08-13, it does not — `DEPLOYER_PRIVATE_KEY` was absent, and the escrow address unset. So the
+"single stubbed variable" gap was narrower than stated. The environment is stripped anyway, because
+the reason it was safe was accidental: nobody had added dotenv loading, changed the runner, or
+exported the variable in their shell.
+
+### Three green runs proved nothing
+
+This is the part that generalises, and it caught us *after* the defect was already understood.
+
+With the fetch guard installed, the suite went 128/128 three times in a row. That looked like proof
+of hermeticity. It was not. Adding a `console.error` to the guard — so a blocked attempt is *logged*
+as well as thrown — showed **4 blocked network requests on every single run, with the suite still
+reporting 128/128 passed.**
+
+Four, because that is viem's default retry count: one attempt and three retries. All from the same
+test, every run, for weeks. The suite was green *and* reaching for the network, simultaneously, and
+the only reason it stayed green is that the failure was swallowed downstream of the assertion.
+
+So a passing suite is not evidence that a suite is hermetic. Green tells you the assertions held; it
+tells you nothing about what the code attempted on the way. If you care whether tests touch the
+network, **count the attempts** — do not infer it from the result.
+
+The final verification was therefore built around measurement rather than absence of failure: 20
+consecutive runs, 131/131 each, **zero** blocked attempts, and Hardhat account #0's on-chain
+transaction count read before and after — unchanged at 23842. Since that key is publicly known and
+shared, "unchanged" means nobody broadcast anything, which is a stronger statement than "we did not".
+
+**Lesson:** when you fix a test-isolation problem, instrument the boundary you just closed and check
+it reports zero. A guard that throws proves the path is blocked; a guard that *counts* proves the path
+is no longer being taken. Those are different claims, and only the second one tells you the code was
+actually fixed rather than merely contained.
 
 ---
 
