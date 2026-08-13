@@ -26,6 +26,7 @@ made.
 | [ADR-0001](ADR-0001-escrow-resolution-and-dispute-authority.md) | Escrow resolution, evidence commitments, and dispute authority | accepted | `CC-081` Defect 2, `CC-075` |
 | [ADR-0002](ADR-0002-pseudonymity-and-task-data-retention.md) | Pseudonymity, task data retention, and the platform's privacy posture | accepted | supersedes "Zero PII" (`CC-027`) |
 | [ADR-0003](ADR-0003-monitoring-as-correctness-dependency.md) | Monitoring as a correctness dependency, not an ops nicety | accepted | rescopes and splits `CC-040` |
+| [ADR-0004](ADR-0004-public-claims-and-pseudonymity.md) | Public claims — copy describes the target state, and the identity claim is pseudonymity | accepted | two positions `CLAUDE.md` kept re-litigating |
 
 `ADR-0001` carries an **Amendment 1** (same date) that changed D4, D6 and D9 — verdicts became
 EIP-712 signatures rather than platform transactions, and settlement became pull-payment. Read the
@@ -63,5 +64,12 @@ the index table above current by hand.
 
 ## Reading order for a fresh session
 
-`ADR-0001` first — the other two depend on it. `ADR-0002` and `ADR-0003` can be read in either
-order, though `ADR-0003` refers to `ADR-0002`'s retention decisions.
+`ADR-0001` first — the others depend on it, and **read its Amendment 1**, which supersedes several of
+its own decisions. `ADR-0002` next. `ADR-0003` refers to `ADR-0002`'s retention decisions, and
+`ADR-0004` restates `ADR-0002` D1/D6 as an operational rule.
+
+**`ADR-0004` is the one to read before editing any website copy.** It exists because two positions —
+that pre-launch copy describes the target state, and that the optional notification email is not a
+PII contradiction — were settled in conversation, lived nowhere durable, and were then re-litigated
+repeatedly. `CLAUDE.md` points at it rather than restating it, deliberately: that file is read at the
+start of every session and had grown to 405 lines carrying five stale claims.

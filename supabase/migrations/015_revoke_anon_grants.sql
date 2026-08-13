@@ -1,4 +1,4 @@
--- 014_revoke_anon_grants.sql
+-- 015_revoke_anon_grants.sql
 --
 -- CC-062 — remove Supabase's default table-level grants from `anon` and `authenticated`,
 -- so RLS is not the only thing standing between the public anon key and real personal data.
