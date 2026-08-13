@@ -19,7 +19,7 @@ export default function LearnHub() {
           explained <span className={styles.accent}>simply.</span>
         </h1>
         <p className={styles.subtitle}>
-          Six short modules. No jargon. Everything you need to get paid onchain.
+          Seven short modules. No jargon. Everything you need to get paid onchain.
         </p>
       </div>
 

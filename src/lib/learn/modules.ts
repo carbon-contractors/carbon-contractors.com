@@ -62,6 +62,15 @@ export const LEARN_MODULES: LearnModule[] = [
       "Three-tier identity architecture and real security lessons from the founder.",
     filename: "module-6-dont-get-rekt.md",
   },
+  {
+    slug: "pseudonymous-is-not-anonymous",
+    title: "Pseudonymous Is Not Anonymous",
+    moduleNumber: 7,
+    readTime: "4 min",
+    description:
+      "We never ask who you are. That is not the same as nobody being able to work it out — and the record is permanent.",
+    filename: "module-7-pseudonymous-is-not-anonymous.md",
+  },
 ];
 
 export function getModuleBySlug(slug: string): LearnModule | undefined {
