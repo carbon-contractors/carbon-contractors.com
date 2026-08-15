@@ -124,6 +124,23 @@ async function withRpcLagRetry<T>(label: string, fn: () => Promise<T>, attempts 
   throw new Error("unreachable");
 }
 
+/**
+ * Re-reads a task until the chain reports the expected state, or attempts run out.
+ *
+ * Polls for the value we expect rather than retrying on exception, because the failure mode
+ * is a *successful* read returning the pre-write struct, not an error. `withRpcLagRetry`
+ * above would not catch it — it only fires on a throw.
+ */
+async function pollForState(paymentRequestId: string, expected: string, attempts = 8) {
+  let task = await getOnChainTask(paymentRequestId);
+  for (let i = 1; i < attempts && task.state !== expected; i++) {
+    console.log(`      chain still reports ${task.state}, re-reading in 5s (${i}/${attempts - 1})...`);
+    await new Promise((r) => setTimeout(r, 5000));
+    task = await getOnChainTask(paymentRequestId);
+  }
+  return task;
+}
+
 function hash32(): Hex {
   // Deterministic-per-run filler. The real specHash comes from CC-084's schema and the
   // real evidenceHash from CC-083's checker; neither exists yet, and the contract does
@@ -310,9 +327,25 @@ async function main() {
   if (submitReceipt.status !== "success") throw new Error(`submitWork reverted: ${submitHash}`);
   console.log(`      tx: ${submitHash}`);
 
-  const afterSubmit = await getOnChainTask(paymentRequestId);
+  // Poll, do not read once. On the first real run (2026-08-15) this read returned the
+  // pre-submission struct — state Funded, submittedAt 0 — so reviewDeadline computed as
+  // 43200, i.e. midday on 1 January 1970. Harmless in the verdict phase, but the submit
+  // phase writes reviewDeadline into the state file, so the claim phase would have thought
+  // the window had closed decades ago and reverted with ReviewWindowOpen().
+  //
+  // Lessons-Learned §16, for the fourth time in one morning — and this time in a script
+  // written that same morning, by someone who had just finished writing the §16 recurrence
+  // note. Knowing about a consistency bug does not protect you from it; only writing the
+  // poll does.
+  const afterSubmit = await pollForState(paymentRequestId, "Delivered");
   console.log(`      state: ${afterSubmit.state} (expected: Delivered)`);
   console.log(`      claimable at: ${new Date(Number(afterSubmit.reviewDeadline) * 1000).toISOString()}`);
+  if (afterSubmit.state !== "Delivered") {
+    throw new Error(
+      `submitWork was mined (${submitHash}) but the chain still reports ${afterSubmit.state}. ` +
+        "Refusing to continue on a read that may be stale — re-run, or check the tx on Basescan.",
+    );
+  }
 
   if (phase === "submit") {
     const pending: PendingRun = {
@@ -491,13 +524,7 @@ async function report(
   console.log("VERIFICATION");
   console.log(line());
 
-  let task = await getOnChainTask(paymentRequestId);
-  if (task.state !== expectedState) {
-    // Stale-read guard — same RPC lag as everywhere else. Re-check once before calling it
-    // a failure.
-    await new Promise((r) => setTimeout(r, 5000));
-    task = await getOnChainTask(paymentRequestId);
-  }
+  const task = await pollForState(paymentRequestId, expectedState);
   console.log(`  on-chain state:  ${task.state} (expected: ${expectedState})`);
   console.log(`  evidenceHash:    ${task.evidenceHash}`);
   console.log(`  verdictHash:     ${task.verdictHash}`);
