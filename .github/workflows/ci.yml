@@ -34,6 +34,23 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      # Contracts (CC-082). Compile first: the ABI drift check and the Hardhat-side
+      # typecheck both read artifacts/, and the contract tests need bytecode.
+      - name: Compile contracts
+        run: npm run compile
+
+      - name: Type check (contracts)
+        run: npm run typecheck:contracts
+
+      # Fails if src/lib/contracts/*-abi.ts no longer matches the compiled contract.
+      # A hand-edited or simply stale ABI is indistinguishable at runtime from a
+      # contract that lacks the function — the call just reverts.
+      - name: ABI matches bytecode
+        run: npm run gen:abi -- --check
+
+      - name: Test (contracts)
+        run: npm run test:contracts
+
       - name: Test
         run: npm test
         env:

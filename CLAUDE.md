@@ -102,16 +102,27 @@ exists rather than reasoning from this file.**
   contract has no sweep, rescue or `receive`. Measured 2026-08-11: nothing stranded, because it has
   never been run. First real use loses the money. → `CC-081` Defect 1, `CC-037`
   · `node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs`
-- **`completeTaskOnChain` can never succeed.** `completeTask` requires `msg.sender == task.agent` and
-  `createTask` sets `agent: msg.sender`, so the platform signer is structurally the wrong sender.
-  Fails safely — returns `isError` without flipping the DB. → `CC-080`, `ADR-0001` D2
+- **`contracts/CarbonEscrow.sol` is v2 and the deployed contract is still v1.** The source in the
+  tree implements `ADR-0001` — `submitWork`, pull-payment claims, EIP-712 verdicts.
+  **`NEXT_PUBLIC_ESCROW_CONTRACT` points at the old bytecode until the redeploy runs.**
+  Anything reasoning about live behaviour must read the deployed ABI, not the file. → `CC-082`
+- **`completeTaskOnChain` can never succeed, and `expireTaskOnChain` no longer can either.**
+  `completeTask` is agent-only and the platform signer is structurally the wrong sender (`CC-080`).
+  v2 made `expireTask` agent-only too — refunds are a pull-payment the agent claims (`A1.2`) — so
+  that function reverts `NotAgent()` from the platform as well. Both fail safely. Removal belongs
+  with `CC-081` Defect 1. → `CC-080`, `ADR-0001` D2/A1.2
 - **Dispute authority is decided; do not re-guess it.** `dispute_task` and `resolve_dispute` are both
-  agent-only today, which lets an agent refund itself after delivery. `ADR-0001` D2 fixes it:
-  either party disputes, `resolve_dispute` loses agent authority, `completeTask` stays agent-only.
-  "Agent resolves its own dispute" was explicitly rejected. → `ADR-0001` D2, `CC-081` Defect 2
-- **Silence favours the agent.** `CarbonEscrow` has one clock, so an agent that simply does nothing
-  after delivery gets refunded at expiry. Fixed by `submitWork` + review window. → `ADR-0001` D1,
-  `CC-082`
+  agent-only in the *app layer* today, which lets an agent refund itself after delivery. v2's
+  contract already fixes the on-chain half: either party may dispute, but **only by presenting a
+  signed failing verdict** — there is no bare-assertion dispute, because one would hand the agent
+  both outcomes again. `resolve_dispute` loses agent authority; `completeTask` stays agent-only.
+  "Agent resolves its own dispute" was explicitly rejected. → `ADR-0001` D2 + open items, `CC-081`
+  Defect 2
+- **Silence favoured the agent, and v2 inverts it.** v1 had one clock, so an agent that did nothing
+  after delivery got refunded at expiry. v2 has two: the delivery deadline and an agent-set review
+  window (12h–14d, bounded by the contract). Once `Delivered`, `expireTask` is unreachable and the
+  worker claims via `releaseAfterReview`. → `ADR-0001` D1, `CC-082`
+  · `npm run test:contracts`
 - **The HSM key owns the contracts** — `0xa8931097540e69B474013D294d0bA6A2cC853e4b`. This entry has
   been wrong in **both** directions; never re-derive it by reading. → `CC-059`
   · `node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`
@@ -181,6 +192,16 @@ exists rather than reasoning from this file.**
   test that reaches the network fails loudly and logs `[CC-060 BLOCKED]`. If you need a real call, it
   belongs in `scripts/audit/`, not a unit test. `ALLOW_TEST_NETWORK=1` bypasses the guard locally —
   never in CI. → `CC-060`
+- **There are two test suites and two typechecks; `npm test` is only half of each.** `npm test`
+  (vitest) covers `src/`; `npm run test:contracts` (hardhat/mocha) covers `contracts/`. Likewise
+  `npm run typecheck` covers the Next side and `npm run typecheck:contracts` covers
+  `hardhat.config.ts`, `test/` and `scripts/deploy/`. CI runs all four. → `CC-082`
+- **The ABIs in `src/lib/contracts/` are generated — do not hand-edit them.**
+  `npm run compile && npm run gen:abi`. CI fails on drift via `npm run gen:abi -- --check`. A stale
+  ABI is indistinguishable at runtime from a contract that lacks the function. → `CC-082`
+- **`evmVersion` is pinned to `cancun`** in `hardhat.config.ts`. Solidity 0.8.24 defaults to
+  `shanghai`, under which OpenZeppelin 5.6's `Bytes.sol` fails to compile (`mcopy`, EIP-5656). Base
+  has had the Cancun opcodes since Ecotone, March 2024. → `CC-082`
 
 ## Where truth lives
 
@@ -218,7 +239,9 @@ src/lib/contracts/     signer.ts (KMS or raw key), kms-signer.ts, escrow.ts (rea
 src/lib/config.ts      Zod env schema. Validation is LAZY — missing vars surface as 500s at
                        request time, not as a boot failure.
 src/lib/categories.ts  The 10 service categories, max 2 per worker
-contracts/             CarbonEscrow.sol, ReputationStake.sol
+contracts/             CarbonEscrow.sol (v2, CC-082), ReputationStake.sol
+                       mocks/ is test-only — never deployed to a live network
+test/                  Hardhat/mocha contract tests. `npm run test:contracts`
 supabase/migrations/   001-015, applied by hand in order. Add new ones, never edit an applied one.
                        No migration runner — check the directory for the next number (CC-057).
 scripts/audit/         Read-only verification scripts. Run these instead of trusting this file.
@@ -227,17 +250,21 @@ scripts/audit/         Read-only verification scripts. Run these instead of trus
 ## Commands
 
 ```bash
-npm run dev            # Next dev server
-npm test               # Vitest. Hermetic — vitest.setup.ts blocks the network (CC-060)
-npm run typecheck      # tsc --noEmit
+npm run dev              # Next dev server
+npm test                 # Vitest, src/ only. Hermetic — vitest.setup.ts blocks the network (CC-060)
+npm run test:contracts   # Hardhat/mocha, contracts/ only (CC-082)
+npm run typecheck        # tsc --noEmit, Next side
+npm run typecheck:contracts   # tsc -p tsconfig.hardhat.json — hardhat.config, test/, scripts/deploy/
 npm run lint
 npm run build
-npm run compile        # Hardhat compile
-npm run seed           # BROKEN — still writes the pre-migration-008 `skills` column (CC-017)
+npm run compile          # Hardhat compile
+npm run gen:abi          # Regenerate src/lib/contracts/*-abi.ts from artifacts (CC-082)
+npm run seed             # BROKEN — still writes the pre-migration-008 `skills` column (CC-017)
 ```
 
-CI runs `npm ci`, `npm audit --audit-level=high`, lint, typecheck, test, build. The audit step fails
-the build on high-severity findings, so a stale dependency tree breaks CI rather than merging quietly.
+CI runs `npm ci`, `npm audit --audit-level=high`, lint, typecheck, compile, `typecheck:contracts`,
+the ABI drift check, `test:contracts`, test, build. The audit step fails the build on high-severity
+findings, so a stale dependency tree breaks CI rather than merging quietly.
 
 ## Conventions
 

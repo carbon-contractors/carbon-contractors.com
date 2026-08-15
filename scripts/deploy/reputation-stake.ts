@@ -13,10 +13,13 @@
 
 import { network } from "hardhat";
 
-const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS;
-if (!USDC_ADDRESS) {
-  throw new Error("NEXT_PUBLIC_USDC_ADDRESS must be set in .env.local");
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} must be set in .env.local`);
+  return value;
 }
+
+const USDC_ADDRESS = required("NEXT_PUBLIC_USDC_ADDRESS");
 
 async function main() {
   const { ethers } = await network.create();

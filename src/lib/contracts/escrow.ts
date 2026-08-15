@@ -137,13 +137,23 @@ function getEscrowAddr(): Address | undefined {
 
 // ── Task state enum (mirrors Solidity) ──────────────────────────────────────
 
+/**
+ * Mirrors `CarbonEscrow.TaskState`.
+ *
+ * **The numbers changed in v2 (CC-082) and are not backwards compatible.** `Completed`
+ * was 2 and is now 3; every value above `Funded` shifted. Nothing reads a persisted copy
+ * of the old numbering — the DB stores its own status strings, not these — but any
+ * hard-coded integer found against the old deployment is wrong now.
+ */
 export const TaskStateEnum = {
   0: "None",
   1: "Funded",
-  2: "Completed",
-  3: "Disputed",
-  4: "Resolved",
-  5: "Expired",
+  2: "Delivered",
+  3: "Completed",
+  4: "Disputed",
+  5: "Arbitrating",
+  6: "Resolved",
+  7: "Expired",
 } as const;
 
 export type OnChainTaskState =
@@ -156,6 +166,22 @@ export interface OnChainTask {
   deadline: bigint;
   state: OnChainTaskState;
   stateRaw: number;
+  /** Seconds the agent has to act after submission, chosen by the agent at funding. */
+  reviewWindow: number;
+  /** Unix seconds of `submitWork`, or 0 if nothing has been delivered yet. */
+  submittedAt: bigint;
+  /** When the worker may call `releaseAfterReview`. Meaningless while `submittedAt` is 0. */
+  reviewDeadline: bigint;
+  /** Commitment to the acceptance criteria, written by the agent at funding. */
+  specHash: `0x${string}`;
+  /** Commitment to the submission, written by the worker at delivery. */
+  evidenceHash: `0x${string}`;
+  /** EIP-712 digest of the verdict presented, or the zero hash if none was. */
+  verdictHash: `0x${string}`;
+  /** Only meaningful when `verdictHash` is non-zero. */
+  verdictPassed: boolean;
+  /** CC-036 slot — EAS attestation UID. Zero until EAS lands. */
+  attestationUid: `0x${string}`;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -193,21 +219,25 @@ export async function getOnChainTask(
     args: [taskId],
   });
 
-  const [agent, worker, amount, deadline, stateRaw] = [
-    result.agent,
-    result.worker,
-    result.amount,
-    result.deadline,
-    Number(result.state),
-  ];
+  const stateRaw = Number(result.state);
+  const submittedAt = BigInt(result.submittedAt);
+  const reviewWindow = Number(result.reviewWindow);
 
   return {
-    agent: agent as Address,
-    worker: worker as Address,
-    amount,
-    deadline,
+    agent: result.agent as Address,
+    worker: result.worker as Address,
+    amount: result.amount as bigint,
+    deadline: BigInt(result.deadline),
     state: TaskStateEnum[stateRaw as keyof typeof TaskStateEnum] ?? "None",
     stateRaw,
+    reviewWindow,
+    submittedAt,
+    reviewDeadline: submittedAt + BigInt(reviewWindow),
+    specHash: result.specHash as `0x${string}`,
+    evidenceHash: result.evidenceHash as `0x${string}`,
+    verdictHash: result.verdictHash as `0x${string}`,
+    verdictPassed: Boolean(result.verdictPassed),
+    attestationUid: result.attestationUid as `0x${string}`,
   };
 }
 
@@ -281,7 +311,30 @@ export async function getTaskIdsForWorkerFromEvents(
   const logs = await getLogsChunked({
     address: getEscrowAddress(),
     event: parseAbiItem(
-      "event TaskCreated(bytes32 indexed taskId, address indexed agent, address indexed worker, uint256 amount, uint256 deadline)"
+      "event TaskCreated(bytes32 indexed taskId, address indexed agent, address indexed worker, uint256 amount, uint64 deadline, uint32 reviewWindow, bytes32 specHash)"
+    ),
+    args: { worker },
+    fromBlock,
+  });
+  return logs.map((l: { args: { taskId: `0x${string}` } }) => l.args.taskId);
+}
+
+/**
+ * Every taskId a worker has actually delivered against, from WorkSubmitted events.
+ *
+ * Same cost warning as `getTaskIdsForWorkerFromEvents` — full-range scan, offline use
+ * only. It exists because CC-075's AWOL trigger is the *difference* between the two sets:
+ * N consecutive expiries with zero submissions means the worker stopped showing up, which
+ * in v1 was indistinguishable from an agent that would not accept.
+ */
+export async function getSubmittedTaskIdsForWorkerFromEvents(
+  worker: Address,
+  fromBlock?: bigint,
+): Promise<`0x${string}`[]> {
+  const logs = await getLogsChunked({
+    address: getEscrowAddress(),
+    event: parseAbiItem(
+      "event WorkSubmitted(bytes32 indexed taskId, address indexed worker, bytes32 evidenceHash, uint64 submittedAt, bytes32 attestationUid)"
     ),
     args: { worker },
     fromBlock,
@@ -294,10 +347,21 @@ export interface OnChainReputationSummary {
   completed: number;
   /** Disputes raised but not yet arbitrated (on-chain state `Disputed`). */
   disputed: number;
+  /** Disputes the owner has accepted for adjudication (on-chain state `Arbitrating`). */
+  arbitrating: number;
   /** Disputes arbitrated by the owner (on-chain state `Resolved`). */
   resolved: number;
   expired: number;
   funded: number;
+  /**
+   * Work submitted, review window still running (on-chain state `Delivered`).
+   *
+   * Counted separately from `funded` on purpose: the difference between the two is the
+   * signal CC-075 needs, and it is the whole reason v2 exists. A task sitting in `Funded`
+   * past its deadline is a worker who did not show up; one sitting in `Delivered` is an
+   * agent who has not looked yet. v1 could not tell those apart.
+   */
+  delivered: number;
   total_earned_usdc: number;
   /**
    * payment_request_ids the chain confirms as `Completed`. The caller pairs these
@@ -352,9 +416,11 @@ export async function getOnChainReputationSummary(
     total_tasks: 0,
     completed: 0,
     disputed: 0,
+    arbitrating: 0,
     resolved: 0,
     expired: 0,
     funded: 0,
+    delivered: 0,
     total_earned_usdc: 0,
     completedPaymentRequestIds: [],
     unverified: [],
@@ -402,6 +468,9 @@ export async function getOnChainReputationSummary(
       case "Disputed":
         summary.disputed++;
         break;
+      case "Arbitrating":
+        summary.arbitrating++;
+        break;
       case "Resolved":
         summary.resolved++;
         break;
@@ -410,6 +479,9 @@ export async function getOnChainReputationSummary(
         break;
       case "Funded":
         summary.funded++;
+        break;
+      case "Delivered":
+        summary.delivered++;
         break;
     }
   }

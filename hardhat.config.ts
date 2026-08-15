@@ -34,6 +34,11 @@ export default defineConfig({
         settings: {
           optimizer: { enabled: true, runs: 1000 },
           viaIR: true,
+          // Pinned, not defaulted. Solidity 0.8.24 defaults to `shanghai`, under which
+          // OpenZeppelin 5.6's Bytes.sol fails to compile — it uses `mcopy` (EIP-5656).
+          // Base has had the Cancun opcodes since the Ecotone upgrade in March 2024, on
+          // both Sepolia and mainnet, so this is safe on every network below.
+          evmVersion: "cancun",
         },
       },
     },

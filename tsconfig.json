@@ -36,8 +36,11 @@
     "artifacts",
     "cache",
     "typechain-types",
+    // Hardhat/mocha world — different runtime and different type augmentations.
+    // Covered by tsconfig.hardhat.json via `npm run typecheck:contracts`.
     "hardhat.config.ts",
     "scripts/deploy",
-    "scripts/admin"
+    "scripts/admin/transfer-escrow-ownership.ts",
+    "test"
   ]
 }

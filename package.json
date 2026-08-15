@@ -10,13 +10,16 @@
     "seed": "tsx scripts/seed.ts",
     "verify:kms": "tsx --env-file-if-exists=.env.local scripts/verify-kms-signer.ts",
     "compile": "hardhat compile",
+    "gen:abi": "node scripts/gen-abi.mjs",
     "deploy:sepolia": "hardhat run scripts/deploy/escrow.ts --network baseSepolia",
     "deploy:reputation": "hardhat run scripts/deploy/reputation-stake.ts --network baseSepolia",
     "transfer:ownership": "hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:contracts": "tsc --noEmit -p tsconfig.hardhat.json",
+    "test:contracts": "hardhat test"
   },
   "dependencies": {
     "@google-cloud/kms": "^5.4.0",
@@ -44,6 +47,7 @@
     "@nomicfoundation/hardhat-network-helpers": "^3.0.11",
     "@nomicfoundation/hardhat-typechain": "^3.1.1",
     "@openzeppelin/contracts": "^5.6.1",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
