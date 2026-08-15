@@ -51,6 +51,14 @@ jobs:
       - name: Test (contracts)
         run: npm run test:contracts
 
+      # CC-085. Offline registry validation only — no network, no secrets. It fails when a
+      # monitor script named in the schedule no longer exists, which would otherwise mean
+      # the scheduled workflow quietly stops checking an invariant while still going green.
+      # The monitors themselves run on a schedule (.github/workflows/monitors.yml), not
+      # here: they read the live chain, and a PR must never be able to trigger that.
+      - name: Invariant monitor registry
+        run: npm run monitors:list
+
       - name: Test
         run: npm test
         env:

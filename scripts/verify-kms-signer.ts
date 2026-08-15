@@ -26,6 +26,14 @@
  * `unable to impersonate ... "error_subtype":"invalid_rapt"` — Google's reauth token has
  * lapsed. It looks like a configuration error and is not one; re-run the login above.
  *
+ * This header previously said "# one-time setup" against the un-impersonated command.
+ * Both halves were wrong, and it stayed wrong long enough to cost debugging time twice.
+ *
+ * What this script does NOT check, and scripts/audit/verify-signer.mjs does (CC-085):
+ * whether the deployed escrow actually accepts this signer, and whether its EIP-712 domain
+ * separator matches the one a verdict would be signed against. A key that signs perfectly
+ * and is not in acceptedSigners produces signatures that revert on every claim.
+ *
  * The kms-signer module auto-detects whether it's running inside Vercel
  * (via the VERCEL env var) and selects its auth path accordingly:
  *   - In Vercel: Workload Identity Federation via @vercel/oidc (requires

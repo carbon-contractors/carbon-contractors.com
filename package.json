@@ -9,6 +9,8 @@
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
     "verify:kms": "tsx --env-file-if-exists=.env.local scripts/verify-kms-signer.ts",
+    "monitors": "node --env-file-if-exists=.env.local scripts/audit/run-monitors.mjs",
+    "monitors:list": "node scripts/audit/run-monitors.mjs --list",
     "compile": "hardhat compile",
     "gen:abi": "node scripts/gen-abi.mjs",
     "deploy:sepolia": "hardhat run scripts/deploy/escrow.ts --network baseSepolia",
