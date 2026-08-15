@@ -11,8 +11,20 @@
  *   4. viem recoverAddress recovers the same address that was derived
  *
  * Usage (local dev — uses Application Default Credentials):
- *   gcloud auth application-default login  # one-time setup
- *   GCP_KMS_KEY_PATH=projects/.../cryptoKeyVersions/1 npm run verify:kms
+ *
+ *   gcloud auth application-default login \
+ *     --impersonate-service-account=kms-signer-svc@carbon-contractors.iam.gserviceaccount.com
+ *   npm run verify:kms
+ *
+ * **The impersonation flag is not optional and this is not one-time setup.** Aaron's own
+ * account holds `roles/iam.serviceAccountTokenCreator` scoped to `kms-signer-svc`, not the
+ * KMS signing role directly, so plain `application-default login` produces credentials
+ * that cannot sign — see CC-059's 2026-08-08 update, where that was confirmed against the
+ * IAM console rather than assumed.
+ *
+ * The session also expires. When it has, the failure is a 400 from the KMS client reading
+ * `unable to impersonate ... "error_subtype":"invalid_rapt"` — Google's reauth token has
+ * lapsed. It looks like a configuration error and is not one; re-run the login above.
  *
  * The kms-signer module auto-detects whether it's running inside Vercel
  * (via the VERCEL env var) and selects its auth path accordingly:

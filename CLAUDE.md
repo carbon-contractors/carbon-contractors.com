@@ -161,6 +161,12 @@ exists rather than reasoning from this file.**
 - **Local Supabase credentials are asymmetric.** The anon key is valid; `SUPABASE_SERVICE_ROLE_KEY`
   is the literal placeholder. Anything needing the service role fails `401` locally — read the status
   codes, not a script's summary line.
+- **KMS locally needs an *impersonated* ADC session, and it expires.** Plain
+  `gcloud auth application-default login` cannot sign — the signing role sits on
+  `kms-signer-svc`, and Aaron holds only `serviceAccountTokenCreator` scoped to it. A lapsed
+  session fails as a 400 reading `unable to impersonate … "error_subtype":"invalid_rapt"`, which
+  looks like broken config and is not. → `CC-059`
+  · `gcloud auth application-default login --impersonate-service-account=kms-signer-svc@carbon-contractors.iam.gserviceaccount.com`
 
 **Wallet and frontend**
 
