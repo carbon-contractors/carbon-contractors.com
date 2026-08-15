@@ -11,17 +11,20 @@
  *   4. viem recoverAddress recovers the same address that was derived
  *
  * Usage (local dev — uses Application Default Credentials):
- *   GCP_KMS_KEY_PATH=projects/.../cryptoKeyVersions/1 npm run verify:kms
- *
- * The ADC session must be IMPERSONATED, and it EXPIRES (CC-059). A plain
- * `gcloud auth application-default login` cannot sign: the signing role sits on
- * kms-signer-svc and Aaron holds only serviceAccountTokenCreator scoped to it. A lapsed
- * session fails as a 400 reading
- * `unable to impersonate ... "error_subtype":"invalid_rapt"`, which reads like broken
- * config and is not — it is a login that needs redoing:
  *
  *   gcloud auth application-default login \
  *     --impersonate-service-account=kms-signer-svc@carbon-contractors.iam.gserviceaccount.com
+ *   npm run verify:kms
+ *
+ * **The impersonation flag is not optional and this is not one-time setup.** Aaron's own
+ * account holds `roles/iam.serviceAccountTokenCreator` scoped to `kms-signer-svc`, not the
+ * KMS signing role directly, so plain `application-default login` produces credentials
+ * that cannot sign — see CC-059's 2026-08-08 update, where that was confirmed against the
+ * IAM console rather than assumed.
+ *
+ * The session also expires. When it has, the failure is a 400 from the KMS client reading
+ * `unable to impersonate ... "error_subtype":"invalid_rapt"` — Google's reauth token has
+ * lapsed. It looks like a configuration error and is not one; re-run the login above.
  *
  * This header previously said "# one-time setup" against the un-impersonated command.
  * Both halves were wrong, and it stayed wrong long enough to cost debugging time twice.

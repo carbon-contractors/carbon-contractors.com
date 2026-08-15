@@ -124,10 +124,61 @@ async function transferOne(
   console.log(`   tx: ${tx.hash} — waiting for confirmation...`);
   await tx.wait();
 
-  const confirmedOwner: string = await contract.owner();
-  const ok = confirmedOwner.toLowerCase() === newOwner.toLowerCase();
-  console.log(`   new owner: ${confirmedOwner} — ${ok ? "PASS" : "FAIL, does not match expected"}`);
-  return { name: contractName, ok, skipped: false, dryRun: false };
+  // This confirmation read is what Lessons-Learned §16 is about. It ran once, immediately
+  // after tx.wait(), against a load-balanced public gateway with no read-your-writes
+  // guarantee — hit a backend that had not caught up, returned the OLD owner, and printed
+  // a confident `FAILED` for two transfers that had both succeeded.
+  //
+  // §16 was written on 2026-08-08 and the script was not changed. On 2026-08-15 it did the
+  // exact same thing to the CC-082 redeploy. Recording a lesson is not fixing it.
+  //
+  // So: poll rather than read once, and — more importantly — distinguish "confirmed it did
+  // not happen" from "could not confirm". Those are different results and only one of them
+  // means the transfer failed.
+  const confirmedOwner = await pollForOwner(contract, newOwner);
+  const ok = confirmedOwner?.toLowerCase() === newOwner.toLowerCase();
+
+  if (ok) {
+    console.log(`   new owner: ${confirmedOwner} — PASS`);
+    return { name: contractName, ok: true, skipped: false, dryRun: false };
+  }
+
+  console.log(`   last read: ${confirmedOwner ?? "unreadable"} — COULD NOT CONFIRM`);
+  console.log(`   The transaction was mined. This is very likely RPC lag, not a failure.`);
+  console.log(`   Do NOT re-run. Verify independently before concluding anything:`);
+  console.log(`     node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs`);
+  console.log(`     https://sepolia.basescan.org/tx/${tx.hash}`);
+  return { name: contractName, ok: false, skipped: false, dryRun: false };
+}
+
+/**
+ * Re-reads owner() until it reports the expected address, or attempts run out.
+ *
+ * Polls for the value we expect rather than retrying on exception, because the failure mode
+ * here is not an error — it is a *successful* read returning stale data. A generic
+ * try/catch retry would have caught nothing on 2026-08-08 or 2026-08-15.
+ */
+async function pollForOwner(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  contract: any,
+  expected: string,
+  attempts = 8,
+): Promise<string | null> {
+  let last: string | null = null;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      last = (await contract.owner()) as string;
+      if (last.toLowerCase() === expected.toLowerCase()) return last;
+    } catch {
+      // A codeless-address read on a lagging node throws rather than returning stale data.
+      last = null;
+    }
+    if (i < attempts) {
+      console.log(`   owner() not updated yet, re-reading in 5s (${i}/${attempts - 1})...`);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+  return last;
 }
 
 async function main() {
