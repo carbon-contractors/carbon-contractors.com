@@ -1,0 +1,95 @@
+# Invariant monitors — CC-085, ADR-0003.
+#
+# Alerting path 1 of 2. Runs the read-only audit scripts against the live deployment on a
+# schedule and posts to a webhook when one fails.
+#
+# Path 2 is the dead-man's switch: a free external cron monitor that this job pings only
+# on a fully green run, and which alerts when the ping does not arrive. It is deliberately
+# NOT hosted here, because scheduled Actions are best-effort, can be delayed under load,
+# and are auto-disabled after 60 days of repository inactivity — this repo was dormant
+# May–July 2026, so that is a lived failure, not a theoretical one. A monitor that can only
+# report while GitHub is healthy cannot report that GitHub is the thing that failed.
+#
+# ── Safety properties, all deliberate ────────────────────────────────────────────────
+#
+#  * No `pull_request` or `push` trigger. This job reaches the live chain and holds
+#    secrets; a PR must never be able to run it.
+#  * The repository guard stops it running on a fork. A fork inherits workflow files but
+#    not secrets, so an unguarded scheduled job on a fork would fail forever and alert
+#    nobody. (GitHub also disables schedules on forks, but stating it in the file means
+#    the property does not depend on remembering that.)
+#  * `permissions: contents: read` — nothing here writes to the repo.
+#  * Only secret *names* appear in this file. Values come from repository secrets and are
+#    masked in the log. Contract addresses and block numbers are public facts and are
+#    written inline on purpose: putting them in secrets would hide the configuration
+#    without protecting anything, and a wrong address is exactly the thing a reader of
+#    this repo should be able to spot.
+#  * The runner never prints a webhook or heartbeat URL, not even truncated. This repo is
+#    public and so are its Actions logs; a Discord webhook URL is a bearer credential.
+
+name: Invariant monitors
+
+on:
+  schedule:
+    # Hourly at :17 — off the hour, where every other scheduled job on the platform piles
+    # up and gets delayed.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated monitor names (blank = all)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: invariant-monitors
+  cancel-in-progress: false
+
+jobs:
+  monitors:
+    name: Run invariant monitors
+    runs-on: ubuntu-latest
+    if: github.repository == 'carbon-contractors/carbon-contractors.com'
+    timeout-minutes: 15
+
+    env:
+      # Public values. See the note above on why these are not secrets.
+      NEXT_PUBLIC_BASE_NETWORK: testnet
+      NEXT_PUBLIC_ESCROW_CONTRACT: "0xe80d03688E8fa6270668AD73191d353e522CB1b1"
+      NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT: "0x4cdeF542F9361201f9543512eeCd1eE834793203"
+      NEXT_PUBLIC_USDC_ADDRESS: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+      VERDICT_SIGNER_ADDRESS: "0xa8931097540e69B474013D294d0bA6A2cC853e4b"
+      # CC-070: without this every getLogs query scans from genesis. Re-derive after any
+      # redeploy with scripts/audit/find-deploy-block.mjs.
+      ESCROW_DEPLOY_BLOCK: "45494043"
+      RPC_MAX_BLOCK_RANGE: "10000"
+
+      # Secrets. BASE_SEPOLIA_RPC_URL is optional — unset falls back to the public
+      # endpoint, which is rate-limited (CC-048) and has no read-your-writes guarantee
+      # (Lessons-Learned §16). Fine for these monitors: they only read committed state.
+      BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+      MONITOR_WEBHOOK_URL: ${{ secrets.MONITOR_WEBHOOK_URL }}
+      MONITOR_WEBHOOK_STYLE: ${{ vars.MONITOR_WEBHOOK_STYLE }}
+      MONITOR_TELEGRAM_CHAT_ID: ${{ secrets.MONITOR_TELEGRAM_CHAT_ID }}
+      MONITOR_HEARTBEAT_URL: ${{ secrets.MONITOR_HEARTBEAT_URL }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      # viem only — the monitors do not need the Next build or the Hardhat toolchain.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run monitors
+        run: |
+          node scripts/audit/run-monitors.mjs \
+            ${{ inputs.only && format('--only={0}', inputs.only) || '' }}

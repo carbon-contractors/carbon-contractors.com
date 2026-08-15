@@ -11,8 +11,25 @@
  *   4. viem recoverAddress recovers the same address that was derived
  *
  * Usage (local dev — uses Application Default Credentials):
- *   gcloud auth application-default login  # one-time setup
  *   GCP_KMS_KEY_PATH=projects/.../cryptoKeyVersions/1 npm run verify:kms
+ *
+ * The ADC session must be IMPERSONATED, and it EXPIRES (CC-059). A plain
+ * `gcloud auth application-default login` cannot sign: the signing role sits on
+ * kms-signer-svc and Aaron holds only serviceAccountTokenCreator scoped to it. A lapsed
+ * session fails as a 400 reading
+ * `unable to impersonate ... "error_subtype":"invalid_rapt"`, which reads like broken
+ * config and is not — it is a login that needs redoing:
+ *
+ *   gcloud auth application-default login \
+ *     --impersonate-service-account=kms-signer-svc@carbon-contractors.iam.gserviceaccount.com
+ *
+ * This header previously said "# one-time setup" against the un-impersonated command.
+ * Both halves were wrong, and it stayed wrong long enough to cost debugging time twice.
+ *
+ * What this script does NOT check, and scripts/audit/verify-signer.mjs does (CC-085):
+ * whether the deployed escrow actually accepts this signer, and whether its EIP-712 domain
+ * separator matches the one a verdict would be signed against. A key that signs perfectly
+ * and is not in acceptedSigners produces signatures that revert on every claim.
  *
  * The kms-signer module auto-detects whether it's running inside Vercel
  * (via the VERCEL env var) and selects its auth path accordingly:
