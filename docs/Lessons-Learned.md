@@ -968,6 +968,43 @@ blocks, how long. That took about twenty minutes here and changed the entire des
 noting that this repo's own convention says to "read the referenced code before proposing a plan";
 the missing half is to re-check the *proposed fix* against measurement, not only the problem statement.
 
+## 23. The money contract had no tests at all, and every check we did run stayed green
+
+**2026-08-15, during `CC-082`.**
+
+`CarbonEscrow` was written, deployed to Base Sepolia, granted ownership of real (testnet) funds,
+described in `CLAUDE.md`, and referenced by nine backlog issues. It had **zero tests.** Not thin
+coverage — none. There was no `test/` directory, `npm test` ran only vitest against `src/`, and
+`hardhat.config.ts` loaded the mocha plugin for a suite that did not exist.
+
+This is the substrate under §17, §19 and §20. `completeTask` could never succeed for anyone
+(`CC-080`); `expireTask` refunded an agent out from under a worker who had delivered; a single
+`nonReentrant`-guarded contract sat holding the entire product premise. Every one of those would
+have been caught by a test that simply *ran the happy path once*. Nothing ran it, so nothing caught
+it, for the entire life of the project.
+
+The uncomfortable part is that the repo did not feel untested. There were 131 passing vitest tests,
+a typecheck, a lint, a security audit, and CI enforcing all of them on every PR. The green checkmark
+was real; it just did not cover the contract. **Coverage of the code you wrote tests for tells you
+nothing about the code you didn't.**
+
+Two mechanisms, not one, because "write tests" is not a mechanism:
+
+- **Wire the new suite into CI in the same commit that creates it.** An unrun suite decays to a
+  worse state than no suite, because it looks like protection.
+- **`npm test` is now a half-truth and the docs say so.** There are two suites and two typechecks;
+  three of the four did not exist or did not run before this. When a repo has more than one, the
+  command that *sounds* comprehensive has to be documented as the one that is not.
+
+**A second, smaller lesson from the same day.** The ABIs in `src/lib/contracts/*-abi.ts` were
+maintained by hand. A hand-written ABI missing a function is indistinguishable at runtime from a
+contract that does not have one — viem encodes what it is told, the call reverts, and the error
+points at the chain rather than at the file. The `reputation-abi.ts` in the tree was in fact an
+incomplete subset of the deployed contract, which nobody had noticed because nothing called the
+missing parts. They are generated from the compiled artifact now, with a CI drift check. **Anything
+transcribed by hand from a build output is a defect waiting for its first reader** — generate it,
+and fail the build when the copy is stale.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.

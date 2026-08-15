@@ -39,6 +39,22 @@ function stubBaseEnv(extra: Record<string, string> = {}) {
   for (const [k, v] of Object.entries(extra)) vi.stubEnv(k, v);
 }
 
+/**
+ * CarbonEscrow v2 state numbering (CC-082). These were bare integers here until the v2
+ * renumbering silently changed what `task(2)` meant — `Completed` moved from 2 to 3, so
+ * the fixture kept passing type checks while asserting the wrong thing.
+ */
+const State = {
+  None: 0,
+  Funded: 1,
+  Delivered: 2,
+  Completed: 3,
+  Disputed: 4,
+  Arbitrating: 5,
+  Resolved: 6,
+  Expired: 7,
+} as const;
+
 /** A task struct as viem decodes it from getTask(). */
 function task(state: number, worker = WORKER, amountUnits = BigInt(1_000_000)) {
   return {
@@ -46,7 +62,14 @@ function task(state: number, worker = WORKER, amountUnits = BigInt(1_000_000)) {
     worker,
     amount: amountUnits,
     deadline: BigInt(0),
+    reviewWindow: 259200,
+    submittedAt: BigInt(0),
     state,
+    verdictPassed: false,
+    specHash: `0x${"00".repeat(32)}`,
+    evidenceHash: `0x${"00".repeat(32)}`,
+    verdictHash: `0x${"00".repeat(32)}`,
+    attestationUid: `0x${"00".repeat(32)}`,
   };
 }
 
@@ -160,7 +183,7 @@ describe("CC-070 — reputation from on-chain state", () => {
 
   it("issues no getLogs call at all", async () => {
     stubBaseEnv();
-    mocks.readContract.mockResolvedValue(task(2));
+    mocks.readContract.mockResolvedValue(task(State.Completed));
 
     const { getOnChainReputationSummary } = await import("@/lib/contracts/escrow");
     await getOnChainReputationSummary(WORKER, ["a", "b"]);
@@ -173,12 +196,15 @@ describe("CC-070 — reputation from on-chain state", () => {
   it("counts each on-chain state and sums earnings from Completed only", async () => {
     stubBaseEnv();
     const byId: Record<string, ReturnType<typeof task>> = {
-      done1: task(2, WORKER, BigInt(5_000_000)),
-      done2: task(2, WORKER, BigInt(2_500_000)),
-      open: task(1),
-      fight: task(3),
-      arbitrated: task(4, WORKER, BigInt(9_000_000)),
-      lapsed: task(5),
+      done1: task(State.Completed, WORKER, BigInt(5_000_000)),
+      done2: task(State.Completed, WORKER, BigInt(2_500_000)),
+      open: task(State.Funded),
+      fight: task(State.Disputed),
+      arbitrated: task(State.Resolved, WORKER, BigInt(9_000_000)),
+      lapsed: task(State.Expired),
+      // v2 additions — a delivered task awaiting review, and one under adjudication.
+      submitted: task(State.Delivered),
+      adjudicating: task(State.Arbitrating),
     };
     // The caller passes toTaskId(id), so hash each known id to work out which task
     // this particular call is asking for.
@@ -192,12 +218,14 @@ describe("CC-070 — reputation from on-chain state", () => {
     const { getOnChainReputationSummary } = await import("@/lib/contracts/escrow");
     const s = await getOnChainReputationSummary(WORKER, Object.keys(byId));
 
-    expect(s.total_tasks).toBe(6);
+    expect(s.total_tasks).toBe(8);
     expect(s.completed).toBe(2);
     expect(s.funded).toBe(1);
     expect(s.disputed).toBe(1);
     expect(s.resolved).toBe(1);
     expect(s.expired).toBe(1);
+    expect(s.delivered).toBe(1);
+    expect(s.arbitrating).toBe(1);
     // 5.0 + 2.5 only — the Resolved task's 9 USDC is excluded, because the state
     // alone does not say which way the owner arbitrated.
     expect(s.total_earned_usdc).toBe(7.5);
@@ -207,7 +235,7 @@ describe("CC-070 — reputation from on-chain state", () => {
 
   it("rejects a task whose on-chain worker is someone else", async () => {
     stubBaseEnv();
-    mocks.readContract.mockResolvedValue(task(2, OTHER, BigInt(1_000_000)));
+    mocks.readContract.mockResolvedValue(task(State.Completed, OTHER, BigInt(1_000_000)));
 
     const { getOnChainReputationSummary } = await import("@/lib/contracts/escrow");
     const s = await getOnChainReputationSummary(WORKER, ["stolen"]);
@@ -221,7 +249,7 @@ describe("CC-070 — reputation from on-chain state", () => {
 
   it("rejects an id with no on-chain task", async () => {
     stubBaseEnv();
-    mocks.readContract.mockResolvedValue(task(0, "0x0000000000000000000000000000000000000000", BigInt(0)));
+    mocks.readContract.mockResolvedValue(task(State.None, "0x0000000000000000000000000000000000000000", BigInt(0)));
 
     const { getOnChainReputationSummary } = await import("@/lib/contracts/escrow");
     const s = await getOnChainReputationSummary(WORKER, ["phantom"]);
@@ -232,7 +260,7 @@ describe("CC-070 — reputation from on-chain state", () => {
 
   it("matches the worker address case-insensitively", async () => {
     stubBaseEnv();
-    mocks.readContract.mockResolvedValue(task(2, WORKER.toUpperCase().replace("0X", "0x")));
+    mocks.readContract.mockResolvedValue(task(State.Completed, WORKER.toUpperCase().replace("0X", "0x")));
 
     const { getOnChainReputationSummary } = await import("@/lib/contracts/escrow");
     const s = await getOnChainReputationSummary(WORKER.toLowerCase(), ["mixed"]);

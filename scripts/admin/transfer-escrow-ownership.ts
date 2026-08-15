@@ -39,10 +39,13 @@ interface EthersLike {
   keccak256(data: string): string;
   getAddress(address: string): string;
   getSigners(): Promise<Array<{ address: string }>>;
-  getContractAt(name: string, address: string): Promise<{
-    owner(): Promise<string>;
-    transferOwnership(newOwner: string): Promise<{ hash: string; wait(): Promise<unknown> }>;
-  }>;
+  // ethers hands back an untyped `Contract` — hardhat-typechain is configured but emits
+  // nothing under Hardhat 3, so contract methods resolve at runtime through its proxy.
+  // This used to declare `{ owner(); transferOwnership() }`, which read as safer but was
+  // never actually checked: the file was excluded from every tsconfig until CC-082 added
+  // one that covers it, and the declaration does not match what ethers returns.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getContractAt(name: string, address: string): Promise<any>;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

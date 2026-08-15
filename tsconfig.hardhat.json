@@ -1,0 +1,34 @@
+{
+  // The Hardhat half of the repo, which the Next.js tsconfig deliberately excludes: it
+  // targets a different runtime (Node ESM, not a bundler), needs ES2020+ for BigInt
+  // literals, and depends on plugin type augmentations that would otherwise leak into the
+  // app build.
+  //
+  // Before CC-082 these files were excluded from `npm run typecheck` and checked by
+  // nothing at all. `npm run typecheck:contracts` covers them now.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node", "mocha", "chai"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  // scripts/admin/verify-escrow-lifecycle.ts is deliberately NOT here — it imports app
+  // code through the `@/` alias and is checked by the Next tsconfig instead. Only the
+  // scripts that reach for `network.create().ethers` belong on this side.
+  "include": [
+    "hardhat.config.ts",
+    "test/**/*.ts",
+    "scripts/deploy/**/*.ts",
+    "scripts/admin/transfer-escrow-ownership.ts"
+  ]
+}

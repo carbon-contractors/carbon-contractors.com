@@ -252,11 +252,45 @@ Once `submitWork` exists, "worker did not deliver" is distinguishable from "agen
 
 ## Open items
 
-- Review window duration, and whether it is fixed or agent-set within bounds.
+**Closed 2026-08-15 while implementing `CC-082`.** Both were load-bearing on the bytecode, so
+they were settled before the contract was written rather than after it was deployed.
+
+- ~~Review window duration, and whether it is fixed or agent-set within bounds.~~ →
+  **Agent-set at `createTask`, bounded by the contract.** `MIN_REVIEW_WINDOW` 12h,
+  `MAX_REVIEW_WINDOW` 14d. Both bounds carry weight: the lower stops a worker claiming before
+  the agent can look at anything, the upper stops an agent stalling a delivered worker
+  indefinitely. A fixed constant was rejected because tuning it would cost a redeploy and a
+  $5 photo task and a multi-day job do not want the same number; an owner-settable default was
+  rejected because it lets the platform change the timing of live tasks, which is more
+  authority than D9 wants.
+- **What a valid failing verdict does** — under-specified by A1.3, which said only that it
+  blocks the worker's claim. → **It moves the task to `Disputed`.** It does not refund the
+  agent. Refunding would hand the verdict signer unilateral power to take money off a worker
+  who has already delivered, with no recourse — exactly the authority D9 exists to bound.
+  Returning to `Funded` for a resubmission was rejected as D8 work, which is v2.
+- **`disputeTask` requires a signed failing verdict; there is no bare-assertion dispute.**
+  This follows from D2 and D6 together rather than from either alone, and it is the single
+  most consequential reading in the implementation. If a bare call could block the worker's
+  claim, the agent would still hold both outcomes — release via `completeTask`, refusal via
+  disputing — and the escrow would protect nobody. Requiring a signature is what makes a
+  refusal re-runnable, and therefore falsifiable.
+
+  **The sharp edge, stated plainly:** if the platform will not sign a failing verdict, the
+  agent has no on-chain recourse and the worker is paid. That is D6's liveness default working
+  as designed, but it also means a task with no machine-checkable spec (`specHash == 0`)
+  *always* resolves to the worker. The "category applicability" consequence below now has a
+  concrete mechanism behind it, and it is the strongest argument yet for value caps on
+  categories that do not check.
+
+Still open:
+
 - Value floor for jury escalation.
 - Spec schema versioning and its own migration path.
 - Whether `specHash` covers the prose description as well as the machine-checkable criteria.
 - `CC-070` currently breaks `getTaskResolvedOutcome`, which the event-reading half of Defect 3's fix depends on.
+- **Categories with no meaningful automated check now have a determinate outcome — the worker
+  wins.** Decide whether that is acceptable, or whether those categories need caps, exclusion
+  from auto-booking, or a different resolution path. Feeds `/services` and `CC-075`.
 
 ---
 

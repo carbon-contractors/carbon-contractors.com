@@ -41,7 +41,15 @@ function getChainConfig() {
   return { chain, rpcUrl };
 }
 
-async function getPlatformAccount(): Promise<LocalAccount> {
+/**
+ * The platform's signing account — KMS-backed in production, a raw key locally.
+ *
+ * Exported since CC-082 because signing is no longer only about sending transactions.
+ * Under `ADR-0001` Amendment 1 the platform's entire role in settlement is producing an
+ * EIP-712 verdict signature and handing it to the parties; it never transacts. Callers
+ * that need `signTypedData` rather than a wallet client want this directly.
+ */
+export async function getPlatformAccount(): Promise<LocalAccount> {
   if (_account) return _account;
 
   const config = getConfig();
@@ -97,7 +105,15 @@ function getEscrowAddress(): Address {
 
 /**
  * Call escrow.completeTask(taskId) on-chain as the platform signer.
- * Releases locked USDC to the worker.
+ *
+ * **This can never succeed and is not called from a working path — CC-080.**
+ * `completeTask` requires `msg.sender == task.agent` and `createTask` records the funder
+ * as the agent, so the platform signer is structurally the wrong sender. It fails safely,
+ * returning `isError` without flipping the DB. Left in place because CC-080 owns its
+ * removal and the replacement (the agent signing for itself) is CC-081 Defect 1's work.
+ *
+ * CC-082 did not change this. Under v2 the worker's route to payment no longer depends on
+ * it at all: `releaseAfterReview` and `claimWithVerdict` are worker-called.
  */
 export async function completeTaskOnChain(
   taskId: `0x${string}`,
@@ -157,6 +173,15 @@ export async function resolveDisputeOnChain(
 
 /**
  * Call escrow.expireTask(taskId) on-chain to refund the agent.
+ *
+ * **CC-082 made this unreachable for the platform signer, deliberately.** In v1
+ * `expireTask` was callable by anyone, so this worked. `ADR-0001` Amendment 1 A1.2 made
+ * refunds a pull-payment the agent claims for itself, so `expireTask` is now agent-only
+ * and this reverts with `NotAgent()` whoever calls it from here.
+ *
+ * That is the intended posture — the platform should not be in any settlement path — but
+ * it means this function is dead until the agent-side call exists. Removing it belongs
+ * with `CC-081` Defect 1, which rewrites the whole app layer against the v2 ABI.
  */
 export async function expireTaskOnChain(
   taskId: `0x${string}`,
