@@ -17,6 +17,10 @@ const eslintConfig = defineConfig([
     "cache/**",
     "typechain-types/**",
     "types/ethers-contracts/**",
+    // Agent worktrees are full checkouts of this same repo, so every finding in `src/`
+    // gets reported once per live worktree. Three copies of one warning reads as three
+    // new problems, which is exactly the wrong signal when you have just edited a file.
+    ".claude/worktrees/**",
   ]),
 ]);
 
