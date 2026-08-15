@@ -120,7 +120,11 @@ async function main() {
   console.log(`MIN_REVIEW_WINDOW        ${mark(min === 43200)}  ${min}s (${min / 3600}h)`);
   console.log(`MAX_REVIEW_WINDOW        ${mark(max === 1209600)}  ${max}s (${max / 86400}d)`);
   console.log(`usdc()                   ${mark(usdcOk)}  ${usdc}`);
-  console.log(`totalLocked()            ${mark(locked === 0n)}  ${locked}`);
+  // Informational, not a pass/fail. This started life marking non-zero with ✗, which was
+  // right for a fresh deployment and wrong the moment a task was funded — it flagged a
+  // perfectly normal escrow while still printing CLEAN underneath. Whether the balance is
+  // *accounted for* is verify-escrow-solvency.mjs's question, not this script's.
+  console.log(`totalLocked()               ${locked} units${locked === 0n ? " (nothing in flight)" : ""}`);
   console.log(`owner()                  ${mark(ownerIsHsm)}  ${owner}`);
   console.log(`acceptedSigners(HSM)     ${mark(signerAccepted)}  ${signerAccepted}`);
   console.log(`VERDICT_TYPEHASH         ${typehash}`);
@@ -152,7 +156,9 @@ async function main() {
     console.log(`✗ usdc() does not match NEXT_PUBLIC_USDC_ADDRESS (${expectedUsdc}).`);
     process.exit(1);
   }
-  console.log("✓ CLEAN — v2, owned by the HSM key, verdict signer seeded, nothing locked.");
+  console.log("✓ CLEAN — v2, owned by the HSM key, verdict signer seeded.");
+  console.log("  Whether the locked balance is accounted for is a separate question:");
+  console.log("    node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs");
 }
 
 main().catch((err) => {
