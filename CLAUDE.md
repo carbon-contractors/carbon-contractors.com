@@ -36,9 +36,13 @@ migrate to Base mainnet and re-run the full lifecycle with Aaron's own funds (`C
 gate lifts (`CC-014`). **The public's first look is on mainnet.** Finishing `CC-076` means "ready to
 attempt the one-way migration", not "go public".
 
-**No part of the money path works end to end yet.** Funding strands USDC, settlement reverts,
-disputes are self-resolved. Nothing is lost because none of it has ever run. `CC-080`, `CC-081`,
-`CC-082`.
+**The money path is half proven.** As of 2026-08-15 a worker has been paid on Sepolia by the v2
+escrow, through a signed verdict, with no platform transaction anywhere in the path (`CC-082`).
+Still broken, and all app-layer rather than contract: **`/api/fund-task` strands USDC** because
+x402 pays the contract directly instead of calling `createTask` (`CC-081` Defect 1); the platform's
+own `completeTaskOnChain` and `expireTaskOnChain` can never succeed (`CC-080`); and `resolve_dispute`
+is still agent-only in the app layer, though the v2 contract no longer permits a bare-assertion
+dispute (`CC-081` Defect 2). Nothing is lost, because the funding path has still never been run.
 
 ## Start here every session
 
@@ -102,10 +106,12 @@ exists rather than reasoning from this file.**
   contract has no sweep, rescue or `receive`. Measured 2026-08-11: nothing stranded, because it has
   never been run. First real use loses the money. → `CC-081` Defect 1, `CC-037`
   · `node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs`
-- **`contracts/CarbonEscrow.sol` is v2 and the deployed contract is still v1.** The source in the
-  tree implements `ADR-0001` — `submitWork`, pull-payment claims, EIP-712 verdicts.
-  **`NEXT_PUBLIC_ESCROW_CONTRACT` points at the old bytecode until the redeploy runs.**
-  Anything reasoning about live behaviour must read the deployed ABI, not the file. → `CC-082`
+- **CarbonEscrow v2 is deployed** — `0xe80d03688E8fa6270668AD73191d353e522CB1b1` on Sepolia,
+  block `45494043`, owned by the HSM key, verdict signer seeded. Implements `ADR-0001`:
+  `submitWork`, pull-payment claims, EIP-712 verdicts. **The `TaskState` enum was renumbered** —
+  `Completed` moved 2 → 3 and everything above `Funded` shifted, so any hard-coded state integer
+  predating 2026-08-15 is wrong. → `CC-082`
+  · `node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs`
 - **`completeTaskOnChain` can never succeed, and `expireTaskOnChain` no longer can either.**
   `completeTask` is agent-only and the platform signer is structurally the wrong sender (`CC-080`).
   v2 made `expireTask` agent-only too — refunds are a pull-payment the agent claims (`A1.2`) — so
@@ -153,7 +159,9 @@ exists rather than reasoning from this file.**
 **Environment and config**
 
 - **`ESCROW_DEPLOY_BLOCK` must be set** or event queries scan from genesis — ~36× the requests.
-  Sepolia: `39032720`. Not a `NEXT_PUBLIC_` var, so it takes effect at runtime.
+  Sepolia: **`45494043`**, and it moves with every redeploy — it was `39032720` until 2026-08-15,
+  which is a valid block and therefore fails slowly rather than loudly. Not a `NEXT_PUBLIC_` var,
+  so it takes effect at runtime.
   `RPC_MAX_BLOCK_RANGE` (default `10000`) is a *provider* property and has already moved once.
   → `CC-070` · `node --env-file=.env.local scripts/audit/find-deploy-block.mjs`
 - **`NEXT_PUBLIC_*` is inlined at build time.** Changing a Vercel env var does nothing without a
