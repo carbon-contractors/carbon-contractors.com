@@ -273,12 +273,20 @@ npm run lint
 npm run build
 npm run compile          # Hardhat compile
 npm run gen:abi          # Regenerate src/lib/contracts/*-abi.ts from artifacts (CC-082)
+npm run monitors         # Run every invariant monitor against the LIVE chain (CC-085)
+npm run monitors:list    # Offline — validates the monitor registry. Runs in CI
 npm run seed             # BROKEN — still writes the pre-migration-008 `skills` column (CC-017)
 ```
 
 CI runs `npm ci`, `npm audit --audit-level=high`, lint, typecheck, compile, `typecheck:contracts`,
-the ABI drift check, `test:contracts`, test, build. The audit step fails the build on high-severity
-findings, so a stale dependency tree breaks CI rather than merging quietly.
+the ABI drift check, `test:contracts`, `monitors:list`, test, build. The audit step fails the build
+on high-severity findings, so a stale dependency tree breaks CI rather than merging quietly.
+
+**The invariant monitors run on a schedule, not in CI** — `.github/workflows/monitors.yml`, hourly.
+They read the live chain, so no `pull_request` trigger may ever run them. Alerting has two paths and
+**path 2 is not live until `MONITOR_WEBHOOK_URL` and `MONITOR_HEARTBEAT_URL` are set as repository
+secrets**; without the heartbeat, the schedule silently stopping is indistinguishable from
+everything passing. → `CC-085`, `ADR-0003` D3/D5
 
 ## Conventions
 

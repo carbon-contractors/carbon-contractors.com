@@ -1035,6 +1035,47 @@ missing parts. They are generated from the compiled artifact now, with a CI drif
 transcribed by hand from a build output is a defect waiting for its first reader** — generate it,
 and fail the build when the copy is stale.
 
+## 24. The health check verified the component and not the contract it had to satisfy
+
+**2026-08-15, while building `CC-085`.**
+
+`npm run verify:kms` has existed for months and does a genuinely careful job: it fetches the public
+key from Cloud KMS, derives the address, signs a message, recovers it, and diffs the two. It hits
+real GCP, no mocks. When it says `✓ ALL CHECKS PASSED` the key works.
+
+It could not have detected the most likely way verdict signing actually breaks.
+
+A verdict is an EIP-712 signature, and EIP-712 binds the digest to `(name, version, chainId,
+verifyingContract)`. The escrow was redeployed this morning under `CC-082`, which changed
+`verifyingContract`. A signer still hashing against the old address would produce cryptographically
+perfect signatures that the new contract can never recover to an accepted signer. Separately,
+`acceptedSigners` is seeded in the constructor — a redeploy that forgot to seed it, or a key
+rotation, leaves a signer that signs beautifully and reverts on every claim. Neither shows up in a
+sign-and-recover round trip, because **the round trip never asks the contract anything.**
+
+Both failures are silent in the specific sense `ADR-0003` is about. Post-Amendment 1 the platform
+makes no transaction in the settlement path, so there is no failed transaction to alert on; the
+system just resolves every task on the liveness default and pays out regardless of evidence.
+
+The generalisable form: **a health check that exercises a component in isolation verifies the
+component, not the interface it has to satisfy.** "Can the signer sign" and "will the verifier
+accept what the signer produces" are different questions, and only the second one is the property
+anybody cares about. The cheap fix was to read `domainSeparator()`, `VERDICT_TYPEHASH()` and
+`acceptedSigners(signer)` off the deployed contract and compare them against an independently
+computed statement of the same intent — three RPC reads, no credentials required, and it now runs on
+a schedule.
+
+Worth noting the shape is §23's again with the polarity flipped. §23 was a component nothing ever
+executed. This was a component that *was* executed, regularly, verifying the wrong property — which
+is the more expensive version, because the passing check is what stops anyone looking closer.
+
+**Smaller lesson from the same day, for anyone wiring scheduled Actions.** An unset GitHub Actions
+secret or variable arrives in the process as the **empty string, not `undefined`**. So `??` does not
+select the default: `process.env.MONITOR_WEBHOOK_STYLE ?? "discord"` silently picks the wrong payload
+shape, and `BigInt(process.env.RPC_MAX_BLOCK_RANGE ?? 10000)` is `0n`, which turns a chunked
+`getLogs` loop into one that never advances. Use `||` for anything sourced from Actions, and validate
+after coercion.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.
