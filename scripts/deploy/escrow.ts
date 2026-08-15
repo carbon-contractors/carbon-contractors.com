@@ -40,6 +40,24 @@ function required(name: string, hint: string): string {
 /** CC-059 — a fresh deploy is owned by the deployer, and must not stay that way. */
 const HSM_OWNER = "0xa8931097540e69B474013D294d0bA6A2cC853e4b";
 
+/**
+ * The public Base Sepolia gateway load-balances across backends with no read-your-writes
+ * guarantee, so a read issued immediately after a write can hit a node that has not seen
+ * it yet. Same failure the lifecycle and dispute scripts already guard against.
+ */
+async function withRpcLagRetry<T>(fn: () => Promise<T>, attempts = 6): Promise<T> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === attempts) throw err;
+      console.log(`   RPC has not caught up yet, retrying in 5s (${attempt}/${attempts - 1})...`);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+  throw new Error("unreachable");
+}
+
 async function main() {
   const { ethers } = await network.create();
   const [deployer] = await ethers.getSigners();
@@ -69,14 +87,27 @@ async function main() {
   // Read every constructor-set value back off the chain rather than assuming the
   // arguments took. A wrong USDC address here strands funds; a missing verdict signer
   // leaves settlement dead.
-  const [owner, usdc, signerAccepted, minWindow, maxWindow, domain] = await Promise.all([
-    escrow.owner(),
-    escrow.usdc(),
-    escrow.acceptedSigners(VERDICT_SIGNER),
-    escrow.MIN_REVIEW_WINDOW(),
-    escrow.MAX_REVIEW_WINDOW(),
-    escrow.domainSeparator(),
-  ]);
+  //
+  // Retried, because the first real run of this script (2026-08-15) threw
+  // `could not decode result data (value="0x")` on owner() against a deployment that had
+  // in fact succeeded: the public sepolia.base.org gateway load-balances across backends
+  // with no read-your-writes guarantee, so the node answering the call had not yet seen
+  // the block carrying the contract's code. A verification that fails for reasons
+  // unrelated to what it verifies is worse than none, because the reader cannot tell the
+  // two apart.
+  //
+  // If this still fails, the deployment is very likely fine — confirm with
+  // `scripts/audit/verify-escrow-deployment.mjs <address>` rather than redeploying.
+  const [owner, usdc, signerAccepted, minWindow, maxWindow, domain] = await withRpcLagRetry(() =>
+    Promise.all([
+      escrow.owner(),
+      escrow.usdc(),
+      escrow.acceptedSigners(VERDICT_SIGNER),
+      escrow.MIN_REVIEW_WINDOW(),
+      escrow.MAX_REVIEW_WINDOW(),
+      escrow.domainSeparator(),
+    ]),
+  );
 
   console.log("\nVerification");
   console.log("  usdc()                 ", usdc, usdc.toLowerCase() === USDC_ADDRESS.toLowerCase() ? "✓" : "✗ MISMATCH");

@@ -656,6 +656,36 @@ independently, or wait and re-read, before concluding failure. This applies with
 exactly when the stakes are highest and the temptation to act immediately on the reported result is
 strongest.
 
+### It happened again, eight days later, in the same script — 2026-08-15
+
+Everything above was written on 2026-08-08. The script was not changed.
+
+On 2026-08-15, transferring ownership of the `CC-082` escrow redeploy, `transfer-escrow-ownership.ts`
+printed `CarbonEscrow: FAILED` for a transfer that had succeeded. Same script, same read, same
+gateway, same stale value. It was caught in seconds this time only because an independent audit
+script was run straight afterwards and reported `owner()` as the HSM key — but it would have been
+caught by nothing at all if that habit had lapsed.
+
+The same defect produced two further wrong results the same morning: the new deploy script threw
+`could not decode result data (value="0x")` on a deployment that had succeeded, and `npm run
+verify:kms` failed on an expired impersonation session whose correct fix was recorded in `CC-059`
+and never propagated to the script's own usage comment.
+
+**The lesson this adds:** *recording a lesson is not fixing it.* §16 stated the correct conclusion
+plainly — "do not trust that immediate read as the verdict" — and then the finding stayed in this
+document while the code that keeps exhibiting it went untouched. A postmortem that ends in prose
+ends in a place nobody reads at the moment of failure. It has to end in a diff.
+
+Two concrete changes, finally made:
+
+- The confirmation read **polls for the expected value** rather than reading once. Note that a
+  generic try/catch retry would have caught nothing here — the failure is a *successful* read
+  returning stale data, not an exception. Retrying on error is the obvious fix and the wrong one.
+- The script now distinguishes **"confirmed it did not happen"** from **"could not confirm"**, which
+  are different results and only one of them is a failure. It prints the transaction hash and the
+  independent check to run, and says explicitly not to re-run. The original `FAILED` collapsed both
+  into the reading most likely to provoke a dangerous retry on an irreversible action.
+
 ### A smaller version of the same mistake, earlier in the same evening
 
 Getting to the point of running that script required granting a Google Cloud IAM permission
