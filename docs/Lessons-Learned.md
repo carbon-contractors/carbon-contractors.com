@@ -1076,6 +1076,57 @@ shape, and `BigInt(process.env.RPC_MAX_BLOCK_RANGE ?? 10000)` is `0n`, which tur
 `getLogs` loop into one that never advances. Use `||` for anything sourced from Actions, and validate
 after coercion.
 
+## 25. The rule that hid the bug was the one we added to prevent it
+
+`src/app/globals.css` has carried `overflow-x: hidden` on `html` and `body` since the **initial
+commit**. It is a standard defensive idiom, and it does exactly what it says: no page of this site
+has ever shown a horizontal scrollbar.
+
+It also meant that the shared `Footer`'s link row had been overflowing the viewport on **every page
+of the site** — all ten routes `PageShell` renders — since the footer was written in `2f9a852` on
+2026-03-21, and nothing surfaced it in the five months since. `.links` was a bare
+`display: flex; gap: 24px` with no `flex-wrap` and no media queries, so at 375px it wanted 393.1px
+inside a 327px content box.
+
+Two things made it invisible rather than merely ugly:
+
+- **`overflow-x: hidden` does not fix an overflow. It deletes the evidence.** The content still
+  overruns; the browser just declines to offer a way to reach it. The symptom that would have made
+  anyone look — a page that scrolls sideways — was suppressed at the root, permanently, for every
+  defect of this class we would ever write.
+- **Centred flex containers clip at both ends.** `.inner` is a column flex with
+  `align-items: center`, so the over-wide row sat at `left: -9.1px, right: 384.1px`. `UNSUBSCRIBE`
+  lost its right edge and `LEARN` lost its left. Only the right-hand overflow is scrollable, so even
+  the one surviving signal — `scrollWidth` 384 vs `clientWidth` 375 — under-reported the damage by
+  half, and nobody was reading it anyway.
+
+The unflattering part is that this was already written down. `CC-025`, filed 2026-07-25 — four months
+after the footer shipped, three weeks before the overflow was noticed — says the `/services` tables
+can clip, "combined with `overflow-x: hidden` on `body` … with no way to scroll to the cut-off
+content." The mechanism was correctly identified and then filed as a property of one page. It was
+re-triaged on 2026-08-11 and confirmed as still valid, and even that second look stayed inside its
+own scope. Nobody asked the next question.
+
+(Measured afterwards, `/services` is in fact clean at 360px today and the footer was the overflow
+actually visible there — so the ticket that named the mechanism was describing the less severe of
+the two defects it could have caught.)
+
+**The generalisable form: a rule that suppresses a whole class of symptom needs a paired detector, or
+it is not a mitigation — it is a blindfold with a good reputation.** `overflow-x: hidden` is fine to
+keep; what was missing is anything that asserts `document.body.scrollWidth === clientWidth` at a
+couple of narrow widths. That check costs one line and would have caught this the day it shipped.
+The second-order lesson is about tickets: when an issue describes a *mechanism* rather than an
+instance, that is the moment to ask what else the mechanism covers. `CC-025` described a global
+mechanism in a local ticket, and the scoping is what let it sit.
+
+**A smaller one, in the §22 family.** The plan for the fix predicted the row at ~345px and proposed
+a smaller `gap` to keep all six links on one line at 375px. Measured in the renderer, the row was
+393.1px and the six links are 299.8px of *text alone* against 327px of space — one line was never
+achievable at any usable gap, and probing 24 / 14 / 10 / 8px produced the identical break every
+time. The fix (`flex-wrap: wrap`) was right; the stated reason for half of it was wrong, and only
+measuring found that out. Reasoning about layout from the stylesheet is a hypothesis. The renderer
+is the authority, and it is one `getBoundingClientRect()` away.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.
