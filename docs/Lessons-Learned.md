@@ -1076,6 +1076,63 @@ shape, and `BigInt(process.env.RPC_MAX_BLOCK_RANGE ?? 10000)` is `0n`, which tur
 `getLogs` loop into one that never advances. Use `||` for anything sourced from Actions, and validate
 after coercion.
 
+## 25. The comment warning about expression interpolation was the thing that broke the workflow
+
+**2026-08-16, one day after `CC-085` shipped.**
+
+The alerting drill (`CC-085`, PR #88) added a `--args=` passthrough to `monitors.yml`, deliberately
+routed through `env:` rather than interpolated into the command line, with a comment inside the
+`run:` block explaining why:
+
+```
+# attacker-controllable in the general case, and `${{ }}` substitution happens
+# before the shell sees the string, so an input containing shell metacharacters would execute.
+```
+
+That comment contains an empty expression pair. **GitHub scans the entire `run:` scalar for
+expressions before any shell sees it, and does not care that the line is a shell comment.** An empty
+pair is a parse error, so the workflow file became invalid — and an invalid workflow on the default
+branch means GitHub **stops running its schedule.**
+
+The invariant monitors did not run for seven hours. Nobody noticed until an unrelated CI question
+sent someone to `gh run list`.
+
+### What made it invisible
+
+Three things, each individually reasonable:
+
+- **A parse error produces no job, so it produces no check run.** The GitHub API returns nothing
+  useful — `--log-failed` says `log not found`, the jobs array is empty, and the check-runs endpoint
+  for the commit shows only the *other*, passing workflows. The error text exists **only in the
+  Actions web UI**, as an annotation. Reading it required opening a browser at the run URL.
+- **The failed runs were attributed to `push`** — an event `monitors.yml` does not even subscribe
+  to. So the failures looked like noise from a workflow that obviously should not be running on
+  push, rather than the signal that the file was broken.
+- **A stopped schedule emits nothing.** Which is precisely the failure mode `ADR-0003` was written
+  about, arriving in the monitoring system itself.
+
+### What actually worked
+
+The dead-man's switch — `ADR-0003`'s path 2, the whole reason it exists. It is the only mechanism in
+the design that can report "the monitors are not running", because it is the only one not hosted by
+the thing that stopped. Path 1, the webhook, cannot fire: it needs a run to have happened.
+
+### The generalisable form
+
+**Documentation written inside a machine-parsed region is not inert.** A comment is only a comment
+to the layer that strips comments, and here the outer layer — GitHub's expression scanner — runs
+first. The same shape catches YAML anchors in prose, template delimiters in Jinja comments, and
+`--` inside SQL string literals.
+
+The narrower operational lesson, worth its own line: **an invalid workflow file silently disables its
+schedule.** Not "runs and fails" — does not run. So the class of change most able to break scheduled
+monitoring is a change to the monitoring workflow itself, and there is no CI gate on it, because CI
+does not lint workflow files. `actionlint` in the CI job would have caught this in the PR.
+
+Unflattering detail worth keeping: this was written into the file by the same session that had just
+argued, correctly and at length, that an alerting path nobody has watched fire is not one you can
+rely on. The drill was built to test the webhook. It broke the schedule.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.

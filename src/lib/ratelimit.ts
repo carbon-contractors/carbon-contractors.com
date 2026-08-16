@@ -149,4 +149,20 @@ export const mcpRateLimiter = createLimiter(30, 60_000, "mcp");
 /** Challenge endpoint rate limiter: 10 req/min per IP. */
 export const challengeRateLimiter = createLimiter(10, 60_000, "challenge");
 
+/**
+ * Task-creation rate limiter: 30 tasks/hour, keyed on the **authenticated caller
+ * wallet** rather than the IP (CC-081 Defect 4).
+ *
+ * The authentication is the control here; this is a bound on how fast one
+ * authenticated agent can grow the tasks table. 30/hour is far past anything this
+ * marketplace sees pre-launch, and `TASK_CREATE_LIMIT_PER_HOUR` exists for when it
+ * is not. Note CC-020: without Upstash configured this is per-instance in-memory,
+ * so on Vercel the effective limit is 30/hour × live instances.
+ */
+export const taskCreationRateLimiter = createLimiter(
+  parseInt(process.env.TASK_CREATE_LIMIT_PER_HOUR ?? "30", 10),
+  3_600_000,
+  "task-create",
+);
+
 export type { RateLimitResult, RateLimiter };

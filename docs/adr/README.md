@@ -29,9 +29,14 @@ made.
 | [ADR-0004](ADR-0004-public-claims-and-pseudonymity.md) | Public claims — copy describes the target state, and the identity claim is pseudonymity | accepted | two positions `CLAUDE.md` kept re-litigating |
 | [ADR-0005](ADR-0005-worker-acceptance-and-offer-lifecycle.md) | Worker acceptance, the offer lifecycle, and concurrency limits | accepted | the worker never consented to being hired |
 
-`ADR-0001` carries an **Amendment 1** (same date) that changed D4, D6 and D9 — verdicts became
-EIP-712 signatures rather than platform transactions, and settlement became pull-payment. Read the
-amendment; several decisions above it are restated by it.
+`ADR-0001` carries two amendments, and both change decisions stated above them:
+
+- **Amendment 1** (same date) changed D4, D6 and D9 — verdicts became EIP-712 signatures rather than
+  platform transactions, and settlement became pull-payment.
+- **Amendment 2** (2026-08-16) scoped D3 — `specHash` binds the machine-checkable criteria and the
+  schema version but **not** the prose, and spec schemas are **never migrated in flight**. It also
+  records why the platform cannot refund an in-flight task, which is a bytecode fact rather than a
+  policy choice.
 
 ## Convention
 

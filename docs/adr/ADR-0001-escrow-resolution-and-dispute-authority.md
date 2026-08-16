@@ -3,7 +3,7 @@ id: ADR-0001
 title: Escrow resolution, evidence commitments, and dispute authority
 status: accepted
 date: 2026-08-13
-amended: 2026-08-13 - D4/D6/D9 revised, see Amendment 1
+amended: 2026-08-13 - D4/D6/D9 revised, see Amendment 1; 2026-08-16 - D3 scoped, see Amendment 2
 deciders: Aaron Clifft
 supersedes: none
 amends: CC-080 (clarifies "the paying agent controls release")
@@ -172,6 +172,9 @@ This gives `slash()` its first defensible trigger: fault established by a publis
 | LLM in the deterministic checker | Destroys re-runnability, the property the whole design rests on (D5) |
 | Jury as primary resolution path | Economics do not close below the value floor; imposes latency and cost on every microtask |
 | Platform submits verdict transactions | Marginal gas cost scales linearly with volume; puts platform liveness in every settlement path (Amendment 1) |
+| Scheduled-downtime schema migration, refunding invalidated tasks | Needs an owner-callable refund, reversing D9 custody; strands `Delivered` workers; downtime cannot rewrite an on-chain commitment (A2.3) |
+| Migrating in-flight tasks to a new schema version | Nothing to gain — specs are content-addressed, and D5 re-runnability already requires the checker to support old versions (A2.2) |
+| Freezing the prose description in `specHash` | Makes every clarification a new task; payment cannot follow the prose anyway, since the checker reads only the criteria (A2.1) |
 
 ---
 
@@ -210,6 +213,61 @@ This also adopts the standard pull-payment safety posture — no push loops, no 
 D6 stands unchanged in substance: **work submitted + no valid failing verdict presented before the window closes → the worker can claim.** The platform's inaction still cannot decide an outcome, and now the platform has no action to take in the happy path at all.
 
 The residual failure mode moves from "platform fails to transact" to "platform fails to *sign*", which is what `ADR-0003` monitors.
+
+---
+
+## Amendment 2 — 2026-08-16 — what `specHash` binds, and how schema versions age
+
+Raised while scoping `CC-084`. Two of this ADR's open items — whether `specHash` covers the prose description, and spec schema versioning — turned out to be the same question wearing two hats: **what is binding, and for how long.**
+
+Answering the second surfaced a proposal the deployed contract cannot execute. It is recorded in full at A2.3 rather than dropped, because "couldn't we just refund the affected tasks?" is exactly the kind of question that gets asked again by someone who has not read the bytecode.
+
+### A2.1 — `specHash` covers the machine-checkable criteria only; the prose is mutable but recorded
+
+`specHash` commits the machine-checkable acceptance criteria and the schema version. It does **not** cover the prose description.
+
+The criteria are the definition of done — the thing the checker evaluates and the thing a verdict is re-run against. Freezing them is what stops the goalposts moving (D4). The prose is context for a human, and clarifying it mid-task — a gate code, a site contact, a correction — is legitimate; freezing it would make every clarification a new task. The split is safe because **payment cannot follow the prose**: the checker reads only the criteria, so an edited brief cannot change what gets paid.
+
+**Mutable is not silent.** Prose edits are append-only in the DB, and the version a worker accepted is recorded against their acceptance.
+
+The hole this closes is not fund safety, it is scope creep. A worker who re-reads the brief mid-job sees different instructions and either does unpaid extra work, or hands the agent a paper trail claiming instructions were not followed. Neither moves money, and both are worth preventing at the cost of one table.
+
+Two consequences that are easy to get wrong:
+
+- **The prose history is task content, not audit log.** `ADR-0002` D4 and `CC-087` delete task content at terminal state, and this goes with it. Audit trails have a habit of quietly becoming retention exceptions; this one is not one.
+- **The worker-facing display must render the criteria human-readably**, not dump JSON beside prose. Under this split the prose is the half that does not bind, so a worker who reads only the prose has not seen the definition of done. That is a requirement on `CC-084`, not a nicety.
+
+`verify-commitments` narrows accordingly — it hashes the criteria and the schema version, not the description.
+
+### A2.2 — Spec schema versions are never migrated in flight
+
+The spec preimage carries its own `schema_version`. **A task resolves under the schema it was created with, permanently.** There is no migration of in-flight tasks and no mechanism to invalidate one.
+
+Deprecation happens at **intake**: stop accepting new tasks on an old version and let the in-flight ones drain. The tail is bounded by the contract — the delivery deadline plus at most `MAX_REVIEW_WINDOW` (14d). A rolling window, not an event.
+
+The cost usually charged against this approach — the checker must understand several schema versions at once — **is already paid.** D5 requires a verdict to be reproducible indefinitely from its pinned `checkerHash`; a checker that cannot evaluate a six-month-old spec cannot re-run a six-month-old verdict. Multi-version support is a consequence of re-runnability, not a new cost imposed by versioning. Scope note on `CC-083`.
+
+### A2.3 — The scheduled-downtime migration model is rejected; the contract cannot execute it
+
+Proposal considered: an MMO-style notified downtime during which the schema migration takes place, with any open task invalidated by the migration refunded to the requester unless completed or in dispute.
+
+Rejected on three grounds. The first is decisive on its own.
+
+1. **The platform cannot refund.** v2 has exactly three `onlyOwner` functions: `beginArbitration`, `resolveDispute`, `setVerdictSigner`. `resolveDispute` requires state `Disputed` or `Arbitrating` (`CarbonEscrow.sol:441`) — and the platform cannot reach that state either, because `disputeTask` requires the caller to be the agent or the worker **and** a signed failing verdict. From `Funded` or `Delivered` there is no path by which the platform moves money; refunds are the agent's own pull-payment via `expireTask` (A1.2). Implementing the proposal means adding an owner-callable refund, which hands the owner discretionary power to take money off a worker mid-task — reversing D9's custody property for an operational convenience.
+2. **It takes money off delivered workers.** "Unless completed or in dispute" leaves `Delivered` uncovered: the worker has submitted, the review window is running, and the task is neither. That is D1's agent-AWOL loss case reintroduced — this time by the platform rather than by an agent.
+3. **Downtime buys nothing here.** The analogy holds in an MMO because the server owns all state and can rewrite it while nobody is connected. `specHash` sits in an immutable on-chain struct. Taking the app offline does not change what a funded task committed to.
+
+### A2.4 — A broken schema version is an incident, not a migration
+
+The real problem the downtime proposal was reaching for is not a routine version bump — A2.2 handles those — but a schema version discovered to be **wrong**: a criterion that always passes, or one that is trivially faked. That is an incident, and it is answerable with machinery already specified.
+
+- **Pause intake** via `CC-086`'s kill switch. Never pause claims — `ADR-0003` D4.
+- **For tasks already in flight under the broken version, re-run the corrected check and sign failing verdicts where warranted.** This is within the platform's existing power and needs no new contract function. A failing verdict moves the task to `Disputed` rather than refunding (open items, 2026-08-15), so the worker keeps recourse — which is the difference between this and A2.3's rejected refund.
+- Tasks that pass under the corrected check are left alone and settle normally.
+
+**The review window is therefore a security parameter, not only worker UX.** The correction must be signed and presented before the window closes; afterwards the worker can claim and the platform has no lever. `MIN_REVIEW_WINDOW` of 12h is the floor on incident-response time, which is a constraint on how fast `ADR-0003`'s monitors and `CC-086`'s kill switch have to be. Not previously stated anywhere, and it should be.
+
+**Residual, accepted:** an agent can still fund a task on-chain under a version already known to be broken. The kill switch stops it happening through the product, but `createTask` is permissionless and the contract has no version gate. Gating it on a platform-maintained version list would put platform liveness back in the funding path, which A1.1 deliberately removed.
 
 ---
 
@@ -282,11 +340,19 @@ they were settled before the contract was written rather than after it was deplo
   concrete mechanism behind it, and it is the strongest argument yet for value caps on
   categories that do not check.
 
+**Closed 2026-08-16 by Amendment 2**, while scoping `CC-084`:
+
+- ~~Whether `specHash` covers the prose description as well as the machine-checkable criteria.~~ →
+  **Criteria and schema version only.** The prose stays mutable, but edits are recorded and the
+  accepted version is pinned to the worker's acceptance. A2.1.
+- ~~Spec schema versioning and its own migration path.~~ → **There is no migration path, by
+  design.** Tasks resolve under the schema they were created with; deprecation happens at intake
+  and the tail is bounded by the contract. A2.2. A version found to be *broken* is an incident
+  handled by kill switch plus corrected failing verdicts, not by a migration. A2.4.
+
 Still open:
 
 - Value floor for jury escalation.
-- Spec schema versioning and its own migration path.
-- Whether `specHash` covers the prose description as well as the machine-checkable criteria.
 - `CC-070` currently breaks `getTaskResolvedOutcome`, which the event-reading half of Defect 3's fix depends on.
 - **Categories with no meaningful automated check now have a determinate outcome — the worker
   wins.** Decide whether that is acceptable, or whether those categories need caps, exclusion
