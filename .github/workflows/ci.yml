@@ -16,6 +16,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # CC-085. Nothing in CI looked at workflow files, so an empty expression pair
+      # inside a run: comment reached master and silently disabled the invariant
+      # monitors' schedule for seven hours — an invalid workflow does not run and fail,
+      # it just stops (Lessons-Learned §25). The class of change most able to break
+      # scheduled monitoring had no gate on it at all.
+      #
+      # Runs first: it needs nothing installed and is the cheapest check in the job.
+      #
+      # Pinned by version AND sha256, because this downloads a binary and executes it.
+      # A marketplace action in the same slot would be a mutable dependency — a moved
+      # tag is a silent code change in a job that checks out the repository. Bump both
+      # values together; the checksum comes from the release's own checksums.txt.
+      - name: Lint workflow files
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint -color
+          rm -f actionlint actionlint.tar.gz
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:

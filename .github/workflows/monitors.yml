@@ -111,10 +111,16 @@ jobs:
           MONITOR_DRILL_ARGS: ${{ inputs.monitor_args }}
         run: |
           # Via env rather than interpolated into the command line: workflow inputs are
-          # attacker-controllable in the general case, and `${{ }}` substitution happens
-          # before the shell sees the string, so an input containing shell metacharacters
-          # would execute. This job holds secrets, so that is worth being careful about even
-          # when only the repo owner can dispatch it.
+          # attacker-controllable in the general case, and GitHub expression substitution
+          # happens before the shell sees the string, so an input containing shell
+          # metacharacters would execute. This job holds secrets, so that is worth being
+          # careful about even when only the repo owner can dispatch it.
+          #
+          # Do not write GitHub's expression delimiters literally in this block, not even
+          # in a comment. The whole `run:` scalar is scanned for expressions before any
+          # shell sees it, so an empty pair here is a parse error for the entire workflow
+          # file — which disables the schedule silently. That is exactly how this comment
+          # broke the monitors for seven hours on 2026-08-16.
           ARGS=()
           [ -n "$MONITOR_ONLY" ] && ARGS+=("--only=$MONITOR_ONLY")
           [ -n "$MONITOR_DRILL_ARGS" ] && ARGS+=("--args=$MONITOR_DRILL_ARGS")
