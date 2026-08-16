@@ -13,8 +13,9 @@
  *   2. demonstrates the OLD behaviour — one unbounded getLogs from block 0 — still
  *      fails against the live endpoint;
  *   3. runs the NEW behaviour — newest-first windows of RPC_MAX_BLOCK_RANGE blocks,
- *      bounded below by ESCROW_DEPLOY_BLOCK, stopping at the first hit — and checks the
- *      recovered values match the receipt exactly, reporting the request count.
+ *      bounded below by that escrow's deploy block, stopping at the first hit — and
+ *      checks the recovered values match the receipt exactly, reporting the request
+ *      count.
  *
  * Scope note, stated plainly: this reproduces the *query shape* used by
  * getTaskResolvedOutcome rather than importing it, because that function lives behind
@@ -25,6 +26,20 @@
  * half of the evidence: that the ranges chosen are ones the real endpoint accepts, and
  * that a real historical event is genuinely found.
  *
+ * **This is historical evidence, not a live check — every input is pinned (CC-082).**
+ * It read NEXT_PUBLIC_ESCROW_CONTRACT and ESCROW_DEPLOY_BLOCK from the environment
+ * until the v2 redeploy moved both out from under it, at which point it failed at step
+ * 1 with "no TaskResolved log found". Reading live config implied it tracked the
+ * current deployment; it never did. The one and only TaskResolved event in existence
+ * was emitted by the **v1** escrow, so the escrow address and its deploy block are now
+ * constants alongside CC059_TX. That is also why CC-085 deliberately left this out of
+ * the monitor registry: it asserts a fact about the past, which cannot regress.
+ *
+ * The query shape it validates is still shipping — getTaskResolvedOutcome
+ * (src/lib/contracts/escrow.ts) is live on the resolve_dispute recovery path, and v2
+ * still declares TaskResolved — so the evidence stands. Re-point these constants only
+ * once a v2 (or mainnet) TaskResolved event actually exists to prove it against.
+ *
  * Executes no writes and sends no transactions.
  *
  *   node --env-file=.env.local scripts/audit/verify-getlogs-recovery.mjs
@@ -32,42 +47,74 @@
  * Exit codes: 0 recovered and matched · 1 mismatch or not found · 2 misconfigured
  */
 
-import { createPublicClient, http, getAddress, parseAbiItem, decodeEventLog } from "viem";
+import { createPublicClient, http, parseAbiItem, decodeEventLog } from "viem";
 import { baseSepolia } from "viem/chains";
 
 const CC059_TX =
   "0x08cd2e374b5f7399370ffd767bcdf2b1fe063078fd8269e13b172d2984b918eb";
+
+/**
+ * The v1 CarbonEscrow on Base Sepolia — the contract that emitted CC059_TX's
+ * TaskResolved. Superseded as the live deployment by v2
+ * (0xe80d03688E8fa6270668AD73191d353e522CB1b1, CC-082), which is why this is pinned
+ * rather than read from NEXT_PUBLIC_ESCROW_CONTRACT. Verify with:
+ *   the `to` and the log address on
+ *   https://sepolia.basescan.org/tx/0x08cd2e374b5f7399370ffd767bcdf2b1fe063078fd8269e13b172d2984b918eb
+ */
+const V1_ESCROW = "0xb9bF8dAC51f62cA237F2C439c63c9D8f16FD2ef7";
+
+/**
+ * v1's deployment block, found by scripts/audit/find-deploy-block.mjs (CC-070).
+ * Pinned for the same reason as V1_ESCROW: ESCROW_DEPLOY_BLOCK now carries v2's
+ * 45494043, which is *above* the CC-059 event at 45204414 — so an env-driven lower
+ * bound would scan a range that starts after the event and correctly find nothing.
+ */
+const V1_DEPLOY_BLOCK = 39032720n;
 
 const TASK_RESOLVED = parseAbiItem(
   "event TaskResolved(bytes32 indexed taskId, bool releasedToWorker, uint256 amount)",
 );
 
 async function main() {
-  const escrowRaw = process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
-  const network = process.env.NEXT_PUBLIC_BASE_NETWORK ?? "testnet";
-  const rpcUrl =
-    network === "mainnet"
-      ? process.env.BASE_MAINNET_RPC_URL
-      : process.env.BASE_SEPOLIA_RPC_URL;
-  const deployBlock = process.env.ESCROW_DEPLOY_BLOCK;
-  const maxRange = BigInt(process.env.RPC_MAX_BLOCK_RANGE ?? "10000");
+  // Sepolia regardless of NEXT_PUBLIC_BASE_NETWORK — the pinned event is a Sepolia
+  // fact, so a mainnet cutover must not silently retarget this at a chain that has
+  // never held it.
+  const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL;
 
-  if (!escrowRaw) {
-    console.error("MISCONFIGURED: NEXT_PUBLIC_ESCROW_CONTRACT is required.");
+  // `?? "10000"` was wrong: ?? only catches null/undefined, so an env var present but
+  // empty gave BigInt("") === 0n, and the window loop below never advanced. Treat
+  // empty/whitespace as unset, and reject a zero or negative cap outright.
+  const rangeRaw = process.env.RPC_MAX_BLOCK_RANGE?.trim();
+  let maxRange;
+  try {
+    maxRange = rangeRaw ? BigInt(rangeRaw) : 10000n;
+  } catch {
+    console.error(`MISCONFIGURED: RPC_MAX_BLOCK_RANGE is not an integer: "${rangeRaw}"`);
     return 2;
   }
-  if (network === "mainnet") {
-    console.error("This script targets the Sepolia deployment that holds the CC-059 event.");
+  if (maxRange <= 0n) {
+    console.error(`MISCONFIGURED: RPC_MAX_BLOCK_RANGE must be positive, got ${maxRange}.`);
     return 2;
   }
 
-  const escrow = getAddress(escrowRaw);
+  const escrow = V1_ESCROW;
   const client = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl || undefined) });
 
-  console.log(`escrow            ${escrow}`);
+  console.log(`escrow            ${escrow}  (v1, pinned — see the header)`);
   console.log(`rpc               ${rpcUrl ? "dedicated endpoint" : "public sepolia.base.org"}`);
-  console.log(`ESCROW_DEPLOY_BLOCK  ${deployBlock ?? "(unset — would fall back to genesis)"}`);
-  console.log(`RPC_MAX_BLOCK_RANGE  ${maxRange}`);
+  console.log(`deploy block      ${V1_DEPLOY_BLOCK}  (v1, pinned)`);
+  console.log(`RPC_MAX_BLOCK_RANGE  ${maxRange}${rangeRaw ? "" : "  (default)"}`);
+
+  // Say out loud that the live deployment has moved on, so a reader running this does
+  // not mistake a pinned historical pass for a statement about the current contract.
+  const live = process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
+  if (live && live.toLowerCase() !== escrow.toLowerCase()) {
+    console.log("");
+    console.log(`note: the live escrow is ${live}.`);
+    console.log("      This script deliberately ignores it — see the header. It proves the");
+    console.log("      recovery query against the only TaskResolved event that exists, which");
+    console.log("      v1 emitted. It is not a check on the current deployment.");
+  }
   console.log("");
 
   // ── 1. ground truth from the receipt ──────────────────────────────────────
@@ -93,7 +140,9 @@ async function main() {
   }
 
   if (!truth) {
-    console.error("   no TaskResolved log found in that transaction — wrong tx or wrong escrow?");
+    console.error(`   no TaskResolved log found in that transaction, emitted by ${escrow}.`);
+    console.error("   Both are pinned constants in this file, so this should not happen —");
+    console.error("   check them against the transaction on sepolia.basescan.org.");
     return 1;
   }
 
@@ -125,7 +174,7 @@ async function main() {
   // ── 3. the new behaviour ──────────────────────────────────────────────────
   console.log("3. NEW behaviour — newest-first windows, bounded below, early exit");
   const head = await client.getBlockNumber();
-  const from = deployBlock !== undefined ? BigInt(deployBlock) : 0n;
+  const from = V1_DEPLOY_BLOCK;
 
   const windows = [];
   for (let start = from; start <= head; start += maxRange) {
@@ -153,6 +202,11 @@ async function main() {
 
   console.log(`   windows available ${windows.length}`);
   console.log(`   requests made     ${requests}`);
+  // Both numbers grow with chain length — the scan is newest-first and the event is
+  // fixed in the past, so it drifts further from head every day. CC-070 recorded
+  // 18 of 635 on 2026-08-11; a larger figure here is age, not a regression. What the
+  // evidence turns on is that the scan terminates on a real hit, not on its cost.
+  console.log("   (both grow with chain age — 18 of 635 when measured on 2026-08-11)");
 
   if (!found) {
     console.error("   FAIL — scanned the whole bounded range and found nothing.");
