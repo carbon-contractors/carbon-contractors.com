@@ -8,12 +8,12 @@ defects, the reasoning, and the fixes is worth something. Every entry below is a
 found in this codebase, not a hypothetical.
 
 **Method.** Each entry: what was wrong, why it survived review, what fixed it, and the
-transferable lesson. Entries are added as issues close — see `docs/backlog/` for the live tracker.
+transferable lesson. Entries are added as issues close â€” see `docs/backlog/` for the live tracker.
 Nothing is removed once written, including the embarrassing ones.
 
 **On "vibe coded."** Much of this codebase was written with AI assistance. That is not the
 interesting risk. Plenty of it has a hermetic test suite, a CI pipeline that fails on high-severity
-audit findings, eleven RLS migrations, and an HSM-backed signer — that is not what unexamined code
+audit findings, eleven RLS migrations, and an HSM-backed signer â€” that is not what unexamined code
 looks like. The actual risk, visible repeatedly below, is narrower and more mundane: **code that
 was generated, appeared to work, and was then never re-read.** Generation is cheap; verification is
 the part that requires deliberate effort. Several entries below are that exact failure.
@@ -22,15 +22,15 @@ the part that requires deliberate effort. Several entries below are that exact f
 
 ## 1. The path you test is not always the path you ship
 
-**Status:** open — `CC-055`, `CC-003`, `CC-001`
+**Status:** open â€” `CC-055`, `CC-003`, `CC-001`
 
 Every wallet test in this project's history used the Coinbase Wallet browser extension: a
 seed-phrase EOA that injects `window.ethereum`. But `src/lib/wallet/providers.tsx` configures no
-wagmi config and no connectors at all — it inherits OnchainKit's default, which is the
+wagmi config and no connectors at all â€” it inherits OnchainKit's default, which is the
 `baseAccount` passkey connector. With the extension installed, the extension wins.
 
-So the passkey Smart Wallet flow — the one the entire product pitch rests on, and the only route
-available to a phone user, since browser extensions don't exist on mobile — had never been
+So the passkey Smart Wallet flow â€” the one the entire product pitch rests on, and the only route
+available to a phone user, since browser extensions don't exist on mobile â€” had never been
 executed once. Not known broken. Unknown, which is worse, because it reads as tested.
 
 Three separate defects had accumulated on that single untested route: the connect button was
@@ -48,7 +48,7 @@ tool that makes your life easier is the thing hiding the defect.
 
 ## 2. Content-Security-Policy failures can be structurally invisible
 
-**Status:** open — `CC-003`
+**Status:** open â€” `CC-003`
 
 The deployed CSP had no `frame-src` directive at all, so the `keys.coinbase.com` passkey iframe
 fell back to `default-src 'self'` and was blocked outright. `connect-src` omitted
@@ -57,7 +57,7 @@ requests.
 
 Both would break wallet connection completely in production. Neither ever appeared in testing,
 because the browser extension signs in its own popup and proxies RPC through its background
-context — it never touches the page's CSP at all.
+context â€” it never touches the page's CSP at all.
 
 **Lesson:** CSP correctness cannot be established locally or through a proxying extension. It has
 to be verified on a deployed origin, in a clean profile, with the console open. A CSP that has
@@ -67,7 +67,7 @@ never rejected anything has never been tested.
 
 ## 3. Two spellings of the same address is two different records
 
-**Status:** open — `CC-002`
+**Status:** open â€” `CC-002`
 
 Registration wrote the EIP-55 checksummed, mixed-case address supplied by wagmi. Every lookup
 queried `.eq("wallet", wallet.toLowerCase())`. The column is case-sensitive `TEXT UNIQUE`.
@@ -85,13 +85,13 @@ more than one valid representation deserves the same treatment.
 
 ## 4. Build-time constants look exactly like runtime configuration
 
-**Status:** open — `CC-014`
+**Status:** open â€” `CC-014`
 
 `middleware.ts` and `src/app/page.tsx` both read `NEXT_PUBLIC_COMING_SOON` at module scope. Next
 inlines `NEXT_PUBLIC_*` at build time, and `/` is statically prerendered. Changing the value in
 the hosting dashboard therefore does nothing at all until a fresh deploy.
 
-The flag also fails closed — the string must be exactly `false` — which is correct, and doubles
+The flag also fails closed â€” the string must be exactly `false` â€” which is correct, and doubles
 the confusion when it appears not to work.
 
 **Lesson:** an environment variable that is inlined at build time is not configuration, it is a
@@ -103,7 +103,7 @@ is a trap.
 
 ## 5. Off-chain state drifting into a second source of truth
 
-**Status:** under verification — `CC-037`, and the argument it underpins in `CC-051`
+**Status:** under verification â€” `CC-037`, and the argument it underpins in `CC-051`
 
 The design principle is unambiguous: on-chain escrow state is authoritative for money, the
 database is a projection. Holding that line under pressure is harder than stating it, because the
@@ -115,21 +115,21 @@ landed since. Re-asserting the finding without re-reading current code would hav
 class of error as the original bug.
 
 There is a second reason it matters. The strongest argument that this platform is not custodial
-is not "the operator cannot extract the signing key" — that is true but beside the point, because
+is not "the operator cannot extract the signing key" â€” that is true but beside the point, because
 the operator can still direct the key to sign. The argument that holds is **"the contract permits
 no destination other than the on-chain worker or a refund to the funding agent."** That is a claim
 about reachable code paths, independently checkable on a block explorer. Which means verifying it
 is not only a security task; it is what makes the claim honest enough to publish.
 
 **Lesson:** stated invariants decay unless something checks them. And be specific about which
-property is doing the work — key custody and disposition control are different things, and
+property is doing the work â€” key custody and disposition control are different things, and
 conflating them produces a reassuring argument that does not survive scrutiny.
 
 ---
 
 ## 6. Four months of dormancy is not a neutral pause
 
-**Status:** resolved 2026-07-30 — `CC-053`, `CC-052`, `CC-049`
+**Status:** resolved 2026-07-30 â€” `CC-053`, `CC-052`, `CC-049`
 
 The project sat untouched from May to July 2026. Picking it back up surfaced more process debt
 than code debt:
@@ -138,14 +138,14 @@ than code debt:
   audited code four months out of date and produced findings that were already fixed. Wasted
   effort, and nearly published as fact.
 - **Completed work was stranded.** A finished key-compromise recovery runbook sat on an unmerged
-  branch for three months. The issue tracker said the work was done, because it was — just not
+  branch for three months. The issue tracker said the work was done, because it was â€” just not
   anywhere it took effect.
 - **The tracker had drifted from reality.** The consolidated go-live gate still showed items
   unticked that were marked Done elsewhere. Inherited checkboxes could not be trusted.
 - **The signing key changed underneath local dev.** Contract authority moved to the HSM, so the
   raw key still in `.env.local` is no longer the owner. Local escrow writes now revert in a way
   that reads as a code bug.
-- **A hardware upgrade** (new CPU and motherboard) invalidated a category of credentials —
+- **A hardware upgrade** (new CPU and motherboard) invalidated a category of credentials â€”
   TPM-bound ones. It happened to cost nothing here, because Windows Hello was never used as a
   passkey provider, but the exposure was real and unexamined until asked about.
 - **The law changed.** Australia's Corporations Amendment (Digital Assets Framework) Bill 2025
@@ -154,7 +154,7 @@ than code debt:
   environment did.
 
 **Lesson:** the first hour back on a dormant project belongs to `git fetch`, checking for unmerged
-branches, reconciling the tracker against the code, and asking what changed in the world — not to
+branches, reconciling the tracker against the code, and asking what changed in the world â€” not to
 writing code. Every one of the above would have been discovered eventually, at higher cost, by
 trusting a stale assumption.
 
@@ -171,13 +171,13 @@ buried in noise, and `git diff` was effectively useless as a review tool.
 Fixed by pinning `* text=auto eol=lf` and normalising the working tree.
 
 **Lesson:** line-ending hygiene is not cosmetic. If reviewing your own diff is painful, you stop
-reviewing your own diff — and that is the actual cost, not the noise itself.
+reviewing your own diff â€” and that is the actual cost, not the noise itself.
 
 ---
 
 ## 8. Publishing your defects is a stronger signal than publishing your polish
 
-**Status:** decided 2026-07-30 — `CC-056`, `CC-028`
+**Status:** decided 2026-07-30 â€” `CC-056`, `CC-028`
 
 An earlier recommendation in this project's review was to make the repository private before
 pushing a backlog that documents live, unfixed defects with `file:line` precision. That
@@ -189,7 +189,7 @@ deployment is a working exploit list, indexed and searchable.
 
 The case for public, which won: this is a solo project with no users, no real money, and testnet
 funds only, so the exploitable surface is close to nil. Meanwhile the trust deficit is the actual
-problem to solve — an unknown developer asking people to trust an escrow service cannot fix that
+problem to solve â€” an unknown developer asking people to trust an escrow service cannot fix that
 with assertions. Verifiable self-scrutiny is the only currency available. Hiding the defect list
 until everything is clean produces a repository that looks like every other project that has
 never been examined.
@@ -212,21 +212,21 @@ bad. A repository containing only successes is indistinguishable from one that w
 
 ## 9. "Closed" and "verified" are different words
 
-**Status:** resolved 2026-07-30 — the fixes held
+**Status:** resolved 2026-07-30 â€” the fixes held
 
 Six security findings in `AUDIT-2026-03-25.md` were fixed in March by writing migrations. The
 migrations were committed, the issues were closed, and nobody checked the live database afterwards.
 Four months later, the first independent inspection of production returned:
 
-- `waitlist` — RLS enabled, zero policies, so anon is denied. AUD-001 held.
-- `notification_channels` — RLS enabled, no anon SELECT policy. AUD-001 held.
-- `tasks` — RLS enabled, zero policies; anon reads a view that excludes `task_description`.
+- `waitlist` â€” RLS enabled, zero policies, so anon is denied. AUD-001 held.
+- `notification_channels` â€” RLS enabled, no anon SELECT policy. AUD-001 held.
+- `tasks` â€” RLS enabled, zero policies; anon reads a view that excludes `task_description`.
   AUD-009 held.
-- `humans` — anon-readable by deliberate design, as intended.
+- `humans` â€” anon-readable by deliberate design, as intended.
 
 So the work was correct. That is a good result and not the point. The point is that it was
-*unverified for four months*, and the same inspection turned up two objects in production —
-`exec_sql` and a `keepalive` table — that exist in no migration at all. The schema in version
+*unverified for four months*, and the same inspection turned up two objects in production â€”
+`exec_sql` and a `keepalive` table â€” that exist in no migration at all. The schema in version
 control was known-incomplete and nobody knew.
 
 Two errors were made *during* that inspection and are worth recording, because they are the same
@@ -234,11 +234,11 @@ error twice:
 
 1. A `keepalive` table was declared missing because it was absent from the migrations. It existed.
    Absence from your records is not absence from reality.
-2. It was then declared working because it existed and the cron was running. It wasn't — Supabase
+2. It was then declared working because it existed and the cron was running. It wasn't â€” Supabase
    paused the project regardless. Existence is not function.
 
 **Lesson:** a closed ticket is a claim about the past. Verify security properties against the live
-system, on a schedule, with a script you keep — not against the migration files, which only record
+system, on a schedule, with a script you keep â€” not against the migration files, which only record
 what you *meant* to happen. And when the check is cheap, run it before asserting anything: both
 errors above came from inferring state instead of querying it.
 
@@ -258,16 +258,16 @@ a human, controls the contracts. It stated:
 
 > The Ethereum address derived from the KMS public key matches the owner/signer address on the
 > deployed escrow contract. You can verify this yourself: check the contract owner address on
-> Basescan… confirm they match — proving the on-chain contract is controlled by the HSM key.
+> Basescanâ€¦ confirm they match â€” proving the on-chain contract is controlled by the HSM key.
 
 It does not match. Measured on Base Sepolia:
 
 - HSM-derived address: `0xa8931097540e69B474013D294d0bA6A2cC853e4b`
-- `CarbonEscrow.owner()`: `0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b` — a conventional private key
+- `CarbonEscrow.owner()`: `0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b` â€” a conventional private key
   sitting in a local `.env.local` file
 
 The HSM key was created, its attestation obtained, its address funded with 0.101 test ETH. The step
-that would have mattered — `transferOwnership()` — was never performed. Everything *around* the
+that would have mattered â€” `transferOwnership()` â€” was never performed. Everything *around* the
 security property was built. The property itself was not.
 
 ### Why it survived
@@ -277,7 +277,7 @@ Because the same repository recorded it correctly, and nobody reconciled the two
 these as **unticked boxes**:
 
 ```
-- [ ] Ethereum address derived: KMS public key → Ethereum address matches contract owner
+- [ ] Ethereum address derived: KMS public key â†’ Ethereum address matches contract owner
 - [ ] DEPLOYER_PRIVATE_KEY removed: Not present in any deployed environment variables
 ```
 
@@ -285,9 +285,9 @@ So the checklist was accurate and the marketing prose was not, and the prose is 
 reader sees. An unticked box is a quiet, easily-ignored artefact; a confident paragraph is not. The
 gap survived four months of dormancy and two reviews.
 
-There is an irony worth naming. `CLAUDE.md` already warned "do not trust the inherited checkboxes…
+There is an irony worth naming. `CLAUDE.md` already warned "do not trust the inherited checkboxesâ€¦
 several were stale." Here the checkboxes were the only thing telling the truth. The instruction was
-right in spirit — verify against the system — and would have been actively misleading if followed as
+right in spirit â€” verify against the system â€” and would have been actively misleading if followed as
 a heuristic about which document to distrust.
 
 ### Why this one is worse than an ordinary bug
@@ -297,7 +297,7 @@ A wrong security claim that a stranger can disprove does more damage to trust th
 all, because it converts "unproven" into "demonstrably careless." For an unknown solo developer
 holding other people's money, that is the whole asset.
 
-No user funds were ever at risk — Base Sepolia, test USDC, `totalLocked() = 0`. That is luck of
+No user funds were ever at risk â€” Base Sepolia, test USDC, `totalLocked() = 0`. That is luck of
 timing, not a mitigating design decision.
 
 ### What fixed it
@@ -306,12 +306,12 @@ The document now leads with the measured mismatch, marks each row of its threat 
 not, and keeps the false claim visible as a quotation rather than silently editing it away. The
 check is now a script, `scripts/audit/verify-contract-owner.mjs`, which derives the HSM address
 offline from the committed public key, reads `owner()` on chain, and **exits non-zero while they
-disagree** — so it can be wired into CI and stop being a matter of prose.
+disagree** â€” so it can be wired into CI and stop being a matter of prose.
 
 **Lesson:** any security claim you publish must be produced by something that can fail. If a
 document asserts a property, the property needs an executable check with the document's name on it,
 and the check must run. Prose has no exit code. Where a checklist and a narrative disagree about the
-same system, believe neither — go and measure — but note which one was written to persuade.
+same system, believe neither â€” go and measure â€” but note which one was written to persuade.
 
 ---
 
@@ -327,35 +327,35 @@ output:
 ```
 exec_sql(sql)       -> 401
 exec_sql(query)     -> 401
-… four more …
+â€¦ four more â€¦
 No exec_sql reachable via PostgREST under any tried parameter name.
 Either it does not exist, it is not in an exposed schema, or the signature differs.
 ```
 
 That conclusion is worthless. `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` is the literal string
-`placeholder…` — 33 characters, not even JWT-shaped. Every one of those 401s is *"you are not
+`placeholderâ€¦` â€” 33 characters, not even JWT-shaped. Every one of those 401s is *"you are not
 authenticated"*, and the script rendered them as *"the function is not there."*
 
 It was caught because the status codes were printed next to the summary, and 401 is not 404. Had the
-script printed only its verdict — which is exactly what a tidier script would do — the finding would
+script printed only its verdict â€” which is exactly what a tidier script would do â€” the finding would
 have been "no `exec_sql` exists, CC-054 closed" and it would have been wrong, in the reassuring
 direction, on the one issue gating publication of a database holding real email addresses.
 
 ### The near-miss inside the near-miss
 
 The decisive test in the same script uses the **anon** key, and that key is valid. It returned
-`404 PGRST202` — genuinely "no such function in the schema cache". So the actual answer was correct
+`404 PGRST202` â€” genuinely "no such function in the schema cache". So the actual answer was correct
 and the exposure is not real. But the right answer arrived beside a fabricated one, from the same
 script, in the same run, and the two are only distinguishable by reading HTTP status codes.
 
 Note also what could not be established at all: whether `exec_sql` still *exists*. Proving absence
 needs `pg_catalog`, and the endpoint that would enumerate it is service-role only. So the placeholder
-key did not merely produce a false statement — it removed the ability to check the true one.
+key did not merely produce a false statement â€” it removed the ability to check the true one.
 
 ### What fixed it
 
-The verdict lines now distinguish the three outcomes explicitly — not found (`PGRST202`/`PGRST205`),
-not permitted (`42501`), not authenticated (`401 Invalid API key`) — and `CLAUDE.md` carries the
+The verdict lines now distinguish the three outcomes explicitly â€” not found (`PGRST202`/`PGRST205`),
+not permitted (`42501`), not authenticated (`401 Invalid API key`) â€” and `CLAUDE.md` carries the
 asymmetric-credentials landmine so the next session does not spend an hour on it. The catalog query
 that actually answers the existence question is kept in
 `scripts/audit/inspect-live-schema.sql`.
@@ -370,7 +370,7 @@ requiring proof that the test could have come back positive.
 
 ## 12. The test passed because doing nothing succeeded
 
-**Status:** found 2026-07-30, **fixed 2026-08-13** — `CC-060`. See *"Three green runs proved
+**Status:** found 2026-07-30, **fixed 2026-08-13** â€” `CC-060`. See *"Three green runs proved
 nothing"* at the end of this entry, which is the part worth reading if you already know the story.
 
 `src/lib/__tests__/signer.test.ts` sets a deliberately fake escrow address
@@ -381,7 +381,7 @@ then calls `completeTaskOnChain` and expects it to fail. The comment says why:
 > there's no RPC, but `createKmsAccount` should have been called.
 
 There is an RPC. `BASE_SEPOLIA_RPC_URL` is unset, so `getChainConfig()` falls back to the chain
-default — the public `sepolia.base.org` endpoint. And `simulateContract` does not fail, because
+default â€” the public `sepolia.base.org` endpoint. And `simulateContract` does not fail, because
 **`eth_call` against an address with no code succeeds.** It returns empty data. Nothing reverts.
 
 So execution continued into `writeContract`, and the test suite broadcast a real transaction to Base
@@ -403,35 +403,35 @@ transaction to a live network. The test verified a side effect while silently pe
 effect. Every CI run since it was written was green.
 
 It surfaced only as *flakiness*. Five consecutive runs on an unchanged tree gave 3 failures, then 1,
-then three clean runs — because the suite was competing for the same public RPC as an unrelated audit
+then three clean runs â€” because the suite was competing for the same public RPC as an unrelated audit
 script running alongside it. The bug announced itself as network noise, which is the easiest class of
 failure to dismiss as someone else's problem.
 
 ### What makes it worse than a wasted transaction
 
 Nothing was harmed: a throwaway key, a codeless target, 22440 gas of testnet ETH. But Vitest loads
-`.env.local` into `process.env`, and CI supplies stub values instead — so local and CI have never run
+`.env.local` into `process.env`, and CI supplies stub values instead â€” so local and CI have never run
 the same test. `DEPLOYER_PRIVATE_KEY` in that file is currently the **owner** of the escrow contract
-(§10). The distance between this test and one signing a real state change as the contract owner is a
+(Â§10). The distance between this test and one signing a real state change as the contract owner is a
 single stubbed variable.
 
 **Lesson:** assert the thing you actually mean. A test whose pass condition is "something threw", or
-"a mock was reached", will keep passing after the behaviour underneath it changes shape entirely —
+"a mock was reached", will keep passing after the behaviour underneath it changes shape entirely â€”
 and a test that reaches the network can do real work while reporting success. If a unit test can
 transact, it is not a unit test; make the transport unreachable rather than trusting a fake address
 to be rejected. When tests go flaky, suspect the test before the network.
 
-### Fixed 2026-08-13 — and one correction to the above
+### Fixed 2026-08-13 â€” and one correction to the above
 
 `vitest.setup.ts` now strips every signing key, real RPC URL and live contract address from
-`process.env`, and replaces global `fetch` with a thrower. Every client in this codebase — viem,
-supabase-js — goes through `fetch`, so a real request is now impossible rather than merely
+`process.env`, and replaces global `fetch` with a thrower. Every client in this codebase â€” viem,
+supabase-js â€” goes through `fetch`, so a real request is now impossible rather than merely
 discouraged. `signer.test.ts` mocks `createPublicClient`/`createWalletClient` and asserts the
 *intent*: that `simulateContract` is called with the right arguments, that the prepared request is
 exactly what gets written, and that a simulate rejection means no write happens.
 
 **Correction:** the paragraph above says Vitest loads `.env.local` into `process.env`. Measured on
-2026-08-13, it does not — `DEPLOYER_PRIVATE_KEY` was absent, and the escrow address unset. So the
+2026-08-13, it does not â€” `DEPLOYER_PRIVATE_KEY` was absent, and the escrow address unset. So the
 "single stubbed variable" gap was narrower than stated. The environment is stripped anyway, because
 the reason it was safe was accidental: nobody had added dotenv loading, changed the runner, or
 exported the variable in their shell.
@@ -441,8 +441,8 @@ exported the variable in their shell.
 This is the part that generalises, and it caught us *after* the defect was already understood.
 
 With the fetch guard installed, the suite went 128/128 three times in a row. That looked like proof
-of hermeticity. It was not. Adding a `console.error` to the guard — so a blocked attempt is *logged*
-as well as thrown — showed **4 blocked network requests on every single run, with the suite still
+of hermeticity. It was not. Adding a `console.error` to the guard â€” so a blocked attempt is *logged*
+as well as thrown â€” showed **4 blocked network requests on every single run, with the suite still
 reporting 128/128 passed.**
 
 Four, because that is viem's default retry count: one attempt and three retries. All from the same
@@ -451,11 +451,11 @@ the only reason it stayed green is that the failure was swallowed downstream of 
 
 So a passing suite is not evidence that a suite is hermetic. Green tells you the assertions held; it
 tells you nothing about what the code attempted on the way. If you care whether tests touch the
-network, **count the attempts** — do not infer it from the result.
+network, **count the attempts** â€” do not infer it from the result.
 
 The final verification was therefore built around measurement rather than absence of failure: 20
 consecutive runs, 131/131 each, **zero** blocked attempts, and Hardhat account #0's on-chain
-transaction count read before and after — unchanged at 23842. Since that key is publicly known and
+transaction count read before and after â€” unchanged at 23842. Since that key is publicly known and
 shared, "unchanged" means nobody broadcast anything, which is a stronger statement than "we did not".
 
 **Lesson:** when you fix a test-isolation problem, instrument the boundary you just closed and check
@@ -472,19 +472,19 @@ actually fixed rather than merely contained.
 A task can be flipped to `disputed` through two separate entry points that both end at the same
 `updateTaskStatus(id, "disputed")` call: the `dispute_task` MCP tool, and `POST /api/dispute`, a
 REST endpoint the dashboard calls after submitting the on-chain `disputeTask` transaction. The MCP
-tool has required a verified wallet signature since it was written — `context.callerWallet` must
+tool has required a verified wallet signature since it was written â€” `context.callerWallet` must
 match the task's assigned wallet, checked against a nonce minted by
 `/api/basedhuman.mcp/challenge` and consumed via `viem.recoverAddress`. `/api/dispute` had none of
 that. It read a `payment_request_id` straight from an unauthenticated POST body and froze the task.
 And because `middleware.ts` only gates page routes, not `/api/*`, it was reachable on the live site
-the whole time — anyone who could see or guess a `payment_request_id` could freeze payment on any
+the whole time â€” anyone who could see or guess a `payment_request_id` could freeze payment on any
 task.
 
 ### Why it survived
 
 The two call sites were built at different times for different callers (an MCP agent vs. a
 browser dashboard), so they read as unrelated code, not as one security boundary implemented twice.
-The REST endpoint's own docstring undersold what it does — "Updates database status only... the
+The REST endpoint's own docstring undersold what it does â€” "Updates database status only... the
 worker must also call `escrow.disputeTask()` on-chain" reads like an internal bookkeeping detail,
 not a mutation with no caller identity check in front of it. Nothing forced the two paths to stay
 in parity, so the security work landed on one and was simply never carried over to the other.
@@ -495,13 +495,13 @@ in parity, so the security work landed on one and was simply never carried over 
 `src/lib/auth/wallet-challenge.ts` so there is exactly one implementation of the check, not two to
 keep in sync. `/api/dispute` now requires the same `x-caller-wallet` / `x-caller-signature` /
 `x-caller-nonce` headers as the MCP transport, verified against the same nonce table, and rejects
-unless the recovered wallet matches the task's `to_human_wallet` — the assigned worker, since this
+unless the recovered wallet matches the task's `to_human_wallet` â€” the assigned worker, since this
 endpoint is worker-initiated (the MCP tool instead checks `from_agent_wallet`, the requesting
 agent; same lock, different key, because the two callers are different parties to the same task).
 
 **Lesson:** when one state mutation is reachable through more than one transport, put the
 authorization check in one shared function that every caller goes through, not in each handler
-separately. "Mirror the pattern" is an instruction to extract and reuse, not to retype — retyping
+separately. "Mirror the pattern" is an instruction to extract and reuse, not to retype â€” retyping
 is exactly how the second copy quietly stays unauthenticated while the first one gets reviewed.
 
 ---
@@ -520,7 +520,7 @@ The homepage didn't load. `next dev` threw `Module not found: Can't resolve 'bs5
 request, 500ing `/`. The cause was three layers down: `wagmi/connectors`'s `baseAccount()` pulls in
 `@base-org/account`, whose Node SSR entry (`dist/index.node.js`, via
 `getOrCreateSubscriptionOwnerWallet.js`) bundles a copy of `@coinbase/cdp-sdk` that imports `bs58`
-in three files — and that package's own `package.json` doesn't list `bs58` as a dependency at all.
+in three files â€” and that package's own `package.json` doesn't list `bs58` as a dependency at all.
 Nothing in this repo was wrong. An upstream package was shipping code that only works if some
 *other* dependency in the tree happens to hoist `bs58` to a resolvable location, which it did not.
 
@@ -528,9 +528,9 @@ Nothing in this repo was wrong. An upstream package was shipping code that only 
 
 None of them render the page. `tsc --noEmit` type-checks; it doesn't bundle. `eslint` reads syntax
 trees; it doesn't resolve a module graph. `vitest` imports individual modules under mocks it
-controls — nothing in the 80-test suite imports `src/lib/wallet/providers.tsx`, because nothing
+controls â€” nothing in the 80-test suite imports `src/lib/wallet/providers.tsx`, because nothing
 needs to unit-test a provider wrapper. The one thing that actually resolves the real import graph
-Next.js will ship — the bundler, walking every `import` starting from `layout.tsx` — is the one
+Next.js will ship â€” the bundler, walking every `import` starting from `layout.tsx` â€” is the one
 step that isn't part of any of the three checks. It only ran when a dev server actually started and
 a page actually loaded in a browser.
 
@@ -539,13 +539,13 @@ a page actually loaded in a browser.
 Adding `bs58` directly as a top-level dependency. Node's module resolution walks up from the
 nested import site toward the project root looking for `node_modules/bs58` at each level; a
 top-level install satisfies that walk without touching the vendored package. This is a workaround
-for someone else's missing dependency declaration, not a real fix — it will need re-checking if
+for someone else's missing dependency declaration, not a real fix â€” it will need re-checking if
 `@base-org/account` or `@coinbase/cdp-sdk` bump versions.
 
 **Lesson:** typecheck, lint, and unit tests verify three different, narrower things than "the app
 runs." None of them execute a bundler's module resolution against the actual dependency tree that
 ships. CLAUDE.md already says frontend changes must be checked in a running browser before being
-called done — this is the concrete failure mode that rule exists to catch: a change that is
+called done â€” this is the concrete failure mode that rule exists to catch: a change that is
 correct in every static sense and still 500s on load, because the only thing that would have caught
 it is the thing that was skipped.
 
@@ -556,8 +556,8 @@ it is the thing that was skipped.
 **Status:** found and fixed 2026-08-04, tracked as `CC-064`
 
 Discovered by accident, trying to dry-run an unrelated script for `CC-059`: every single Hardhat
-command in this repo — `npm run compile`, both deploy scripts, a brand-new script that had never
-run before — failed identically with `Hardhat only supports ESM projects`. Not a regression from
+command in this repo â€” `npm run compile`, both deploy scripts, a brand-new script that had never
+run before â€” failed identically with `Hardhat only supports ESM projects`. Not a regression from
 that session's own work; reproduced with the pre-existing `scripts/deploy/escrow.ts` untouched.
 `hardhat` had drifted from `^3.2.0` to `3.12.0`, a major version that dropped CommonJS support
 outright, and this repo had never been updated to match.
@@ -567,39 +567,39 @@ outright, and this repo had never been updated to match.
 Nobody had run a Hardhat script in long enough that nobody noticed. Same shape as entry #12's
 flaky test and CC-057's schema drift: `npm ci`, `npm run typecheck`, `npm run lint`, `npx vitest
 run`, and `npm run build` all stayed green through this the entire time, because none of them
-touch the contracts toolchain at all — it is exercised only by a human (or an agent) actually
+touch the contracts toolchain at all â€” it is exercised only by a human (or an agent) actually
 running `npx hardhat run` or `npm run compile`, which per `CC-061`'s own investigation hadn't
 happened since well before the last CI run on `master`.
 
-It got worse on inspection. The installed `@nomicfoundation/hardhat-toolbox@^7.0.0` — the
-"recommended bundle" pinned in `package.json` — turned out to be a deprecated stub: its own
+It got worse on inspection. The installed `@nomicfoundation/hardhat-toolbox@^7.0.0` â€” the
+"recommended bundle" pinned in `package.json` â€” turned out to be a deprecated stub: its own
 `package.json` `homepage` field pointed at a `github.com/.../tree/deprecated-versions/...` branch,
 and simply installing it printed a warning that it "does not work with Hardhat 2 nor 3." `npm
 install` had been silently satisfying `^7.0.0` with a package the Hardhat team themselves had
 already end-of-lifed, for however long that range had been in `package.json`. A pinned major
-version range is not the same claim as "this major version is maintained and correct" — nothing
+version range is not the same claim as "this major version is maintained and correct" â€” nothing
 in `npm install`'s own output flags a resolved package as abandoned.
 
 ### What fixed it, and what it took
 
 Not a config flag. The docs site's own migration guide was accurate on the shape of the change
 (`"type": "module"`, `defineConfig()`, a real ethers-based replacement package) but thin on
-specifics; the reliable source turned out to be the framework's own GitHub repo — its committed
+specifics; the reliable source turned out to be the framework's own GitHub repo â€” its committed
 example templates and internal test fixtures showed the actual `network.create()` API, the
 `configVariable()` resolution behaviour, and the `ChainType` values in working, current code,
 which the rendered docs pages didn't. `gh search code` against the upstream repo did more to
 unblock this than three attempts at the hosted docs.
 
 Fixing it surfaced a second, separate finding: the deprecated toolbox's dependency tree carried an
-`elliptic` advisory with **no fixed version available at all** — the latest release still has it.
+`elliptic` advisory with **no fixed version available at all** â€” the latest release still has it.
 The advisory only reached this repo through `hardhat-verify` and `hardhat-ignition`, two plugins
 bundled into the toolbox that nothing here calls (no contract-explorer verification, no
 Ignition-based deployments). Swapping the toolbox meta-package for the specific plugins actually
-used dropped that entire vulnerable subtree — turning an "accept the risk, no fix exists" situation
+used dropped that entire vulnerable subtree â€” turning an "accept the risk, no fix exists" situation
 into zero unresolved findings, by removing surface area instead of waiting for upstream.
 
 **Lesson:** a dependency range that resolves cleanly and installs without error is not the same
-claim as "this is a maintained, working version" — `npm install` has no concept of "this package
+claim as "this is a maintained, working version" â€” `npm install` has no concept of "this package
 is abandoned," only "this range is satisfied." And a toolchain that nothing in CI actually
 exercises can go completely unusable while every automated check stays green, because green checks
 only prove what they run. If a whole class of tooling (here: anything touching contracts) isn't
@@ -613,7 +613,7 @@ exercised by CI, treat "nobody's complained" as "nobody's tried," not as "it wor
 
 `CC-059` had been open since 2026-07-30: the deployed escrow contracts were owned by a raw local
 key, not the HSM address Vercel actually signs as, so `resolveDisputeOnChain` reverted in
-production. The fix was a one-way, irreversible on-chain `transferOwnership()` call — exactly the
+production. The fix was a one-way, irreversible on-chain `transferOwnership()` call â€” exactly the
 kind of action this project's own rules require explicit go-ahead for, immediately before running
 it. That approval was given. The script ran, sent two real transactions, and printed:
 
@@ -622,11 +622,11 @@ CarbonEscrow: FAILED
 ReputationStake: FAILED
 ```
 
-Both had actually succeeded. `transferOwnership()` was confirmed on-chain for both contracts —
+Both had actually succeeded. `transferOwnership()` was confirmed on-chain for both contracts â€”
 independently verified against Basescan directly, `OwnershipTransferred` emitted, no reverts. The
 script's own `contract.owner()` re-read, executed immediately after `tx.wait()` resolved, against
 the same public `sepolia.base.org` RPC endpoint used to send the transaction, returned the *old*
-owner — a stale read on a load-balanced public gateway with no read-your-writes guarantee across
+owner â€” a stale read on a load-balanced public gateway with no read-your-writes guarantee across
 its backend nodes. The write landed on one node; the very next read a few milliseconds later hit a
 different one that hadn't caught up yet.
 
@@ -634,36 +634,36 @@ different one that hadn't caught up yet.
 
 A script that throws an exception announces "something is wrong, go look." A script that prints a
 clean, confident `FAILED` in a well-formatted summary table announces "something is wrong, and I
-already looked, and here's the answer" — which invites trusting it instead of checking further. On
+already looked, and here's the answer" â€” which invites trusting it instead of checking further. On
 an irreversible action, believing a false negative can be actively worse than believing a false
 positive: the natural next move after "it failed" is often "try again," and this project's own
-history (`Lessons-Learned.md` #10, #12) is full of exactly this shape of problem — a check that
+history (`Lessons-Learned.md` #10, #12) is full of exactly this shape of problem â€” a check that
 looks authoritative but is answering a narrower question than it appears to.
 
 It was caught here specifically because the result was checked against a *second, independent*
-source — the transaction hash on a block explorer — rather than trusted or re-run. Re-running would
+source â€” the transaction hash on a block explorer â€” rather than trusted or re-run. Re-running would
 likely have been harmless in this specific case: the script's own safety check
-(`currentOwner !== deployerAddress → ABORT`) would have refused to proceed on a second attempt,
+(`currentOwner !== deployerAddress â†’ ABORT`) would have refused to proceed on a second attempt,
 since by then the real owner was already the HSM address, not the deployer key signing the retry.
 But that safety margin was a property of this particular script, not something to rely on in
-general — the instinct to independently verify before reacting is the actual lesson, not "it would
+general â€” the instinct to independently verify before reacting is the actual lesson, not "it would
 have been fine anyway."
 
 **Lesson:** for any check that reads state immediately after writing it, on infrastructure you
 don't control the consistency model of (a public RPC gateway, a load-balanced API, anything without
-an explicit read-your-writes guarantee), do not trust that immediate read as the verdict — verify
+an explicit read-your-writes guarantee), do not trust that immediate read as the verdict â€” verify
 independently, or wait and re-read, before concluding failure. This applies with the most force
 exactly when the stakes are highest and the temptation to act immediately on the reported result is
 strongest.
 
-### It happened again, eight days later, in the same script — 2026-08-15
+### It happened again, eight days later, in the same script â€” 2026-08-15
 
 Everything above was written on 2026-08-08. The script was not changed.
 
 On 2026-08-15, transferring ownership of the `CC-082` escrow redeploy, `transfer-escrow-ownership.ts`
 printed `CarbonEscrow: FAILED` for a transfer that had succeeded. Same script, same read, same
 gateway, same stale value. It was caught in seconds this time only because an independent audit
-script was run straight afterwards and reported `owner()` as the HSM key — but it would have been
+script was run straight afterwards and reported `owner()` as the HSM key â€” but it would have been
 caught by nothing at all if that habit had lapsed.
 
 The same defect produced two further wrong results the same morning: the new deploy script threw
@@ -671,15 +671,15 @@ The same defect produced two further wrong results the same morning: the new dep
 verify:kms` failed on an expired impersonation session whose correct fix was recorded in `CC-059`
 and never propagated to the script's own usage comment.
 
-**The lesson this adds:** *recording a lesson is not fixing it.* §16 stated the correct conclusion
-plainly — "do not trust that immediate read as the verdict" — and then the finding stayed in this
+**The lesson this adds:** *recording a lesson is not fixing it.* Â§16 stated the correct conclusion
+plainly â€” "do not trust that immediate read as the verdict" â€” and then the finding stayed in this
 document while the code that keeps exhibiting it went untouched. A postmortem that ends in prose
 ends in a place nobody reads at the moment of failure. It has to end in a diff.
 
 Two concrete changes, finally made:
 
 - The confirmation read **polls for the expected value** rather than reading once. Note that a
-  generic try/catch retry would have caught nothing here — the failure is a *successful* read
+  generic try/catch retry would have caught nothing here â€” the failure is a *successful* read
   returning stale data, not an exception. Retrying on error is the obvious fix and the wrong one.
 - The script now distinguishes **"confirmed it did not happen"** from **"could not confirm"**, which
   are different results and only one of them is a failure. It prints the transaction hash and the
@@ -690,7 +690,7 @@ Two concrete changes, finally made:
 
 Getting to the point of running that script required granting a Google Cloud IAM permission
 (`Service Account Token Creator`) so a personal account could impersonate the signing service
-account for local testing. The first attempt granted it on the **project-level** IAM page — which,
+account for local testing. The first attempt granted it on the **project-level** IAM page â€” which,
 read at a glance, looked like the right principal had gained the right role. It hadn't: that page
 put the role on the *service account itself* rather than on the human account, backwards from what
 was needed, and the actual permission error on the next attempt (`iam.serviceAccounts.getAccessToken
@@ -713,7 +713,7 @@ The `resolve_dispute` MCP tool updates the database row and returns a text note 
 to go call the contract themselves. It reads like a TODO that got left as shipped behaviour.
 
 This is a different shape of bug from `CC-037` in the same file, `completeTaskOnChain`, which *is*
-called but fails on-chain every time because of an access-control mismatch. That one fails loudly —
+called but fails on-chain every time because of an access-control mismatch. That one fails loudly â€”
 a revert, a thrown error, something to notice. This one fails silently: the database says
 `completed`, the caller gets a success response, and nothing on-chain ever moves. Nothing crashes.
 Nothing logs a warning. The only way to notice is to go looking for the call site and find that it
@@ -722,16 +722,16 @@ isn't there.
 Both bugs survived in the same file, in adjacent functions, for the same underlying reason: the
 on-chain write half of a two-system operation (database + contract) was designed and documented but
 the wiring was never finished, and nothing forced a check that the two systems actually agree after
-the "success" response. Tests exist for `completeTaskOnChain` (`signer.test.ts`) — not because
+the "success" response. Tests exist for `completeTaskOnChain` (`signer.test.ts`) â€” not because
 `resolveDisputeOnChain` was judged safe, but because nobody wrote a test that would have needed to
 call it, which is exactly the gap that let it go unnoticed.
 
 **Lesson:** verifying a fix to a function is not the same as verifying the *product* uses that
 function. Before treating "the code now does X correctly" as done, check that something in the
-actual call graph reaches that code — `grep` for real call sites, not just the definition and its
+actual call graph reaches that code â€” `grep` for real call sites, not just the definition and its
 own tests. A correct function with no caller is not a smaller bug than an incorrect function with a
-caller; for a two-system operation like escrow state, it's the same bug — the two systems can
-diverge — with a quieter failure mode.
+caller; for a two-system operation like escrow state, it's the same bug â€” the two systems can
+diverge â€” with a quieter failure mode.
 
 ---
 
@@ -740,115 +740,115 @@ diverge — with a quieter failure mode.
 **Status:** found and fixed 2026-08-08 while shipping `CC-067`
 
 Adding a self-serve waitlist unsubscribe (`CC-067`) meant testing it against the real Supabase
-project, not just a mock — and the local environment's `SUPABASE_SERVICE_ROLE_KEY` is a documented
+project, not just a mock â€” and the local environment's `SUPABASE_SERVICE_ROLE_KEY` is a documented
 placeholder (see `CLAUDE.md`'s own landmine list), so the test correctly failed with an auth
 rejection. The UI showed the failure as the literal string **`[object Object]`**.
 
 `safeErrorResponse` (`src/lib/errors.ts`, used by six routes) computed its message as `err
 instanceof Error ? err.message : String(err)`. Supabase's client doesn't always throw a real
-`Error`/`PostgrestError` instance — a gateway-level rejection (bad API key, and plausibly other
+`Error`/`PostgrestError` instance â€” a gateway-level rejection (bad API key, and plausibly other
 edge-of-infrastructure failures) comes back as a plain `{ message, hint }` object instead. Plain
 objects fail `instanceof Error`, and `String()` on a plain object with no custom `toString` always
-produces `"[object Object]"` — dropping a perfectly good `.message` property on the floor.
+produces `"[object Object]"` â€” dropping a perfectly good `.message` property on the floor.
 
 ### The part that matters more than the broken UI text
 
 The same `String(err)` computation fed the **server-side log line**
 (`log("error", context, { error: message })`), not just the dev-mode client response. That means
 every one of the six routes using this helper was silently logging `"[object Object]"` instead of
-the real error, for exactly this class of failure — and this class of failure (auth/gateway
+the real error, for exactly this class of failure â€” and this class of failure (auth/gateway
 rejections: an expired key, a rotated credential, a misconfigured environment) is precisely the
 kind of incident where good server logs matter most and are hardest to reconstruct after the fact.
 A bug in a client-facing message is a UX papercut; the same bug in the log line is lost incident
 forensics, and it was the *same line of code* causing both.
 
 This had been live in five existing routes (`waitlist`, `dispute`, `tasks`, `reputation`,
-`fund-task`) the entire time — `CC-067` didn't introduce it, it just happened to be the first
+`fund-task`) the entire time â€” `CC-067` didn't introduce it, it just happened to be the first
 piece of work whose manual verification path ran straight into a gateway-level Supabase error
 rather than a normal query error.
 
 **Lesson:** error-handling helpers that branch on `instanceof Error` will misfire on any thrown
-value shaped like an error but not descended from one — which includes a specific, common,
+value shaped like an error but not descended from one â€” which includes a specific, common,
 non-hypothetical case: REST/gateway API clients that return plain error objects for
 infrastructure-level failures, as distinct from the well-typed error classes they use for
 domain-level ones. Check for a usable `.message` property structurally, not just via `instanceof`,
 before falling back to `String()`. And more generally: local dev's known-broken credentials (the
 ones everyone works around and stops thinking about) are a free, standing test case for exactly
-this kind of failure path — this bug was sitting there waiting to be found by anyone who ever
+this kind of failure path â€” this bug was sitting there waiting to be found by anyone who ever
 manually clicked through a form far enough to hit it.
 
 ---
 
 ## 19. The one path we couldn't test was the one path that was actually broken
 
-**Status:** found and fixed 2026-08-08, live re-verification pending — `CC-069`
+**Status:** found and fixed 2026-08-08, live re-verification pending â€” `CC-069`
 
 `CC-055` had sat open since launch prep began, worded deliberately: "not known to be broken. It
 is unknown, which for a launch is worse." Every prior test of the wallet flow used the Coinbase
-browser extension — an EOA, a seed-phrase wallet — because that's what was installed on every
+browser extension â€” an EOA, a seed-phrase wallet â€” because that's what was installed on every
 development machine. The product's actual pitch, the passkey-based Smart Wallet (Base Account),
 had never once been exercised end to end, because doing so meant a phone, or a browser with no
 extension, and testing kept defaulting to whatever was already open.
 
 Closing `CC-003` (the CSP blocker) finally made a real attempt possible. On a real phone, with a
-real Base Account, the flow got further than ever before — a genuine Coinbase login-code email,
+real Base Account, the flow got further than ever before â€” a genuine Coinbase login-code email,
 a genuine passkey signing prompt at `keys.coinbase.com`, a tap on **Sign**. Then: "Signature
 verification failed."
 
 The cause wasn't a phone setting, a browser quirk, or bad luck. `verifyMessage` from viem's
-top-level export — used to check the signed registration message — carries this in its own
+top-level export â€” used to check the signed registration message â€” carries this in its own
 docstring: *"Only supports Externally Owned Accounts. Does not support Contract Accounts."* Base
 Account is a smart contract account (ERC-4337). Its signatures are ERC-6492/ERC-1271, not raw
 ECDSA recoverable to the wallet's own address by `ecrecover`. The exact account type the entire
-onboarding pitch is built on was, structurally, the one type this check could never accept — and
+onboarding pitch is built on was, structurally, the one type this check could never accept â€” and
 the identical mistake (`recoverAddress`/`hashMessage`, same EOA-only limitation) was independently
 present in the MCP/dispute authentication path too, found by grepping for the same pattern once
 the first instance was understood.
 
 ### Why "untested" turned out to mean "broken," not "probably fine"
 
-It is tempting to read "nobody has tried this yet" as neutral — an open question, weighted maybe
+It is tempting to read "nobody has tried this yet" as neutral â€” an open question, weighted maybe
 50/50. It wasn't. The two wallet types this app supports are architecturally different enough
 (EOA vs. smart contract account) that code correct for one has no statistical tendency to also be
 correct for the other; there was no reason to expect the untested path to work just because the
-tested one did. A code review would not have caught this either — `verifyMessage({ address,
+tested one did. A code review would not have caught this either â€” `verifyMessage({ address,
 message, signature })` reads as obviously correct, type-checks, and the bug is entirely in *which*
 function with that exact name and shape got imported.
 
 **Lesson:** when a product has two structurally different ways of doing the same thing (two
 account types, two payment rails, two auth methods) and only one has ever been exercised, do not
 treat the other as "probably fine, just unverified." Treat it as a coin flip at best, and budget
-time to actually flip it — ideally by grep'ing for every other call site sharing the same
+time to actually flip it â€” ideally by grep'ing for every other call site sharing the same
 underlying primitive (`verifyMessage`, `recoverAddress`) the moment the first failure explains why,
 since a mistake made once by not knowing a library's own documented limitation is a mistake very
 likely made twice.
 
 ---
 
-## 20. The core hire→pay loop has never worked, and correct error handling is why nobody noticed
+## 20. The core hireâ†’pay loop has never worked, and correct error handling is why nobody noticed
 
-**Status:** found 2026-08-11, **not yet fixed** — `CC-080`. Published as found, per §8.
+**Status:** found 2026-08-11, **not yet fixed** â€” `CC-080`. Published as found, per Â§8.
 
-The function that pays people has never once succeeded. Not "is fragile", not "fails under load" —
+The function that pays people has never once succeeded. Not "is fragile", not "fails under load" â€”
 structurally cannot succeed, and has never been able to, for the entire life of the project.
 
 `CarbonEscrow.completeTask` requires `msg.sender == task.agent`
 (`contracts/CarbonEscrow.sol:128`), and `createTask` sets `agent: msg.sender` (`:107`). Nothing
-server-side calls the contract's `createTask` — the agent funds the escrow client-side from its own
+server-side calls the contract's `createTask` â€” the agent funds the escrow client-side from its own
 wallet, which both `src/lib/payments/x402.ts:45` and `src/lib/contracts/escrow.ts:6` state plainly.
 So `task.agent` is the *agent's* address. But `confirm_task_completion`
 (`src/lib/mcp/server.ts:391`) settles the task **server-side as the platform signer**, via
 `completeTaskOnChain` (`src/lib/contracts/signer.ts:102`). The platform signer is not the agent, so
 every call reverts with `"only agent"`.
 
-Two designs — agent-signed client-side writes, and platform-signed server-side writes — coexist in
+Two designs â€” agent-signed client-side writes, and platform-signed server-side writes â€” coexist in
 the codebase, and the payout path is assembled from one half of each.
 
 ### Why it survived, and this is the part worth generalising
 
 **Because the error handling is correct.** `server.ts:389-409` catches the revert, logs
 `signer_complete_task_failed`, returns `isError: true` with the chain error text, and returns
-*before* `updateTaskStatus`. That is exactly right — it is AUD-005 and AUD-006 doing their job, and
+*before* `updateTaskStatus`. That is exactly right â€” it is AUD-005 and AUD-006 doing their job, and
 it is why no worker was ever falsely marked paid and no USDC was ever stranded. The failure mode is
 genuinely safe.
 
@@ -866,15 +866,15 @@ progress, because it was scoped as one ticket covering the happy path, six unhap
 edge cases across the entire product. That is not a task, it is a wish. It was split four ways during
 the triage that found this.
 
-And it was found by *reading a call path during a backlog review*, not by testing — the third defect
-in this area found that way, after `CC-059` found `CC-065` and after §17.
+And it was found by *reading a call path during a backlog review*, not by testing â€” the third defect
+in this area found that way, after `CC-059` found `CC-065` and after Â§17.
 
 **Lesson:** an error branch that has never been observed *not* firing is not evidence the happy path
-works — it is the absence of evidence in either direction, and it deserves active suspicion rather
+works â€” it is the absence of evidence in either direction, and it deserves active suspicion rather
 than the comfort its tidiness invites. If a catch block has never been proven unnecessary, treat the
-path it guards as unproven. This is a sharper form of §17: there, a correct function had no caller;
+path it guards as unproven. This is a sharper form of Â§17: there, a correct function had no caller;
 here, the caller exists and the call can never succeed. Both survived for the same underlying reason
-— nobody had executed the path — and in both cases reading the call graph found in an afternoon what
+â€” nobody had executed the path â€” and in both cases reading the call graph found in an afternoon what
 months of green checks had not.
 
 Corollary, and the cheaper half of the fix: **size a verification ticket so that one person can
@@ -885,7 +885,7 @@ is considered, and its permanent open status will read as "tracked" rather than 
 
 ## 21. Closing one issue re-introduced the defect another open issue was describing
 
-**Status:** found 2026-08-11, **not yet fixed** — `CC-009`. Published as found.
+**Status:** found 2026-08-11, **not yet fixed** â€” `CC-009`. Published as found.
 
 `CC-009` was filed on 2026-07-25: the waitlist route logs the signup event including the email
 address, and `maskMeta` (`src/lib/logging.ts`) masks only values matching
@@ -899,7 +899,7 @@ log("info", "waitlist_unsubscribed", { email });
 ```
 
 Forty lines below the line `CC-009` was already about, in the same file. The defect did not survive
-review — it was *recreated* by it. There are now two cleartext-email log sites where there was one.
+review â€” it was *recreated* by it. There are now two cleartext-email log sites where there was one.
 
 ### Why an open issue was no protection
 
@@ -907,19 +907,19 @@ Because open issues are read when triaging the backlog, not when writing a log l
 `docs/backlog/` before adding an observability call, and there is nothing in the code, the types or
 CI that would have objected. The defect class was documented. It was not *controlled*.
 
-Worth noting how well-scrutinised this particular commit was: the same piece of work produced §18's
+Worth noting how well-scrutinised this particular commit was: the same piece of work produced Â§18's
 finding, because someone actually ran it against real infrastructure and chased a `[object Object]`
 to its root cause. Care was not the missing ingredient.
 
 **Lesson:** a ticket describing a defect is documentation, not a control. If a defect class can
-recur — and "someone adds a log line" always can — the fix has to live in the chokepoint everything
+recur â€” and "someone adds a log line" always can â€” the fix has to live in the chokepoint everything
 passes through, or in CI, not in prose describing where the defect currently is. `CC-009`'s own Fix
 section already said the right thing: *add an email branch to `maskMeta`*. Had that been done when it
 was filed rather than left as a described intention, `CC-067`'s new line would have been safe the
 moment it was written, and this entry would not exist.
 
 Generalised: when a fix can be made either at the call sites or in the shared helper they all route
-through, the helper is not merely tidier — it is the only version that also protects the call sites
+through, the helper is not merely tidier â€” it is the only version that also protects the call sites
 nobody has written yet.
 
 ---
@@ -928,12 +928,12 @@ nobody has written yet.
 
 ## 22. The ticket's own fix would not have worked, and the fallback is why nobody knew
 
-**Status:** found and fixed 2026-08-11 — `CC-070`
+**Status:** found and fixed 2026-08-11 â€” `CC-070`
 
 `/api/reputation` is supposed to compute a worker's reputation from on-chain escrow events. It never
 once did. Every `getLogs` call in `src/lib/contracts/escrow.ts` defaulted `fromBlock` to `0`, and the
 RPC provider caps a single `eth_getLogs` at a fixed block span, so every query failed the moment the
-contract was more than a couple of hours old — which is to say, for essentially the whole life of the
+contract was more than a couple of hours old â€” which is to say, for essentially the whole life of the
 project.
 
 ### Why nobody knew: the fallback had a reassuring name
@@ -944,16 +944,16 @@ The failure was caught and handled. On error, the code fell back to the database
 reputation_onchain_fallback
 ```
 
-That reads like a designed degradation — a fast path and a safe path, with the safe path occasionally
+That reads like a designed degradation â€” a fast path and a safe path, with the safe path occasionally
 taking over. It was not. The fast path had a 100% failure rate, and the log line was the only evidence,
 phrased in a way that made permanent total failure look like an intermittent, anticipated condition.
 `CC-070` was only filed because someone happened to read that log line during unrelated live testing of
 `CC-069` and wondered why it was there at all.
 
-This is the same shape as §20, from the other direction. There, correct error handling made a dead code
+This is the same shape as Â§20, from the other direction. There, correct error handling made a dead code
 path look like a healthy error path. Here, a correct *fallback* made a dead primary look like a healthy
 secondary. In both cases the defensive code worked exactly as designed, and that is precisely what hid
-the defect. **A fallback that fires every single time is not a fallback, it is the implementation** —
+the defect. **A fallback that fires every single time is not a fallback, it is the implementation** â€”
 and nothing in the code, the logs, or the tests distinguished those two cases.
 
 ### The part that is genuinely humbling: the fix in the ticket was wrong
@@ -964,14 +964,14 @@ the actual error message. Two things were wrong with it, both found only by meas
 
 **The limit was not 2,000.** The ticket quoted a live error saying `max block range 2000`. Probed
 against the same endpoint two weeks later: 10,000 is accepted, 50,000 is rejected, and the rejection
-message says *"eth_getLogs is limited to a 10,000 range"*. Whatever moved — a raised limit, or
-different limits behind a load balancer — a hardcoded `2000` would have been wrong immediately, and
+message says *"eth_getLogs is limited to a 10,000 range"*. Whatever moved â€” a raised limit, or
+different limits behind a load balancer â€” a hardcoded `2000` would have been wrong immediately, and
 wrong in the silent direction: five times slower than necessary, with nothing failing to reveal it.
 
 **Chunking was necessary and nowhere near sufficient.** Base Sepolia was ~45.4M blocks deep. Chunking
 from genesis in 10,000-block windows is ~22,700 requests *per query*, and the reputation summary made
-four queries. Even bounded at the contract's deploy block — a number nobody had measured, and which
-took a binary search over `eth_getCode` to find — it is ~635 requests per query, ~2,540 per dashboard
+four queries. Even bounded at the contract's deploy block â€” a number nobody had measured, and which
+took a binary search over `eth_getCode` to find â€” it is ~635 requests per query, ~2,540 per dashboard
 load, roughly thirteen minutes. **Implementing the ticket's fix as written would have replaced a fast,
 loud failure with a slow, quiet one**, and it would have looked like progress: the code would have been
 demonstrably "chunked", the tests would have passed, and the endpoint would have timed out instead of
@@ -985,7 +985,7 @@ was only visible once the arithmetic was on the table.
 **Lesson, two parts.**
 
 A **fallback needs a success-rate signal, not just a log line.** If the primary path can fail silently
-into a secondary, then "how often does the primary actually succeed" has to be observable — a counter, a
+into a secondary, then "how often does the primary actually succeed" has to be observable â€” a counter, a
 `source` field in the response, anything. Otherwise the fallback becomes load-bearing and nobody notices
 for months. Note the fix retains a `source: "on-chain" | "database"` field for exactly this reason; that
 field existed before and was the one thing that could have surfaced this, if anything had looked at it.
@@ -993,7 +993,7 @@ field existed before and was the one thing that could have surfaced this, if any
 And **a backlog ticket's proposed fix is a hypothesis, not a plan.** These issue files are written to be
 handed to a fresh session that starts by reading them, which is their value and also the risk: a
 confidently-worded Fix section is very easy to implement without re-deriving whether it is adequate.
-The cheapest defence is to put the numbers on the table first — how many requests, over how many
+The cheapest defence is to put the numbers on the table first â€” how many requests, over how many
 blocks, how long. That took about twenty minutes here and changed the entire design. It is worth
 noting that this repo's own convention says to "read the referenced code before proposing a plan";
 the missing half is to re-check the *proposed fix* against measurement, not only the problem statement.
@@ -1004,10 +1004,10 @@ the missing half is to re-check the *proposed fix* against measurement, not only
 
 `CarbonEscrow` was written, deployed to Base Sepolia, granted ownership of real (testnet) funds,
 described in `CLAUDE.md`, and referenced by nine backlog issues. It had **zero tests.** Not thin
-coverage — none. There was no `test/` directory, `npm test` ran only vitest against `src/`, and
+coverage â€” none. There was no `test/` directory, `npm test` ran only vitest against `src/`, and
 `hardhat.config.ts` loaded the mocha plugin for a suite that did not exist.
 
-This is the substrate under §17, §19 and §20. `completeTask` could never succeed for anyone
+This is the substrate under Â§17, Â§19 and Â§20. `completeTask` could never succeed for anyone
 (`CC-080`); `expireTask` refunded an agent out from under a worker who had delivered; a single
 `nonReentrant`-guarded contract sat holding the entire product premise. Every one of those would
 have been caught by a test that simply *ran the happy path once*. Nothing ran it, so nothing caught
@@ -1028,11 +1028,11 @@ Two mechanisms, not one, because "write tests" is not a mechanism:
 
 **A second, smaller lesson from the same day.** The ABIs in `src/lib/contracts/*-abi.ts` were
 maintained by hand. A hand-written ABI missing a function is indistinguishable at runtime from a
-contract that does not have one — viem encodes what it is told, the call reverts, and the error
+contract that does not have one â€” viem encodes what it is told, the call reverts, and the error
 points at the chain rather than at the file. The `reputation-abi.ts` in the tree was in fact an
 incomplete subset of the deployed contract, which nobody had noticed because nothing called the
 missing parts. They are generated from the compiled artifact now, with a CI drift check. **Anything
-transcribed by hand from a build output is a defect waiting for its first reader** — generate it,
+transcribed by hand from a build output is a defect waiting for its first reader** â€” generate it,
 and fail the build when the copy is stale.
 
 ## 24. The health check verified the component and not the contract it had to satisfy
@@ -1041,7 +1041,7 @@ and fail the build when the copy is stale.
 
 `npm run verify:kms` has existed for months and does a genuinely careful job: it fetches the public
 key from Cloud KMS, derives the address, signs a message, recovers it, and diffs the two. It hits
-real GCP, no mocks. When it says `✓ ALL CHECKS PASSED` the key works.
+real GCP, no mocks. When it says `âœ“ ALL CHECKS PASSED` the key works.
 
 It could not have detected the most likely way verdict signing actually breaks.
 
@@ -1049,7 +1049,7 @@ A verdict is an EIP-712 signature, and EIP-712 binds the digest to `(name, versi
 verifyingContract)`. The escrow was redeployed this morning under `CC-082`, which changed
 `verifyingContract`. A signer still hashing against the old address would produce cryptographically
 perfect signatures that the new contract can never recover to an accepted signer. Separately,
-`acceptedSigners` is seeded in the constructor — a redeploy that forgot to seed it, or a key
+`acceptedSigners` is seeded in the constructor â€” a redeploy that forgot to seed it, or a key
 rotation, leaves a signer that signs beautifully and reverts on every claim. Neither shows up in a
 sign-and-recover round trip, because **the round trip never asks the contract anything.**
 
@@ -1062,11 +1062,11 @@ component, not the interface it has to satisfy.** "Can the signer sign" and "wil
 accept what the signer produces" are different questions, and only the second one is the property
 anybody cares about. The cheap fix was to read `domainSeparator()`, `VERDICT_TYPEHASH()` and
 `acceptedSigners(signer)` off the deployed contract and compare them against an independently
-computed statement of the same intent — three RPC reads, no credentials required, and it now runs on
+computed statement of the same intent â€” three RPC reads, no credentials required, and it now runs on
 a schedule.
 
-Worth noting the shape is §23's again with the polarity flipped. §23 was a component nothing ever
-executed. This was a component that *was* executed, regularly, verifying the wrong property — which
+Worth noting the shape is Â§23's again with the polarity flipped. Â§23 was a component nothing ever
+executed. This was a component that *was* executed, regularly, verifying the wrong property â€” which
 is the more expensive version, because the passing check is what stops anyone looking closer.
 
 **Smaller lesson from the same day, for anyone wiring scheduled Actions.** An unset GitHub Actions
@@ -1076,7 +1076,152 @@ shape, and `BigInt(process.env.RPC_MAX_BLOCK_RANGE ?? 10000)` is `0n`, which tur
 `getLogs` loop into one that never advances. Use `||` for anything sourced from Actions, and validate
 after coercion.
 
-## 25. The rule that hid the bug was the one we added to prevent it
+## 25. The comment warning about expression interpolation was the thing that broke the workflow
+
+**2026-08-16, one day after `CC-085` shipped.**
+
+The alerting drill (`CC-085`, PR #88) added a `--args=` passthrough to `monitors.yml`, deliberately
+routed through `env:` rather than interpolated into the command line, with a comment inside the
+`run:` block explaining why:
+
+```
+# attacker-controllable in the general case, and `${{ }}` substitution happens
+# before the shell sees the string, so an input containing shell metacharacters would execute.
+```
+
+That comment contains an empty expression pair. **GitHub scans the entire `run:` scalar for
+expressions before any shell sees it, and does not care that the line is a shell comment.** An empty
+pair is a parse error, so the workflow file became invalid â€” and an invalid workflow on the default
+branch means GitHub **stops running its schedule.**
+
+The invariant monitors did not run for seven hours. Nobody noticed until an unrelated CI question
+sent someone to `gh run list`.
+
+### What made it invisible
+
+Three things, each individually reasonable:
+
+- **A parse error produces no job, so it produces no check run.** The GitHub API returns nothing
+  useful â€” `--log-failed` says `log not found`, the jobs array is empty, and the check-runs endpoint
+  for the commit shows only the *other*, passing workflows. The error text exists **only in the
+  Actions web UI**, as an annotation. Reading it required opening a browser at the run URL.
+- **The failed runs were attributed to `push`** â€” an event `monitors.yml` does not even subscribe
+  to. So the failures looked like noise from a workflow that obviously should not be running on
+  push, rather than the signal that the file was broken.
+- **A stopped schedule emits nothing.** Which is precisely the failure mode `ADR-0003` was written
+  about, arriving in the monitoring system itself.
+
+### What actually worked
+
+The dead-man's switch â€” `ADR-0003`'s path 2, the whole reason it exists. It is the only mechanism in
+the design that can report "the monitors are not running", because it is the only one not hosted by
+the thing that stopped. Path 1, the webhook, cannot fire: it needs a run to have happened.
+
+### The generalisable form
+
+**Documentation written inside a machine-parsed region is not inert.** A comment is only a comment
+to the layer that strips comments, and here the outer layer â€” GitHub's expression scanner â€” runs
+first. The same shape catches YAML anchors in prose, template delimiters in Jinja comments, and
+`--` inside SQL string literals.
+
+The narrower operational lesson, worth its own line: **an invalid workflow file silently disables its
+schedule.** Not "runs and fails" â€” does not run. So the class of change most able to break scheduled
+monitoring is a change to the monitoring workflow itself, and there is no CI gate on it, because CI
+does not lint workflow files. `actionlint` in the CI job would have caught this in the PR.
+
+Unflattering detail worth keeping: this was written into the file by the same session that had just
+argued, correctly and at length, that an alerting path nobody has watched fire is not one you can
+rely on. The drill was built to test the webhook. It broke the schedule.
+
+## 26. Three things were already written down, and none of them were enforced
+
+**2026-08-16, fixing Â§22's own acceptance script after the `CC-082` redeploy.**
+
+`scripts/audit/verify-getlogs-recovery.mjs` is the live-chain evidence behind Â§22. It asserts against
+a hardcoded transaction â€” `CC059_TX`, the only `TaskResolved` event that has ever existed â€” but read
+the escrow address and the deploy block from `NEXT_PUBLIC_ESCROW_CONTRACT` and `ESCROW_DEPLOY_BLOCK`.
+Both moved when v2 deployed, and it went red.
+
+That is one artefact making two incompatible kinds of claim. **A monitor asserts something about now
+and must read live config, because it should break when reality changes. An evidence script asserts
+something about the past and must pin everything, because a fact about the past cannot regress â€” if
+it starts failing, the script is wrong, not the system.** This one was half of each. It was never
+correct; the env vars merely happened to describe the same deployment that emitted the transaction,
+and that coincidence held for five days.
+
+The interesting part is not the breakage. It is that **all three of the things needed to prevent it
+were already written down in this repository, and not one of them was enforced anywhere.**
+
+### One â€” the classification existed, in a different file
+
+`CC-085` built the monitor registry and *deliberately excluded this script*, with a comment block
+explaining that it is historical evidence rather than a live invariant. The reasoning was correct and
+recorded. It just lived in `run-monitors.mjs`, while the script it described went on reading live
+config. The artefact and its own documentation disagreed, and the documentation was the accurate one.
+
+`CLAUDE.md` already uses the phrase *hermetic by enforcement, not convention* for the test suite
+(`CC-060`). The same sentence applies to evidence: **a comment next to an artefact is documentation;
+a constant inside it is enforcement.** The fix was to move the classification into the script â€”
+`V1_ESCROW` and `V1_DEPLOY_BLOCK` as constants beside `CC059_TX`.
+
+### Two â€” Â§24 recorded the `??` lesson the day before, and nobody swept
+
+The same script had `BigInt(process.env.RPC_MAX_BLOCK_RANGE ?? "10000")`. Â§24 had already written
+this up â€” the exact expression, the exact `0n`, the exact never-advancing loop â€” one day earlier. It
+was true, well-argued, and changed nothing, because writing down a defect class is not the same as
+removing its instances.
+
+Swept properly this time. **Ten more `process.env.X ??` sites.** Most are harmless by luck: an empty
+`NEXT_PUBLIC_BASE_NETWORK` still fails the `=== "mainnet"` test and lands on testnet. One is not:
+
+```js
+// src/lib/ratelimit.ts:141
+parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "60", 10)
+```
+
+`parseInt("", 10)` is `NaN` â€” not `0`, not `60`. So `maxRequests` becomes `NaN`, and
+`entry.count > NaN` is **false for every value of count**: the general `/api/*` limiter does not fall
+back to 60, it stops limiting anything at all. A different primitive from Â§24's `BigInt`, a different
+wrong value, the same root cause, and a considerably worse blast radius â€” `CLAUDE.md` notes every
+`/api/*` route bypasses the coming-soon gate and is reachable today. Not currently triggered: the
+variable is unset in `.env.local`, and the Vercel environment was not checked from here. A loaded
+trap rather than an open hole, which is the only reason it is described in public before being fixed.
+
+The mechanism is not "remember that `??` differs from `||`" â€” Â§24 already said that, and it did not
+take. It is that `src/lib/config.ts` is a Zod schema built for exactly this, and all ten sites read
+`process.env` directly and bypass it. `z.coerce.number().positive()` rejects both the empty string
+and the `NaN` at the boundary instead of letting each call site invent its own failure mode. **A
+lesson without a sweep is a lesson that gets written twice.**
+
+### Three â€” the evidence could pass while skipping what it was evidence for
+
+The worst version of this defect is not the one that happened. Had `ESCROW_DEPLOY_BLOCK` been
+**unset** rather than moved, the old code fell back to `0n` â€” genesis â€” and the script would have
+**passed**, scanning ~4,500 windows instead of ~635 and still finding the event. Green, while
+silently not exercising the bounded-lower-bound half of Â§22's finding: the part that took a binary
+search over `eth_getCode` to establish and that turned 22,691 requests into 635. The only tell was a
+larger window count in the output, which nothing compares against anything.
+
+**An evidence script that can pass while skipping the property it exists to demonstrate is worse than
+no script**, because the PASS is what gets quoted into the backlog and read as settled. Pinning
+removes the mode instead of documenting it.
+
+Worth noting against Â§22's own closing lesson. That entry ended on "a backlog ticket's proposed fix
+is a hypothesis, not a plan" â€” and the first plausible fix here, swapping in the v1 address alone,
+would have moved the failure from step 1 to step 3 rather than resolving it. Same shape, smaller
+stakes: **a symptom that shifts under the first plausible fix is not evidence the diagnosis was
+complete.**
+
+### A smaller one, on measurements that age
+
+The re-run reports 30 requests over 647 windows where Â§22 recorded 18 over 635. Nothing regressed â€”
+the scan is newest-first against an event fixed in the past, so it drifts further from head every day
+and those numbers climb forever. A future reader comparing the two had every reason to call it a
+regression. **Any evidence artefact reporting a cost metric should carry the date that metric was
+measured, in its own output.** The script now prints `18 of 635 when measured on 2026-08-11` beside
+the live figures, so the drift reads as age rather than decay.
+
+## 27. The rule that hid the bug was the one we added to prevent it
 
 `src/app/globals.css` has carried `overflow-x: hidden` on `html` and `body` since the **initial
 commit**. It is a standard defensive idiom, and it does exactly what it says: no page of this site
@@ -1132,8 +1277,8 @@ is the authority, and it is one `getBoundingClientRect()` away.
 Recorded here because pretending to certainty would defeat the purpose of the document.
 
 - Whether the escrow design constitutes a Digital Asset Platform under the Australian framework
-  commencing 9 April 2027. Currently well inside the small-scale exemption — under $10m annual
-  volume and under $5,000 held per client — but the per-client limb is driven by *concurrent*
+  commencing 9 April 2027. Currently well inside the small-scale exemption â€” under $10m annual
+  volume and under $5,000 held per client â€” but the per-client limb is driven by *concurrent*
   holdings, which the agentic use case stresses in a non-obvious way: thirty simultaneous $200
   tasks from one agent is $6,000. Tracked as `CC-051`.
 - Whether reputation staking means anything while `slash()` is never called from anywhere. Tracked

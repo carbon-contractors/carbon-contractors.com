@@ -3,8 +3,15 @@ name: CI
 on:
   push:
     branches: [master]
+  # Deliberately unfiltered. `branches: [master]` meant a stacked PR — one targeting
+  # another feature branch rather than master — got no CI at all, while still showing
+  # green ticks from the Vercel checks. A green that means "a deployment succeeded"
+  # and not "the tests passed" is worse than a red one. Measured on PR #92, 2026-08-16.
+  #
+  # Safe to widen because this workflow holds no secrets: every env value below is a
+  # hardcoded test placeholder. Do NOT copy this trigger to monitors.yml, which reads
+  # the live chain and must never be reachable from a pull request (CC-085).
   pull_request:
-    branches: [master]
 
 permissions:
   contents: read
@@ -15,6 +22,31 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # CC-085. Nothing in CI looked at workflow files, so an empty expression pair
+      # inside a run: comment reached master and silently disabled the invariant
+      # monitors' schedule for seven hours — an invalid workflow does not run and fail,
+      # it just stops (Lessons-Learned §25). The class of change most able to break
+      # scheduled monitoring had no gate on it at all.
+      #
+      # Runs first: it needs nothing installed and is the cheapest check in the job.
+      #
+      # Pinned by version AND sha256, because this downloads a binary and executes it.
+      # A marketplace action in the same slot would be a mutable dependency — a moved
+      # tag is a silent code change in a job that checks out the repository. Bump both
+      # values together; the checksum comes from the release's own checksums.txt.
+      - name: Lint workflow files
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint -color
+          rm -f actionlint actionlint.tar.gz
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -27,6 +59,13 @@ jobs:
 
       - name: Security audit
         run: npm audit --audit-level=high
+
+      # Offline, no dependencies — the script runs before `npm install` by design.
+      # INDEX.md is generated, so a PR that edits an issue without regenerating leaves
+      # master with a board that silently disagrees with the issue files. Two PRs adding
+      # issues in parallel is the common way this happens.
+      - name: Backlog index is current
+        run: node scripts/backlog.mjs --check
 
       - name: Lint
         run: npm run lint

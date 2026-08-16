@@ -27,10 +27,16 @@ made.
 | [ADR-0002](ADR-0002-pseudonymity-and-task-data-retention.md) | Pseudonymity, task data retention, and the platform's privacy posture | accepted | supersedes "Zero PII" (`CC-027`) |
 | [ADR-0003](ADR-0003-monitoring-as-correctness-dependency.md) | Monitoring as a correctness dependency, not an ops nicety | accepted | rescopes and splits `CC-040` |
 | [ADR-0004](ADR-0004-public-claims-and-pseudonymity.md) | Public claims — copy describes the target state, and the identity claim is pseudonymity | accepted | two positions `CLAUDE.md` kept re-litigating |
+| [ADR-0005](ADR-0005-worker-acceptance-and-offer-lifecycle.md) | Worker acceptance, the offer lifecycle, and concurrency limits | accepted | the worker never consented to being hired |
 
-`ADR-0001` carries an **Amendment 1** (same date) that changed D4, D6 and D9 — verdicts became
-EIP-712 signatures rather than platform transactions, and settlement became pull-payment. Read the
-amendment; several decisions above it are restated by it.
+`ADR-0001` carries two amendments, and both change decisions stated above them:
+
+- **Amendment 1** (same date) changed D4, D6 and D9 — verdicts became EIP-712 signatures rather than
+  platform transactions, and settlement became pull-payment.
+- **Amendment 2** (2026-08-16) scoped D3 — `specHash` binds the machine-checkable criteria and the
+  schema version but **not** the prose, and spec schemas are **never migrated in flight**. It also
+  records why the platform cannot refund an in-flight task, which is a bytecode fact rather than a
+  policy choice.
 
 ## Convention
 
@@ -67,6 +73,10 @@ the index table above current by hand.
 `ADR-0001` first — the others depend on it, and **read its Amendment 1**, which supersedes several of
 its own decisions. `ADR-0002` next. `ADR-0003` refers to `ADR-0002`'s retention decisions, and
 `ADR-0004` restates `ADR-0002` D1/D6 as an operational rule.
+
+`ADR-0005` is the only one that is **not** about money, custody or claims — it is the matching layer,
+and it needs no contract knowledge to read. Read it before touching the hire path, `CC-074`,
+`CC-075`, or anything that assumes a worker agreed to a task.
 
 **`ADR-0004` is the one to read before editing any website copy.** It exists because two positions —
 that pre-launch copy describes the target state, and that the optional notification email is not a
