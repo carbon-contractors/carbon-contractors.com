@@ -67,6 +67,14 @@ jobs:
       # INDEX.md is generated, so a PR that edits an issue without regenerating leaves
       # master with a board that silently disagrees with the issue files. Two PRs adding
       # issues in parallel is the common way this happens.
+      # 248 lines across CLAUDE.md, Lessons-Learned.md and CC-025.md were double-encoded
+      # by a PowerShell conflict resolution on 2026-08-16 and merged to master unnoticed.
+      # The result is still VALID UTF-8, so nothing objected — .gitattributes pins line
+      # endings, not encoding, and `git ls-files --eol` reports lf/lf on a corrupted file.
+      # Offline and dependency-free.
+      - name: No double-encoded UTF-8
+        run: node scripts/audit/check-encoding.mjs
+
       - name: Backlog index is current
         run: node scripts/backlog.mjs --check
 
