@@ -3,8 +3,15 @@ name: CI
 on:
   push:
     branches: [master]
+  # Deliberately unfiltered. `branches: [master]` meant a stacked PR — one targeting
+  # another feature branch rather than master — got no CI at all, while still showing
+  # green ticks from the Vercel checks. A green that means "a deployment succeeded"
+  # and not "the tests passed" is worse than a red one. Measured on PR #92, 2026-08-16.
+  #
+  # Safe to widen because this workflow holds no secrets: every env value below is a
+  # hardcoded test placeholder. Do NOT copy this trigger to monitors.yml, which reads
+  # the live chain and must never be reachable from a pull request (CC-085).
   pull_request:
-    branches: [master]
 
 permissions:
   contents: read
@@ -52,6 +59,13 @@ jobs:
 
       - name: Security audit
         run: npm audit --audit-level=high
+
+      # Offline, no dependencies — the script runs before `npm install` by design.
+      # INDEX.md is generated, so a PR that edits an issue without regenerating leaves
+      # master with a board that silently disagrees with the issue files. Two PRs adding
+      # issues in parallel is the common way this happens.
+      - name: Backlog index is current
+        run: node scripts/backlog.mjs --check
 
       - name: Lint
         run: npm run lint
