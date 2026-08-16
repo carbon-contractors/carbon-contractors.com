@@ -26,10 +26,9 @@ const TOOLS = [
   {
     name: "request_human_work",
     description:
-      "Initiate a task to hire a verified human. Returns a payment_request_id and fund_url. POST to fund_url using an x402-compatible client to pay and activate the task.",
+      "Initiate a task to hire a verified human. Requires an authenticated session — the hiring agent is your verified wallet. Returns a payment_request_id and fund_url. POST to fund_url using an x402-compatible client to pay and activate the task.",
     params: [
-      "from_agent_wallet: 0x...",
-      "to_human_wallet: 0x...",
+      "to_human_wallet: 0x... (must be registered)",
       "task_description: string",
       "amount_usdc: number",
       "deadline_hours: 1-720",
@@ -106,6 +105,24 @@ export default function McpInfoPage() {
             <div className={styles.endpointUrl}>/api/basedhuman.mcp</div>
           </div>
         </div>
+
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Authentication</h2>
+          <p className={styles.subtitle}>
+            Discovery tools are open. Hiring and settlement —{" "}
+            <code>request_human_work</code>, <code>confirm_task_completion</code>,{" "}
+            <code>dispute_task</code>, <code>resolve_dispute</code> — need a
+            verified wallet, and the task is attributed to it rather than to an
+            address you supply. Nonces expire after 60 seconds.
+          </p>
+          <pre className={styles.codeBlock}>{`POST /api/basedhuman.mcp/challenge
+  { "walletAddress": "0x..." }        → { nonce, message, expiresAt }
+
+Sign \`message\` with that wallet, then initialize the MCP session with:
+  x-caller-wallet:    0x...
+  x-caller-signature: 0x...
+  x-caller-nonce:     <nonce>`}</pre>
+        </section>
 
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>Tools</h2>

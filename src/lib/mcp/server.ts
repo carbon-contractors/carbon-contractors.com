@@ -32,6 +32,7 @@ import {
 } from "@/lib/contracts/escrow";
 import { completeTaskOnChain, resolveDisputeOnChain } from "@/lib/contracts/signer";
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
+import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { log } from "@/lib/logging";
 
 /** Context provided when a caller authenticates their session. */
@@ -46,6 +47,7 @@ export interface McpSessionContext {
  * connecting a single McpServer to multiple transports simultaneously.
  *
  * @param context Optional session context with caller identity.
+ *   `request_human_work` requires `callerWallet` and attributes the task to it.
  *   Tools that mutate task state (resolve_dispute, confirm_task_completion,
  *   dispute_task) require `callerWallet` to match the task's `from_agent_wallet`.
  */
@@ -109,18 +111,21 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   );
 
   // ─── Tool: request_human_work ─────────────────────────────────────────────
+  // CC-081 Defect 4: this tool used to accept `from_agent_wallet` as an argument and
+  // never touched `context.callerWallet`, so task provenance was unauthenticated —
+  // and every downstream authorisation check (confirm_task_completion, dispute_task,
+  // resolve_dispute) compares the caller against exactly that field. It is now bound
+  // to the authenticated caller and cannot be asserted.
   server.tool(
     "request_human_work",
-    "Initiate a task to hire a verified human on Base L2. Returns a payment_request_id and a fund_url. POST { payment_request_id } to fund_url using an x402-compatible HTTP client (@x402/fetch) — the endpoint returns 402 Payment Required, your client auto-pays USDC, and the task activates.",
+    "Initiate a task to hire a verified human on Base L2. Requires an authenticated session — the hiring agent is taken from your verified wallet, not from an argument. Returns a payment_request_id and a fund_url. POST { payment_request_id } to fund_url using an x402-compatible HTTP client (@x402/fetch) — the endpoint returns 402 Payment Required, your client auto-pays USDC, and the task activates.",
     {
-      from_agent_wallet: z
-        .string()
-        .regex(/^0x[0-9a-fA-F]{40}$/)
-        .describe("Agent's Base wallet address (0x…)"),
       to_human_wallet: z
         .string()
         .regex(/^0x[0-9a-fA-F]{40}$/)
-        .describe("Human's Base wallet address from search_whitepages"),
+        .describe(
+          "Human's Base wallet address from search_whitepages. Must belong to a registered worker."
+        ),
       task_description: z
         .string()
         .min(10)
@@ -138,7 +143,6 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         .describe("Deadline in hours from now (1–720)"),
     },
     async ({
-      from_agent_wallet,
       to_human_wallet,
       task_description,
       amount_usdc,
@@ -148,9 +152,79 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         Math.floor(Date.now() / 1000) + deadline_hours * 3600;
 
       try {
+        // Authorization: the hiring agent must be an authenticated wallet, and the
+        // task is attributed to it. Same shape as the three mutating tools below.
+        if (!context?.callerWallet) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error:
+                    "Authentication required. POST { walletAddress } to /api/basedhuman.mcp/challenge, sign the returned message with your wallet, and re-initialize the session with the x-caller-wallet, x-caller-signature and x-caller-nonce headers.",
+                }),
+              },
+            ],
+          };
+        }
+        const from_agent_wallet = context.callerWallet;
+
+        // Bound how fast one authenticated agent can create tasks. The
+        // authentication above is the real control; see CC-020 on this limiter
+        // being per-instance in-memory without Upstash.
+        const { success, retryAfterS } = await taskCreationRateLimiter.limit(
+          from_agent_wallet.toLowerCase()
+        );
+        if (!success) {
+          log("warn", "request_human_work_rate_limited", {
+            caller: from_agent_wallet,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Task creation rate limit exceeded for this wallet.",
+                  retry_after_s: retryAfterS,
+                }),
+              },
+            ],
+          };
+        }
+
+        // `to_human_wallet` was previously format-checked only, despite the
+        // parameter description claiming it comes from search_whitepages. Once the
+        // agent passes `worker` to createTask this value becomes the on-chain payout
+        // destination, so an unregistered address must not reach a task row.
+        // getHumanByWallet lowercases its argument; wallets are stored lowercase and
+        // CHECK-constrained that way by migration 014.
+        const worker = await getHumanByWallet(to_human_wallet);
+        if (!worker) {
+          log("warn", "request_human_work_unregistered_worker", {
+            caller: from_agent_wallet,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error:
+                    "to_human_wallet does not belong to a registered worker. Use search_whitepages to find one.",
+                }),
+              },
+            ],
+          };
+        }
+
         const response = await initiateX402Payment({
           from_agent_wallet,
-          to_human_wallet,
+          to_human_wallet: worker.wallet,
           task_description,
           amount_usdc,
           deadline_unix,
