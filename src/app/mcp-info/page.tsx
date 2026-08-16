@@ -32,6 +32,7 @@ const TOOLS = [
       "task_description: string",
       "amount_usdc: number",
       "deadline_hours: 1-720",
+      "acceptance_spec?: JSON string",
     ],
     phase: "Hire",
   },

@@ -60,6 +60,9 @@ export interface Database {
           status: TaskStatus;
           tx_hash: string | null;
           escrow_contract: string | null;
+          acceptance_spec: string | null;
+          spec_hash: string | null;
+          spec_schema_version: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -74,6 +77,9 @@ export interface Database {
           status?: TaskStatus;
           tx_hash?: string | null;
           escrow_contract?: string | null;
+          acceptance_spec?: string | null;
+          spec_hash?: string | null;
+          spec_schema_version?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -88,6 +94,9 @@ export interface Database {
           status?: TaskStatus;
           tx_hash?: string | null;
           escrow_contract?: string | null;
+          // acceptance_spec / spec_hash / spec_schema_version are deliberately absent:
+          // migration 016's trigger rejects any change to them, unconditionally. Leaving
+          // them out makes that a compile error rather than a runtime exception (CC-084).
           created_at?: string;
           updated_at?: string;
         };

@@ -17,6 +17,10 @@ export interface TaskRecord {
   status: TaskStatus;
   tx_hash: string | null;
   escrow_contract: string | null;
+  /** Verbatim spec string — the specHash preimage. Never reserialise it (CC-084). */
+  acceptance_spec: string | null;
+  spec_hash: string | null;
+  spec_schema_version: number | null;
   created_at: string;
 }
 
@@ -29,6 +33,10 @@ export interface CreateTaskInput {
   deadline_unix: number;
   tx_hash: string;
   escrow_contract: string;
+  /** All three together or none — enforced by migration 016's tasks_spec_complete. */
+  acceptance_spec?: string | null;
+  spec_hash?: string | null;
+  spec_schema_version?: number | null;
 }
 
 export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
@@ -45,6 +53,9 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
       deadline_unix: input.deadline_unix,
       tx_hash: input.tx_hash,
       escrow_contract: input.escrow_contract,
+      acceptance_spec: input.acceptance_spec ?? null,
+      spec_hash: input.spec_hash ?? null,
+      spec_schema_version: input.spec_schema_version ?? null,
       status: "pending",
     })
     .select()
