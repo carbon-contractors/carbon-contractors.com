@@ -15,6 +15,9 @@ on:
 
 permissions:
   contents: read
+  # Read-only, for the duplicate-issue-id check below. It lists open PRs and their
+  # changed filenames; it never writes, comments or labels.
+  pull-requests: read
 
 jobs:
   build:
@@ -66,6 +69,15 @@ jobs:
       # issues in parallel is the common way this happens.
       - name: Backlog index is current
         run: node scripts/backlog.mjs --check
+
+      # Two open PRs can each add CC-096.md and both look clean until one merges — git
+      # only sees the collision as an add/add conflict afterwards, when the id is already
+      # threaded through commit messages and cross-references. Happened three times on
+      # 2026-08-16. Needs the API, so it skips on forks rather than failing.
+      - name: No duplicate backlog issue ids across open PRs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-issue-ids.mjs
 
       - name: Lint
         run: npm run lint

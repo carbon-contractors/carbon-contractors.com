@@ -50,7 +50,9 @@
 
 .links {
   display: flex;
-  gap: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px 24px;
 }
 
 .link {
@@ -73,4 +75,16 @@
   font-size: 9px;
   letter-spacing: 0.14em;
   color: var(--cc-text-faint);
+}
+
+/* Narrow phones. `flex-wrap` above is what prevents the overflow — this is purely cosmetic,
+   and it does NOT keep the links on one row: the six of them measure ~300px of text alone
+   against 327px of content box at 375px, so they wrap at any usable gap. What the tighter
+   gap buys is keeping the wrapped first line clear of the viewport edges (4.5px of slack at
+   24px, 24.5px at 14px) and holding the break steady instead of re-flowing again at 360px.
+   (CC-092) */
+@media (max-width: 480px) {
+  .links {
+    column-gap: 14px;
+  }
 }

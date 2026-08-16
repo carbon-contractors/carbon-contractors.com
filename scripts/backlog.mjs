@@ -50,6 +50,16 @@ const issues = readdirSync(DIR)
     for (const k of ["id", "title", "status", "priority", "area", "epic"]) {
       if (!fm[k]) throw new Error(`${f}: missing required field "${k}"`);
     }
+    // The filesystem stops two issues sharing a filename, so a duplicate id can only
+    // enter as a mismatch between the name and the frontmatter — which is exactly what
+    // a half-finished renumber leaves behind. Three id collisions happened on
+    // 2026-08-16 (CC-092, then CC-096 twice) and each renumber touched 20+ references.
+    if (fm.id !== f.replace(/\.md$/, "")) {
+      throw new Error(
+        `${f}: frontmatter id "${fm.id}" does not match the filename. ` +
+          `Renaming an issue means changing both, plus every reference to it.`,
+      );
+    }
     if (!STATUS_ORDER.includes(fm.status)) {
       throw new Error(`${f}: unknown status "${fm.status}" (expected ${STATUS_ORDER.join(", ")})`);
     }
