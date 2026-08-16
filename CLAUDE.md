@@ -201,6 +201,16 @@ exists rather than reasoning from this file.**
   correct, not unsigned.
 - **Line endings are pinned** (`* text=auto eol=lf`). If `git status` shows every file modified, that
   is the cause. **Python's `write_text` silently writes CRLF on Windows — use `write_bytes`.**
+- **A fresh worktree has neither `node_modules` nor `.env.local`, and only `npm run build` says so.**
+  Both are gitignored, so neither crosses into `.claude/worktrees/*`. Missing deps surface as
+  `Cannot find module .../next/dist/bin/next` — run `npm ci` first. Missing env is the trap: because
+  `src/lib/config.ts` validation is **lazy**, it does not fail at boot but at page-data collection,
+  as `Invalid environment configuration: SUPABASE_URL …` against `/api/fund-task`. `dev`, `lint`,
+  `typecheck` and `test` all pass without it, so build is the only step that trips and it reads as a
+  code fault. Do not copy `.env.local` into the worktree; supply it for the one command. Node's
+  `--env-file` does **not** work — Next propagates it into `NODE_OPTIONS` for its workers, which
+  reject it `ERR_WORKER_INVALID_EXEC_ARGV`. → `CC-092`
+  · `set -a; . ../../../.env.local; set +a; npm run build`
 - **The test suite is hermetic by enforcement, not convention.** `vitest.setup.ts` strips every
   signing key, RPC URL and live contract address from the environment and blocks global `fetch`. A
   test that reaches the network fails loudly and logs `[CC-060 BLOCKED]`. If you need a real call, it
