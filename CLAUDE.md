@@ -169,7 +169,7 @@ exists rather than reasoning from this file.**
   `undefined`, and **`z.coerce.number()` turns `""` into `0`, not `NaN`** — so a blank
   `RATE_LIMIT_MAX_REQUESTS` was a limit of zero in `config.ts` and `NaN` (no limiting at all) at the
   `parseInt` call sites. `config.ts` now maps blank to unset via `envInt`/`envOptional`; use those
-  for any new var rather than reading `process.env` directly. → `CC-096`, `Lessons-Learned.md` §26
+  for any new var rather than reading `process.env` directly. → `CC-097`, `Lessons-Learned.md` §26
   · `grep -nE 'process\.env\.[A-Z_0-9]+\s*\?\?' -r src middleware.ts scripts`
 - **`NEXT_PUBLIC_*` is inlined at build time.** Changing a Vercel env var does nothing without a
   fresh deploy. `NEXT_PUBLIC_COMING_SOON` fails closed — the value must be exactly `false`. → `CC-014`

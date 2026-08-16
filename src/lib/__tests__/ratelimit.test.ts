@@ -49,7 +49,7 @@ describe("ratelimit", () => {
   });
 });
 
-// ── CC-096 ───────────────────────────────────────────────────────────────────
+// ── CC-097 ───────────────────────────────────────────────────────────────────
 //
 // The regression these exist for: `parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ??
 // "60", 10)` could not see a set-but-empty variable. `parseInt("", 10)` is NaN, and
@@ -57,7 +57,7 @@ describe("ratelimit", () => {
 // dashboard silently disabled the general /api/* limiter entirely. It did not fall
 // back to 60.
 
-describe("ratelimit — blank env vars (CC-096)", () => {
+describe("ratelimit — blank env vars (CC-097)", () => {
   beforeEach(() => {
     vi.resetModules();
     delete process.env.UPSTASH_REDIS_REST_URL;

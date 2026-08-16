@@ -35,7 +35,7 @@ interface WindowEntry {
 
 const rateLimitMap = new Map<string, WindowEntry>();
 
-// Validated at the boundary rather than parsed here (CC-096). getRateLimitConfig()
+// Validated at the boundary rather than parsed here (CC-097). getRateLimitConfig()
 // deliberately reads only the rate-limit vars, so the coming-soon gate above does not
 // gain a dependency on the Supabase or KMS environment. zod is edge-safe.
 //

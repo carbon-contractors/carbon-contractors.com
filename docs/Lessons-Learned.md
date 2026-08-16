@@ -1193,7 +1193,7 @@ take. It is that `src/lib/config.ts` is a Zod schema built for exactly this, and
 and the `NaN` at the boundary instead of letting each call site invent its own failure mode. **A
 lesson without a sweep is a lesson that gets written twice.**
 
-### Amendment, same day, while implementing the sweep as `CC-096`
+### Amendment, same day, while implementing the sweep as `CC-097`
 
 Two corrections, both from measuring rather than reasoning.
 

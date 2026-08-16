@@ -86,7 +86,7 @@ describe("config", () => {
   });
 });
 
-// ── CC-096: set-but-empty env vars ───────────────────────────────────────────
+// ── CC-097: set-but-empty env vars ───────────────────────────────────────────
 //
 // A var that is present but empty arrives as "" rather than undefined. `??` does not
 // catch it, `.default()` does not fire on it, and — the trap that made this worth a
@@ -95,7 +95,7 @@ describe("config", () => {
 // with a limit of zero, and a blank ESCROW_DEPLOY_BLOCK with block 0, which is a
 // valid block number that passes escrow.ts's `=== undefined` guard.
 
-describe("config — set-but-empty env vars (CC-096)", () => {
+describe("config — set-but-empty env vars (CC-097)", () => {
   beforeEach(() => {
     _resetConfig();
     vi.unstubAllEnvs();
@@ -177,7 +177,7 @@ describe("config — set-but-empty env vars (CC-096)", () => {
   });
 });
 
-describe("getRateLimitConfig (CC-096)", () => {
+describe("getRateLimitConfig (CC-097)", () => {
   beforeEach(() => {
     _resetConfig();
     vi.unstubAllEnvs();

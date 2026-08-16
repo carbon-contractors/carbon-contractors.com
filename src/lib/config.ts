@@ -6,14 +6,14 @@
 
 import { z } from "zod";
 
-// ── Set-but-empty env vars (CC-096) ──────────────────────────────────────────
+// ── Set-but-empty env vars (CC-097) ──────────────────────────────────────────
 //
 // An env var that is PRESENT BUT EMPTY arrives as "" rather than undefined. A blank
 // field in the Vercel dashboard, a `VAR=` line in a .env file, `docker run -e VAR`
 // and an unset GitHub Actions secret all produce it. `??` only catches null and
 // undefined, so it does not select the default — that is Lessons-Learned §24.
 //
-// Zod does not save you from it by itself, which is the part that made CC-096 worth
+// Zod does not save you from it by itself, which is the part that made CC-097 worth
 // filing. Two traps:
 //
 //   • `.default()` fires on undefined only, so "" reaches the inner schema.
@@ -78,7 +78,7 @@ const envSchema = z.object({
 
   // ── Contracts (optional — may not be deployed yet) ────────────────────────
   // envOptional, not bare .optional(): a blank NEXT_PUBLIC_ESCROW_CONTRACT would
-  // otherwise arrive as "" and be treated as a configured address (CC-096).
+  // otherwise arrive as "" and be treated as a configured address (CC-097).
   NEXT_PUBLIC_ESCROW_CONTRACT: envOptional(z.string().optional()),
   NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT: envOptional(z.string().optional()),
   BASE_SEPOLIA_RPC_URL: envOptional(z.string().optional()),
@@ -118,7 +118,7 @@ const envSchema = z.object({
 
   // ── GCP Cloud KMS (optional — production signer via HSM) ─────────────────
   // A blank GCP_KMS_KEY_PATH must read as "no HSM configured", not as a configured
-  // key path of "", which is what selects the signer implementation (CC-096).
+  // key path of "", which is what selects the signer implementation (CC-097).
   GCP_KMS_KEY_PATH: envOptional(z.string().optional()),
   GCP_PROJECT_NUMBER: envOptional(z.string().optional()),
   GCP_WORKLOAD_IDENTITY_POOL_ID: envOptional(z.string().optional()),
@@ -177,7 +177,7 @@ export function getConfig(): AppConfig {
 }
 
 /**
- * The rate-limiting knobs, validated on their own (CC-096).
+ * The rate-limiting knobs, validated on their own (CC-097).
  *
  * Deliberately narrower than getConfig(). middleware.ts reads these at module scope
  * on the edge runtime, and the same middleware hosts the coming-soon gate — so

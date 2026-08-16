@@ -90,7 +90,7 @@ describe("rate limiting middleware", () => {
   });
 });
 
-// ── CC-096 ───────────────────────────────────────────────────────────────────
+// ── CC-097 ───────────────────────────────────────────────────────────────────
 //
 // Blank RATE_LIMIT_* vars broke this middleware in two opposite directions at once.
 // WINDOW_MS = NaN meant `now - windowStart > NaN` was false, so the window never
@@ -99,7 +99,7 @@ describe("rate limiting middleware", () => {
 // those kept comparing against a counter that could never reset — the MCP routes
 // would have locked out permanently while the rest of the API went unlimited.
 
-describe("rate limiting middleware — blank env vars (CC-096)", () => {
+describe("rate limiting middleware — blank env vars (CC-097)", () => {
   let middleware: (req: NextRequest) => ReturnType<typeof import("../../../middleware").middleware>;
 
   const request = (path: string, ip: string) =>

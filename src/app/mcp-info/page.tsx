@@ -86,7 +86,7 @@ const RESOURCES = [
 ];
 
 export default function McpInfoPage() {
-  // `||`, not `??` (CC-096). NEXT_PUBLIC_* is inlined at build time, so a blank
+  // `||`, not `??` (CC-097). NEXT_PUBLIC_* is inlined at build time, so a blank
   // Vercel field becomes the literal "" in the bundle: `??` would render an empty
   // contract address instead of "Not deployed". Read directly rather than through
   // getConfig() because Next only inlines literal `process.env.NEXT_PUBLIC_*`

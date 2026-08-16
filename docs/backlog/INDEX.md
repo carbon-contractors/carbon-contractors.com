@@ -123,7 +123,7 @@ Open by priority: **P0** 10 · **P1** 28 · **P2** 18 · **P3** 1
 | [CC-069](CC-069.md) | Done | Every wallet-signature check rejects Smart Wallet / Base Account signatures |
 | [CC-070](CC-070.md) | Done | Every eth_getLogs query in escrow.ts exceeds the public RPC's 2000-block range limit |
 | [CC-082](CC-082.md) | Done | CarbonEscrow v2 — submitWork, pull-payment claims, signed verdicts, commitments |
-| [CC-096](CC-096.md) | Done | Set-but-empty env vars bypass every default — the API rate limiter stops limiting |
+| [CC-097](CC-097.md) | Done | Set-but-empty env vars bypass every default — the API rate limiter stops limiting |
 
 ## Linear provenance
 

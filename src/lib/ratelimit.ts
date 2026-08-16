@@ -138,7 +138,7 @@ function createLimiter(
 // ── Exported limiters ────────────────────────────────────────────────────────
 
 // Read once, at module scope, through the validated boundary rather than through
-// `parseInt(process.env.X ?? "...")` (CC-096). The old form could not see a
+// `parseInt(process.env.X ?? "...")` (CC-097). The old form could not see a
 // set-but-empty variable — `??` does not catch "", and `parseInt("", 10)` is NaN, so
 // `count > maxRequests` was false for every count and this limiter stopped limiting
 // entirely. It did not fall back to 60. → Lessons-Learned §26
