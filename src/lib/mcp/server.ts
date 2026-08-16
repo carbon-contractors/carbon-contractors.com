@@ -33,6 +33,8 @@ import {
 import { completeTaskOnChain, resolveDisputeOnChain } from "@/lib/contracts/signer";
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { taskCreationRateLimiter } from "@/lib/ratelimit";
+import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
+import { MAX_SPEC_BYTES } from "@/lib/spec/schema";
 import { log } from "@/lib/logging";
 
 /** Context provided when a caller authenticates their session. */
@@ -141,12 +143,20 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         .min(1)
         .max(720)
         .describe("Deadline in hours from now (1–720)"),
+      acceptance_spec: z
+        .string()
+        .max(MAX_SPEC_BYTES)
+        .optional()
+        .describe(
+          'Machine-checkable acceptance criteria, as a JSON STRING (not an object) — e.g. \'{"schema_version":1,"criteria":{"min_artefacts":8}}\'. Sent as a string because the exact bytes you send are the hash preimage: the returned spec_hash is keccak256 of them, and re-serialising would change it. Without a spec there is nothing to check, so the task can only resolve in the worker\'s favour.'
+        ),
     },
     async ({
       to_human_wallet,
       task_description,
       amount_usdc,
       deadline_hours,
+      acceptance_spec,
     }) => {
       const deadline_unix =
         Math.floor(Date.now() / 1000) + deadline_hours * 3600;
@@ -222,12 +232,31 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
+        // Validate and hash before any row is written, so a malformed spec fails
+        // the whole call rather than creating a task the agent cannot commit.
+        let spec = null;
+        if (acceptance_spec !== undefined) {
+          try {
+            spec = parseAndHashSpec(acceptance_spec);
+          } catch (err) {
+            const message =
+              err instanceof SpecValidationError ? err.message : String(err);
+            return {
+              isError: true,
+              content: [
+                { type: "text", text: JSON.stringify({ ok: false, error: message }) },
+              ],
+            };
+          }
+        }
+
         const response = await initiateX402Payment({
           from_agent_wallet,
           to_human_wallet: worker.wallet,
           task_description,
           amount_usdc,
           deadline_unix,
+          spec,
         });
 
         return {
