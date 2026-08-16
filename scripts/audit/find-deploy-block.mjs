@@ -26,8 +26,8 @@ import { createPublicClient, http, getAddress } from "viem";
 import { base, baseSepolia } from "viem/chains";
 
 async function main() {
-  const target = process.argv[2] ?? process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
-  const network = process.env.NEXT_PUBLIC_BASE_NETWORK ?? "testnet";
+  const target = process.argv[2] || process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
+  const network = process.env.NEXT_PUBLIC_BASE_NETWORK || "testnet";
   const rpcUrl =
     network === "mainnet"
       ? process.env.BASE_MAINNET_RPC_URL

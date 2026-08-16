@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // Stub env vars before importing middleware
@@ -87,5 +87,75 @@ describe("rate limiting middleware", () => {
     );
     const result = middleware(req);
     expect(result).toBeUndefined();
+  });
+});
+
+// ── CC-097 ───────────────────────────────────────────────────────────────────
+//
+// Blank RATE_LIMIT_* vars broke this middleware in two opposite directions at once.
+// WINDOW_MS = NaN meant `now - windowStart > NaN` was false, so the window never
+// rolled over; MAX_REQUESTS = NaN meant `count > NaN` was false, so the general
+// /api/* limit never tripped. ENDPOINT_LIMITS holds *literal* limits, though, so
+// those kept comparing against a counter that could never reset — the MCP routes
+// would have locked out permanently while the rest of the API went unlimited.
+
+describe("rate limiting middleware — blank env vars (CC-097)", () => {
+  let middleware: (req: NextRequest) => ReturnType<typeof import("../../../middleware").middleware>;
+
+  const request = (path: string, ip: string) =>
+    new NextRequest(`http://localhost:3000${path}`, {
+      headers: { "x-forwarded-for": ip },
+    });
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubEnv("RATE_LIMIT_MAX_REQUESTS", "");
+    vi.stubEnv("RATE_LIMIT_WINDOW_MS", "");
+    const mod = await import("../../../middleware");
+    middleware = mod.middleware;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  it("falls back to the documented 60/min instead of not limiting at all", () => {
+    const ip = "203.0.113.1";
+    for (let i = 0; i < 60; i++) {
+      expect(middleware(request("/api/tasks", ip))).toBeUndefined();
+    }
+    expect(middleware(request("/api/tasks", ip))?.status).toBe(429);
+  });
+
+  it("rolls the window over, so a tighter endpoint limit is not a permanent lockout", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T00:00:00Z"));
+
+    const ip = "203.0.113.2";
+    const path = "/api/basedhuman.mcp/challenge";
+
+    // ENDPOINT_LIMITS caps this at 10 regardless of RATE_LIMIT_MAX_REQUESTS.
+    for (let i = 0; i < 10; i++) {
+      expect(middleware(request(path, ip))).toBeUndefined();
+    }
+    expect(middleware(request(path, ip))?.status).toBe(429);
+
+    // Past the 60s default window the counter must reset. With WINDOW_MS = NaN the
+    // comparison at middleware.ts:86 was false forever and this stayed 429.
+    vi.advanceTimersByTime(61_000);
+    expect(middleware(request(path, ip))).toBeUndefined();
+  });
+
+  it("sends a numeric Retry-After, never the string NaN", () => {
+    const ip = "203.0.113.3";
+    for (let i = 0; i < 60; i++) middleware(request("/api/tasks", ip));
+
+    const blocked = middleware(request("/api/tasks", ip));
+    const retryAfter = blocked?.headers.get("Retry-After");
+
+    expect(retryAfter).not.toBeNull();
+    expect(retryAfter).not.toBe("NaN");
+    expect(Number.isFinite(Number(retryAfter))).toBe(true);
   });
 });

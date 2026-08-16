@@ -13,10 +13,14 @@ import * as dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
 
+// `||`, not `??` — dotenv turns a bare `BASE_SEPOLIA_RPC_URL=` line into "", which
+// `??` passes straight through as an empty RPC URL (CC-097). This file cannot use
+// src/lib/config.ts: it is excluded from the Next tsconfig and belongs to the Hardhat
+// world, which has no Supabase environment for the full schema to validate.
 const BASE_SEPOLIA_RPC =
-  process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org";
+  process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org";
 const BASE_MAINNET_RPC =
-  process.env.BASE_MAINNET_RPC_URL ?? "https://mainnet.base.org";
+  process.env.BASE_MAINNET_RPC_URL || "https://mainnet.base.org";
 
 export default defineConfig({
   plugins: [

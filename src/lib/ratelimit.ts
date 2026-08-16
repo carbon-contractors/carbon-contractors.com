@@ -7,6 +7,7 @@
  * Falls back to in-memory sliding window when Upstash is not configured.
  */
 
+import { getRateLimitConfig } from "@/lib/config";
 import { log } from "@/lib/logging";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -136,10 +137,17 @@ function createLimiter(
 
 // ── Exported limiters ────────────────────────────────────────────────────────
 
+// Read once, at module scope, through the validated boundary rather than through
+// `parseInt(process.env.X ?? "...")` (CC-097). The old form could not see a
+// set-but-empty variable — `??` does not catch "", and `parseInt("", 10)` is NaN, so
+// `count > maxRequests` was false for every count and this limiter stopped limiting
+// entirely. It did not fall back to 60. → Lessons-Learned §26
+const rateLimits = getRateLimitConfig();
+
 /** General API rate limiter: 60 req/min per IP (configurable via env). */
 export const apiRateLimiter = createLimiter(
-  parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "60", 10),
-  parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? "60000", 10),
+  rateLimits.RATE_LIMIT_MAX_REQUESTS,
+  rateLimits.RATE_LIMIT_WINDOW_MS,
   "api",
 );
 
@@ -160,7 +168,7 @@ export const challengeRateLimiter = createLimiter(10, 60_000, "challenge");
  * so on Vercel the effective limit is 30/hour × live instances.
  */
 export const taskCreationRateLimiter = createLimiter(
-  parseInt(process.env.TASK_CREATE_LIMIT_PER_HOUR ?? "30", 10),
+  rateLimits.TASK_CREATE_LIMIT_PER_HOUR,
   3_600_000,
   "task-create",
 );

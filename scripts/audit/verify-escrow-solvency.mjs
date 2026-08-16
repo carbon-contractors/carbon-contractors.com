@@ -71,7 +71,7 @@ const usdcFmt = (v) => `${formatUnits(v, 6)} USDC`;
 async function main() {
   const escrowRaw = process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
   const usdcRaw = process.env.NEXT_PUBLIC_USDC_ADDRESS;
-  const network = process.env.NEXT_PUBLIC_BASE_NETWORK ?? "testnet";
+  const network = process.env.NEXT_PUBLIC_BASE_NETWORK || "testnet";
   const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL;
 
   if (!escrowRaw || !usdcRaw) {

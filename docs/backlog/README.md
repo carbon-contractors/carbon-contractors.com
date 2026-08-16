@@ -73,6 +73,23 @@ so `git log --grep=CC-001` reconstructs the story.
 
 `CC-###`, allocated sequentially, never reused.
 
+**Check the directory for the next free number — there is no allocator.** Two branches cut at
+different times cannot see each other's choices, and on 2026-08-16 three ids collided in one day
+(`CC-092`, then `CC-096` twice). Each renumber touched 20+ references across a dozen files.
+
+Two guards now exist, covering different halves:
+
+- **`backlog.mjs` asserts the filename matches the frontmatter `id`.** The filesystem stops two
+  issues sharing a name, so a duplicate can only enter as a mismatch — which is what a half-finished
+  renumber leaves behind.
+- **`scripts/check-issue-ids.mjs` fails CI when two *open* PRs add the same id.** Git only sees that
+  as an add/add conflict once one of them merges, by which point the id is already threaded through
+  commit messages and cross-references. Both PRs go red, deliberately: which one moves is a
+  judgement call (first claim usually wins), not a script's decision.
+
+If you are renumbering, `git grep -n CC-0XX` before pushing — the id appears in code comments and
+other issues' `Related:` lines, not just the issue file.
+
 - `CC-001` to `CC-038` — seeded 2026-07-25 from the codebase review, `AUDIT-2026-03-25.md`, the
   MVP definition of done, and the `NOR-` references still in the code.
 - `CC-039` to `CC-054` — added the same day from the full Linear export, plus findings that came

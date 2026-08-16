@@ -86,9 +86,14 @@ const RESOURCES = [
 ];
 
 export default function McpInfoPage() {
+  // `||`, not `??` (CC-097). NEXT_PUBLIC_* is inlined at build time, so a blank
+  // Vercel field becomes the literal "" in the bundle: `??` would render an empty
+  // contract address instead of "Not deployed". Read directly rather than through
+  // getConfig() because Next only inlines literal `process.env.NEXT_PUBLIC_*`
+  // references — a value routed through a runtime helper is not substituted at all.
   const escrowContract =
-    process.env.NEXT_PUBLIC_ESCROW_CONTRACT ?? "Not deployed";
-  const network = process.env.NEXT_PUBLIC_BASE_NETWORK ?? "testnet";
+    process.env.NEXT_PUBLIC_ESCROW_CONTRACT || "Not deployed";
+  const network = process.env.NEXT_PUBLIC_BASE_NETWORK || "testnet";
 
   return (
     <PageShell>

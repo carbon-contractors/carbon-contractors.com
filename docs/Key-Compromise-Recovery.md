@@ -180,7 +180,9 @@ import { base, baseSepolia } from "viem/chains";
 
 const client = createPublicClient({
   chain: process.env.NEXT_PUBLIC_BASE_NETWORK === "mainnet" ? base : baseSepolia,
-  transport: http(process.env.BASE_MAINNET_RPC_URL ?? process.env.BASE_SEPOLIA_RPC_URL),
+  // `||`, not `??` — a blank BASE_MAINNET_RPC_URL is "" and would be used as the
+  // transport URL instead of falling through to Sepolia (CC-097).
+  transport: http(process.env.BASE_MAINNET_RPC_URL || process.env.BASE_SEPOLIA_RPC_URL),
 });
 
 const ESCROW = process.env.NEXT_PUBLIC_ESCROW_CONTRACT as `0x${string}`;
