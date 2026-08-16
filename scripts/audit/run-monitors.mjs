@@ -344,7 +344,7 @@ async function main() {
       ? `Carbon Contractors invariant monitors: all clear (${results.length} checked)`
       : `Carbon Contractors INVARIANT FAILURE — ${failed.length} of ${results.length}${wake.length > 0 ? " (includes a wake-someone-up tier)" : ""}`,
   );
-  lines.push(`network ${process.env.NEXT_PUBLIC_BASE_NETWORK ?? "testnet"} · ${started.toISOString()}`);
+  lines.push(`network ${process.env.NEXT_PUBLIC_BASE_NETWORK || "testnet"} · ${started.toISOString()}`);
   for (const r of results) {
     lines.push(`${r.status === "PASS" ? "ok" : r.status.toLowerCase()} · ${r.name} · ${r.verdict}`);
   }

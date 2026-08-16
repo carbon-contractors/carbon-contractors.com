@@ -164,6 +164,13 @@ exists rather than reasoning from this file.**
   so it takes effect at runtime.
   `RPC_MAX_BLOCK_RANGE` (default `10000`) is a *provider* property and has already moved once.
   → `CC-070` · `node --env-file=.env.local scripts/audit/find-deploy-block.mjs`
+- **A blank env var is not an unset one, and Zod did not save us from it.** `VAR=`, a cleared Vercel
+  field and an unset Actions secret all arrive as `""`. `??` misses it, `.default()` only fires on
+  `undefined`, and **`z.coerce.number()` turns `""` into `0`, not `NaN`** — so a blank
+  `RATE_LIMIT_MAX_REQUESTS` was a limit of zero in `config.ts` and `NaN` (no limiting at all) at the
+  `parseInt` call sites. `config.ts` now maps blank to unset via `envInt`/`envOptional`; use those
+  for any new var rather than reading `process.env` directly. → `CC-096`, `Lessons-Learned.md` §26
+  · `grep -nE 'process\.env\.[A-Z_0-9]+\s*\?\?' -r src middleware.ts scripts`
 - **`NEXT_PUBLIC_*` is inlined at build time.** Changing a Vercel env var does nothing without a
   fresh deploy. `NEXT_PUBLIC_COMING_SOON` fails closed — the value must be exactly `false`. → `CC-014`
 - **Local Supabase credentials are asymmetric.** The anon key is valid; `SUPABASE_SERVICE_ROLE_KEY`

@@ -1193,6 +1193,47 @@ take. It is that `src/lib/config.ts` is a Zod schema built for exactly this, and
 and the `NaN` at the boundary instead of letting each call site invent its own failure mode. **A
 lesson without a sweep is a lesson that gets written twice.**
 
+### Amendment, same day, while implementing the sweep as `CC-096`
+
+Two corrections, both from measuring rather than reasoning.
+
+**The Vercel environment has now been checked.** `vercel env ls production`: neither rate-limit
+variable exists in any environment, so the trap was never armed. Worth recording that the check took
+one read-only command and the paragraph above chose to speculate instead.
+
+**The prescribed fix above does not work.** Routing these through `config.ts` was the right
+instinct and the wrong remedy, because `config.ts` had the same defect class in four of its own
+fields. Measured against zod 4.3.6:
+
+```
+z.coerce.number().default(60)                       <- ""   ->  0     (not 60)
+z.coerce.number().int().nonnegative().optional()    <- ""   ->  0     (not undefined)
+z.string().optional()                               <- ""   ->  ""    (present-and-empty)
+```
+
+`Number("")` is `0`, not `NaN` — so `z.coerce` does not produce the `NaN` that `.positive()` was
+supposed to catch. And `.default()` fires on `undefined` only, so `""` sails past it into the inner
+schema. Routing the rate limiter through the schema unchanged would have replaced *"limits nothing"*
+with *"limit of zero — denies everything"*. Equally silent, equally wrong, opposite direction.
+
+The `ESCROW_DEPLOY_BLOCK` case is the one worth keeping. A blank value coerced to `0`, which is a
+*valid block number*, so it passed the `configured === undefined` guard in `escrow.ts` — the guard
+whose entire purpose is to warn that the bound is missing. Queries would scan from genesis with the
+warning suppressed. §26 opened on a script that could pass while skipping the property it existed to
+demonstrate; this is a guard that could pass while skipping the condition it existed to detect,
+found the same day, one layer down.
+
+The working fix is `z.preprocess` mapping blank to `undefined` *before* coercion, so the default is
+reachable and only genuinely malformed input throws.
+
+**The generalisable form, and the reason this is an amendment rather than a footnote:** §22 recorded
+that a ticket's proposed fix would not have worked. §24 recorded a lesson that changed nothing
+because nobody swept. §26 — this entry — was written to correct §24's failure to take, and shipped
+with a remedy that had not been run. **A prescribed fix is a hypothesis until something executes
+it.** Writing the sweep is not the same as doing the sweep; and specifying the remedy is not the same
+as testing the remedy. Three entries now, each catching the previous one's confidence, and the only
+thing that has ever broken the chain is running the expression and reading what came back.
+
 ### Three — the evidence could pass while skipping what it was evidence for
 
 The worst version of this defect is not the one that happened. Had `ESCROW_DEPLOY_BLOCK` been

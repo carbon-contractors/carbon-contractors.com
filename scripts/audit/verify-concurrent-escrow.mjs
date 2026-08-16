@@ -106,7 +106,7 @@ function numArg(args, flag, envName, fallback) {
 async function main() {
   const args = process.argv.slice(2);
   const escrowRaw = process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
-  const network = process.env.NEXT_PUBLIC_BASE_NETWORK ?? "testnet";
+  const network = process.env.NEXT_PUBLIC_BASE_NETWORK || "testnet";
   const mainnet = network === "mainnet";
   const rpcUrl = mainnet ? process.env.BASE_MAINNET_RPC_URL : process.env.BASE_SEPOLIA_RPC_URL;
 

@@ -197,7 +197,7 @@ async function main() {
   const noKms = args.includes("--no-kms") || Boolean(signerOverrideRaw);
 
   const escrowRaw = process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
-  const network = process.env.NEXT_PUBLIC_BASE_NETWORK ?? "testnet";
+  const network = process.env.NEXT_PUBLIC_BASE_NETWORK || "testnet";
   const mainnet = network === "mainnet";
   const rpcUrl = mainnet
     ? process.env.BASE_MAINNET_RPC_URL

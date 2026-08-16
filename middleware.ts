@@ -12,6 +12,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
+import { getRateLimitConfig } from "@/lib/config";
+
 // ── Coming Soon Redirect ────────────────────────────────────────────────────
 
 const COMING_SOON = process.env.NEXT_PUBLIC_COMING_SOON !== "false";
@@ -33,8 +35,20 @@ interface WindowEntry {
 
 const rateLimitMap = new Map<string, WindowEntry>();
 
-const WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? "60000", 10);
-const MAX_REQUESTS = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "60", 10);
+// Validated at the boundary rather than parsed here (CC-096). getRateLimitConfig()
+// deliberately reads only the rate-limit vars, so the coming-soon gate above does not
+// gain a dependency on the Supabase or KMS environment. zod is edge-safe.
+//
+// The previous `parseInt(process.env.X ?? "60000", 10)` could not see a set-but-empty
+// variable, and produced NaN rather than the default. Both constants going NaN broke
+// this block in two opposite directions at once: `now - windowStart > NaN` is false,
+// so the window never rolled over, while `count > NaN` is also false, so the general
+// /api/* limit never tripped. Endpoints in ENDPOINT_LIMITS have literal limits, so
+// their counters kept climbing against a window that never reset — meaning the MCP
+// routes would have locked out permanently on request 31 while the rest of the API
+// stopped being limited at all. → Lessons-Learned §26
+const { RATE_LIMIT_WINDOW_MS: WINDOW_MS, RATE_LIMIT_MAX_REQUESTS: MAX_REQUESTS } =
+  getRateLimitConfig();
 
 // Tighter limits for specific endpoints
 const ENDPOINT_LIMITS: Record<string, number> = {
