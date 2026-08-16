@@ -28,6 +28,13 @@ jobs:
       - name: Security audit
         run: npm audit --audit-level=high
 
+      # Offline, no dependencies — the script runs before `npm install` by design.
+      # INDEX.md is generated, so a PR that edits an issue without regenerating leaves
+      # master with a board that silently disagrees with the issue files. Two PRs adding
+      # issues in parallel is the common way this happens.
+      - name: Backlog index is current
+        run: node scripts/backlog.mjs --check
+
       - name: Lint
         run: npm run lint
 
