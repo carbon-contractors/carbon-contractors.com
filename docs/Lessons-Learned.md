@@ -1133,6 +1133,94 @@ Unflattering detail worth keeping: this was written into the file by the same se
 argued, correctly and at length, that an alerting path nobody has watched fire is not one you can
 rely on. The drill was built to test the webhook. It broke the schedule.
 
+## 26. Three things were already written down, and none of them were enforced
+
+**2026-08-16, fixing §22's own acceptance script after the `CC-082` redeploy.**
+
+`scripts/audit/verify-getlogs-recovery.mjs` is the live-chain evidence behind §22. It asserts against
+a hardcoded transaction — `CC059_TX`, the only `TaskResolved` event that has ever existed — but read
+the escrow address and the deploy block from `NEXT_PUBLIC_ESCROW_CONTRACT` and `ESCROW_DEPLOY_BLOCK`.
+Both moved when v2 deployed, and it went red.
+
+That is one artefact making two incompatible kinds of claim. **A monitor asserts something about now
+and must read live config, because it should break when reality changes. An evidence script asserts
+something about the past and must pin everything, because a fact about the past cannot regress — if
+it starts failing, the script is wrong, not the system.** This one was half of each. It was never
+correct; the env vars merely happened to describe the same deployment that emitted the transaction,
+and that coincidence held for five days.
+
+The interesting part is not the breakage. It is that **all three of the things needed to prevent it
+were already written down in this repository, and not one of them was enforced anywhere.**
+
+### One — the classification existed, in a different file
+
+`CC-085` built the monitor registry and *deliberately excluded this script*, with a comment block
+explaining that it is historical evidence rather than a live invariant. The reasoning was correct and
+recorded. It just lived in `run-monitors.mjs`, while the script it described went on reading live
+config. The artefact and its own documentation disagreed, and the documentation was the accurate one.
+
+`CLAUDE.md` already uses the phrase *hermetic by enforcement, not convention* for the test suite
+(`CC-060`). The same sentence applies to evidence: **a comment next to an artefact is documentation;
+a constant inside it is enforcement.** The fix was to move the classification into the script —
+`V1_ESCROW` and `V1_DEPLOY_BLOCK` as constants beside `CC059_TX`.
+
+### Two — §24 recorded the `??` lesson the day before, and nobody swept
+
+The same script had `BigInt(process.env.RPC_MAX_BLOCK_RANGE ?? "10000")`. §24 had already written
+this up — the exact expression, the exact `0n`, the exact never-advancing loop — one day earlier. It
+was true, well-argued, and changed nothing, because writing down a defect class is not the same as
+removing its instances.
+
+Swept properly this time. **Ten more `process.env.X ??` sites.** Most are harmless by luck: an empty
+`NEXT_PUBLIC_BASE_NETWORK` still fails the `=== "mainnet"` test and lands on testnet. One is not:
+
+```js
+// src/lib/ratelimit.ts:141
+parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "60", 10)
+```
+
+`parseInt("", 10)` is `NaN` — not `0`, not `60`. So `maxRequests` becomes `NaN`, and
+`entry.count > NaN` is **false for every value of count**: the general `/api/*` limiter does not fall
+back to 60, it stops limiting anything at all. A different primitive from §24's `BigInt`, a different
+wrong value, the same root cause, and a considerably worse blast radius — `CLAUDE.md` notes every
+`/api/*` route bypasses the coming-soon gate and is reachable today. Not currently triggered: the
+variable is unset in `.env.local`, and the Vercel environment was not checked from here. A loaded
+trap rather than an open hole, which is the only reason it is described in public before being fixed.
+
+The mechanism is not "remember that `??` differs from `||`" — §24 already said that, and it did not
+take. It is that `src/lib/config.ts` is a Zod schema built for exactly this, and all ten sites read
+`process.env` directly and bypass it. `z.coerce.number().positive()` rejects both the empty string
+and the `NaN` at the boundary instead of letting each call site invent its own failure mode. **A
+lesson without a sweep is a lesson that gets written twice.**
+
+### Three — the evidence could pass while skipping what it was evidence for
+
+The worst version of this defect is not the one that happened. Had `ESCROW_DEPLOY_BLOCK` been
+**unset** rather than moved, the old code fell back to `0n` — genesis — and the script would have
+**passed**, scanning ~4,500 windows instead of ~635 and still finding the event. Green, while
+silently not exercising the bounded-lower-bound half of §22's finding: the part that took a binary
+search over `eth_getCode` to establish and that turned 22,691 requests into 635. The only tell was a
+larger window count in the output, which nothing compares against anything.
+
+**An evidence script that can pass while skipping the property it exists to demonstrate is worse than
+no script**, because the PASS is what gets quoted into the backlog and read as settled. Pinning
+removes the mode instead of documenting it.
+
+Worth noting against §22's own closing lesson. That entry ended on "a backlog ticket's proposed fix
+is a hypothesis, not a plan" — and the first plausible fix here, swapping in the v1 address alone,
+would have moved the failure from step 1 to step 3 rather than resolving it. Same shape, smaller
+stakes: **a symptom that shifts under the first plausible fix is not evidence the diagnosis was
+complete.**
+
+### A smaller one, on measurements that age
+
+The re-run reports 30 requests over 647 windows where §22 recorded 18 over 635. Nothing regressed —
+the scan is newest-first against an event fixed in the past, so it drifts further from head every day
+and those numbers climb forever. A future reader comparing the two had every reason to call it a
+regression. **Any evidence artefact reporting a cost metric should carry the date that metric was
+measured, in its own output.** The script now prints `18 of 635 when measured on 2026-08-11` beside
+the live figures, so the drift reads as age rather than decay.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.
