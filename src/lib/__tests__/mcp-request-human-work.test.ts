@@ -159,3 +159,69 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     expect(mockLimit).not.toHaveBeenCalled();
   });
 });
+
+describe("request_human_work acceptance spec (CC-084)", () => {
+  const VALID_SPEC = '{"schema_version":1,"criteria":{"min_artefacts":8}}';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLimit.mockResolvedValue({ success: true, remaining: 29, retryAfterS: 0 });
+    mockGetHumanByWallet.mockResolvedValue({
+      id: "human-uuid",
+      wallet: WORKER_WALLET.toLowerCase(),
+      categories: ["delivery-errands"],
+      rate_usdc: 40,
+      availability: "available",
+      reputation_score: 80,
+    });
+    mockInitiateX402Payment.mockResolvedValue({
+      status: "awaiting_funding",
+      payment_request_id: "pr_1",
+    });
+  });
+
+  it("passes the parsed spec and its hash through to the payment request", async () => {
+    await callRequestHumanWork({ ...VALID_ARGS, acceptance_spec: VALID_SPEC });
+
+    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spec: expect.objectContaining({
+          preimage: VALID_SPEC, // verbatim — never reserialised
+          hash: "0x95488785ad9098de2b47cd8e031a10509c63766075e0b2de83f5a1902e8466a4",
+          version: 1,
+          hasNoCriteria: false,
+        }),
+      }),
+    );
+  });
+
+  it("passes spec: null when the agent supplies none", async () => {
+    await callRequestHumanWork();
+
+    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+      expect.objectContaining({ spec: null }),
+    );
+  });
+
+  it("rejects a malformed spec before any task row is created", async () => {
+    const { result, json } = await callRequestHumanWork({
+      ...VALID_ARGS,
+      acceptance_spec: '{"schema_version":1,"criteria":{"vibes_check":true}}',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(json.error).toContain("acceptance_spec is invalid");
+    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unsupported schema version with a usable message", async () => {
+    const { result, json } = await callRequestHumanWork({
+      ...VALID_ARGS,
+      acceptance_spec: '{"schema_version":99,"criteria":{}}',
+    });
+
+    expect(result.isError).toBe(true);
+    expect(json.error).toContain("unsupported schema_version 99");
+    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+  });
+});
