@@ -233,6 +233,25 @@ async function main() {
   const onlyRaw = args.find((a) => a.startsWith("--only="))?.slice("--only=".length);
   const only = onlyRaw ? onlyRaw.split(",").map((s) => s.trim()) : null;
 
+  // ── --args: extra flags appended to every selected monitor ────────────────
+  //
+  // Exists so the alerting path can be exercised on demand. An alerting path nobody has
+  // watched fire is not a path you can rely on, and waiting for a genuine incident to
+  // find out whether the webhook works is the wrong time to learn it does not.
+  //
+  // Deliberately generic rather than a per-monitor threshold flag. Which monitor can be
+  // driven into failure depends on what is on chain at the time: with a task in flight,
+  // `verify-unclaimed --max-age-days=0.001` breaches; against a settled escrow it cannot,
+  // because there are no Delivered tasks at any threshold, and `verify-concurrent-escrow
+  // --annual-limit=1` is the one that still bites since it replays historical volume.
+  // Hard-coding either would have produced a drill that silently stops working.
+  //
+  // Safe on the schedule by construction: a scheduled run supplies no workflow inputs, so
+  // this is always empty there. It cannot arm itself.
+  const argsRaw = args.find((a) => a.startsWith("--args="))?.slice("--args=".length);
+  const extraArgs = argsRaw ? argsRaw.trim().split(/\s+/).filter(Boolean) : [];
+  const isDrill = extraArgs.length > 0;
+
   if (only) {
     const unknown = only.filter((n) => !MONITORS.some((m) => m.name === n));
     if (unknown.length > 0) {
@@ -285,7 +304,7 @@ async function main() {
     }
 
     const t0 = Date.now();
-    const { code, out } = await runScript(m.script, m.args ?? []);
+    const { code, out } = await runScript(m.script, [...(m.args ?? []), ...extraArgs]);
     const status = code === 0 ? "PASS" : code === 2 ? "MISCONFIG" : "FAIL";
     const verdict = verdictLine(out);
     results.push({ ...m, status, verdict, code });
@@ -313,6 +332,13 @@ async function main() {
   // ── Build the alert body ──────────────────────────────────────────────────
   const ctx = runContext();
   const lines = [];
+  // A drill must never be mistakeable for an incident. If someone fires this to test the
+  // webhook and the message looks identical to a real failure, the next genuine alert is
+  // one someone has already been trained to ignore — which is worse than no alert at all.
+  if (isDrill) {
+    lines.push("🧪 **DRILL — NOT A REAL FAILURE.** Monitor thresholds were overridden by hand.");
+    lines.push(`overrides: ${extraArgs.join(" ")}`);
+  }
   lines.push(
     green
       ? `Carbon Contractors invariant monitors: all clear (${results.length} checked)`
@@ -358,8 +384,18 @@ async function main() {
     // Dead-man's switch. Only pinged on a fully green run: the external service's own
     // "no ping in N minutes" alarm is path 2, and it must fire when this run does not
     // happen at all, not merely when it happens and fails.
-    const hb = await pingHeartbeat(green ? "" : "fail");
-    if (!hb.attempted) {
+    //
+    // A drill deliberately does NOT touch it. The heartbeat's whole job is to record
+    // whether the monitors are genuinely running and genuinely passing; marking it down
+    // because someone tested the webhook makes its own history lie, and the history is
+    // the only thing that distinguishes "the schedule stopped" from "everything is fine".
+    // Drills exercise path 1. Path 2 proves itself on every real green run.
+    const hb = isDrill
+      ? { attempted: false, drill: true }
+      : await pingHeartbeat(green ? "" : "fail");
+    if (isDrill) {
+      console.log("alerting  heartbeat skipped — drill runs must not mark the dead-man's switch down");
+    } else if (!hb.attempted) {
       console.log("alerting  MONITOR_HEARTBEAT_URL is unset — PATH 2 IS NOT CONFIGURED.");
       console.log("          Scheduled Actions are best-effort and are auto-disabled after 60 days");
       console.log("          of repository inactivity. Without a dead-man's switch, this monitor");

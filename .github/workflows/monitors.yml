@@ -40,6 +40,22 @@ on:
         description: "Comma-separated monitor names (blank = all)"
         required: false
         type: string
+      # Alerting drill. Appended to every selected monitor so a failure can be forced on
+      # demand and the webhook actually watched to fire — an alerting path nobody has seen
+      # work is not one you can rely on, and a live incident is the wrong time to find out.
+      #
+      # Only reachable via workflow_dispatch: a scheduled run supplies no inputs, so this is
+      # always empty there and cannot arm itself.
+      #
+      # Which monitor can be driven into failure depends on what is on chain. With a task in
+      # flight, `--max-age-days=0.001` breaches verify-unclaimed. Against a settled escrow it
+      # cannot, at any threshold — there are no Delivered tasks to find — and the one that
+      # still bites is `--annual-limit=1`, since verify-concurrent-escrow replays historical
+      # volume that survives settlement.
+      monitor_args:
+        description: "DRILL ONLY — extra flags for the selected monitors, e.g. --annual-limit=1"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -90,6 +106,16 @@ jobs:
         run: npm ci
 
       - name: Run monitors
+        env:
+          MONITOR_ONLY: ${{ inputs.only }}
+          MONITOR_DRILL_ARGS: ${{ inputs.monitor_args }}
         run: |
-          node scripts/audit/run-monitors.mjs \
-            ${{ inputs.only && format('--only={0}', inputs.only) || '' }}
+          # Via env rather than interpolated into the command line: workflow inputs are
+          # attacker-controllable in the general case, and `${{ }}` substitution happens
+          # before the shell sees the string, so an input containing shell metacharacters
+          # would execute. This job holds secrets, so that is worth being careful about even
+          # when only the repo owner can dispatch it.
+          ARGS=()
+          [ -n "$MONITOR_ONLY" ] && ARGS+=("--only=$MONITOR_ONLY")
+          [ -n "$MONITOR_DRILL_ARGS" ] && ARGS+=("--args=$MONITOR_DRILL_ARGS")
+          node scripts/audit/run-monitors.mjs "${ARGS[@]}"
