@@ -54,6 +54,7 @@
 
 import { createPublicClient, http, getAddress, formatUnits, parseAbiItem } from "viem";
 import { base, baseSepolia } from "viem/chains";
+import { withRpcRetry, isTransient, shortError } from "./rpc-retry.mjs";
 
 const EVENTS = {
   created: parseAbiItem(
@@ -148,18 +149,27 @@ async function main() {
 
   let head, logs, totalLocked;
   try {
-    head = await client.getBlockNumber();
+    head = await withRpcRetry("head", () => client.getBlockNumber());
     const range = { address: escrow, fromBlock: deployBlock, toBlock: head, span };
-    const [created, completed, resolved, expired] = await Promise.all([
-      getLogsChunked(client, { ...range, event: EVENTS.created }),
-      getLogsChunked(client, { ...range, event: EVENTS.completed }),
-      getLogsChunked(client, { ...range, event: EVENTS.resolved }),
-      getLogsChunked(client, { ...range, event: EVENTS.expired }),
-    ]);
+    // Sequential, not Promise.all: this is the heaviest monitor by request count and the
+    // public endpoint is rate limited (CC-048). Four concurrent chunked sweeps is how you
+    // provoke the 429 that the retry then has to absorb.
+    const created = await withRpcRetry("created", () => getLogsChunked(client, { ...range, event: EVENTS.created }));
+    const completed = await withRpcRetry("completed", () => getLogsChunked(client, { ...range, event: EVENTS.completed }));
+    const resolved = await withRpcRetry("resolved", () => getLogsChunked(client, { ...range, event: EVENTS.resolved }));
+    const expired = await withRpcRetry("expired", () => getLogsChunked(client, { ...range, event: EVENTS.expired }));
     logs = { created, completed, resolved, expired };
-    totalLocked = await client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "totalLocked" });
+    totalLocked = await withRpcRetry("totalLocked", () =>
+      client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "totalLocked" }),
+    );
   } catch (err) {
-    console.error(`RPC read failed: ${err instanceof Error ? err.message : String(err)}`);
+    // Exit 3, not 2. A network failure is not a misconfiguration, and reporting it as one
+    // sends the reader looking for a config error that does not exist (2026-08-17).
+    if (isTransient(err)) {
+      console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(err)}`);
+      return 3;
+    }
+    console.error(`MISCONFIGURED: RPC read failed: ${shortError(err)}`);
     return 2;
   }
 
@@ -229,10 +239,18 @@ async function main() {
   const blockTimes = new Map();
   try {
     const uniqueBlocks = [...new Set(logs.created.map((l) => l.blockNumber))];
-    const fetched = await Promise.all(uniqueBlocks.map((b) => client.getBlock({ blockNumber: b })));
-    uniqueBlocks.forEach((b, i) => blockTimes.set(b, Number(fetched[i].timestamp)));
+    for (const b of uniqueBlocks) {
+      const block = await withRpcRetry(`block ${b}`, () => client.getBlock({ blockNumber: b }));
+      blockTimes.set(b, Number(block.timestamp));
+    }
   } catch (err) {
-    console.error(`block timestamp read failed: ${err instanceof Error ? err.message : String(err)}`);
+    // This is the read that failed on 2026-08-17. It printed viem's full multi-line message,
+    // whose last line is `Version: viem@x.y.z` — and that is precisely what the alert showed.
+    if (isTransient(err)) {
+      console.error(`TRANSIENT — block timestamp read failed after retries: ${shortError(err)}`);
+      return 3;
+    }
+    console.error(`MISCONFIGURED: block timestamp read failed: ${shortError(err)}`);
     return 2;
   }
 
