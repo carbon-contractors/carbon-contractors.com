@@ -60,6 +60,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { verdictLine } from "./verdict-line.mjs";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -135,7 +136,12 @@ const MONITORS = [
  * worse than their absence, because it would read as coverage.
  */
 
-const ICON = { PASS: "PASS", FAIL: "FAIL", MISCONFIG: "CONF", SKIP: "SKIP" };
+// TRAN is a monitor that could not reach the chain after retries. It counts as a failure —
+// an invariant that went unchecked is not a passing one, which is ADR-0003 D3's whole point
+// — but it is labelled apart from CONF so the reader is not sent hunting for a config error
+// that does not exist. That is what happened on 2026-08-17: an RPC blip reported as
+// `misconfig`, which reads as "you set this up wrong".
+const ICON = { PASS: "PASS", FAIL: "FAIL", MISCONFIG: "CONF", TRANSIENT: "TRAN", SKIP: "SKIP" };
 
 function runScript(script, args) {
   return new Promise((resolve) => {
@@ -151,28 +157,9 @@ function runScript(script, args) {
   });
 }
 
-/**
- * The one-line verdict, for the alert body.
- *
- * Every audit script here states its conclusion on a line starting with a known marker,
- * so that is what gets picked. `VIOLATION — 2 problem(s):` on its own is useless in a
- * chat notification, so the `·` bullets that follow it are appended — an alert that makes
- * you go and open the log to learn anything at all is a worse alert.
- */
-function verdictLine(out) {
-  const lines = out.split("\n").map((l) => l.trim()).filter(Boolean);
-  const idx = lines.findLastIndex((l) =>
-    /^(CLEAN|VIOLATION|STRANDED|DEFICIT|PASS|FAIL|UNEXPECTED|MISCONFIGURED)\b/.test(l),
-  );
-  if (idx === -1) return (lines.at(-1) ?? "(no output)").slice(0, 220);
-
-  const detail = [];
-  for (const l of lines.slice(idx + 1)) {
-    if (!l.startsWith("·")) break;
-    detail.push(l);
-  }
-  return [lines[idx], ...detail].join(" ").slice(0, 400);
-}
+// Lives in its own module so it can be unit-tested. It could not be while it was inline
+// here — this file self-executes on import — and its untested fallback branch put a bare
+// `Version: viem@2.55.10` into a real Discord alert on 2026-08-17.
 
 async function postWebhook(body) {
   const url = process.env.MONITOR_WEBHOOK_URL;
@@ -305,7 +292,8 @@ async function main() {
 
     const t0 = Date.now();
     const { code, out } = await runScript(m.script, [...(m.args ?? []), ...extraArgs]);
-    const status = code === 0 ? "PASS" : code === 2 ? "MISCONFIG" : "FAIL";
+    const status =
+      code === 0 ? "PASS" : code === 2 ? "MISCONFIG" : code === 3 ? "TRANSIENT" : "FAIL";
     const verdict = verdictLine(out);
     results.push({ ...m, status, verdict, code });
 
@@ -319,7 +307,9 @@ async function main() {
     }
   }
 
-  const failed = results.filter((r) => r.status === "FAIL" || r.status === "MISCONFIG");
+  const failed = results.filter(
+    (r) => r.status === "FAIL" || r.status === "MISCONFIG" || r.status === "TRANSIENT",
+  );
   const skipped = results.filter((r) => r.status === "SKIP");
   const wake = failed.filter((r) => r.tier === "wake");
   const green = failed.length === 0 && (!strict || skipped.length === 0);
