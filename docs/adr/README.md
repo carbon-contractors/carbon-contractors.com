@@ -38,6 +38,12 @@ made.
   records why the platform cannot refund an in-flight task, which is a bytecode fact rather than a
   policy choice.
 
+`ADR-0002` carries one amendment:
+
+- **Amendment 1** (2026-08-18) reaffirms D1 (no identity verification) pending `CC-098`'s AUSTRAC
+  classification, and records the fee-based argument for why Carbon Contractors may not sit on the
+  same footing as a paid broker for who counts as "the customer" in a two-sided designated service.
+
 ## Convention
 
 Frontmatter fields in use:
