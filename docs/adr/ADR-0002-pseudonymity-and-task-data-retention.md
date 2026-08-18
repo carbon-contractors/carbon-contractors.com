@@ -3,6 +3,7 @@ id: ADR-0002
 title: Pseudonymity, task data retention, and the platform's privacy posture
 status: accepted
 date: 2026-08-13
+amended: 2026-08-18 - D1 reaffirmed pending CC-098, see Amendment 1
 deciders: Aaron Clifft
 depends-on: ADR-0001 (D4 commitment scheme, D5 deterministic checker)
 supersedes: the "Zero PII" design constraint in README.md
@@ -152,7 +153,56 @@ Note also: the intent is row deletion (`DELETE`, or partition drop), not `DROP T
 - Whether the platform holds *any* scratch copy of evidence, or the checker streams from the agent's bucket only.
 - Storage target for task content: unbacked table, separate store, or none.
 - Whether a minimal settlement record is required for the platform's own audit purposes independent of the chain, and if so what the absolute minimum is.
-- AML/CTF exposure of a marketplace routing USDC with no identity verification — adjacent to this ADR, not resolved by it, and a lawyer question alongside `CC-051`.
+- ~~AML/CTF exposure of a marketplace routing USDC with no identity verification — adjacent to
+  this ADR, not resolved by it, and a lawyer question alongside `CC-051`.~~ → **Ticketed
+  2026-08-18.** `CC-098` carries the AUSTRAC AML/CTF Tranche 2 (VASP) classification question
+  specifically — distinct from `CC-051`'s ASIC/DAP scope — including the direct tension it creates
+  with D1 if customer due diligence turns out to be required. `CC-099` carries sanctions/PEP
+  wallet screening, which is compatible with D1 as written (address-based, not identity-based)
+  and does not wait on `CC-098`'s answer. Still a lawyer question, not resolved by either ticket.
+  **D1 itself reaffirmed 2026-08-18 — see Amendment 1.**
+
+## Amendment 1 — 2026-08-18 — D1 reaffirmed; sanctions screening is the operative control, not identity verification
+
+Raised while scoping `CC-098` (AUSTRAC AML/CTF Tranche 2 classification) and `CC-099` (sanctions
+screening), which both landed on the question this ADR's open items already flagged but left
+unresolved: if AML/CTF obligations turn out to attach, does D1 survive?
+
+### A1.1 — Aaron's position, recorded so it is not re-litigated
+
+Stated 2026-08-18: the intent is to **abide by AML/sanctions obligations in full**, including
+doing whatever is reasonably required to stop a known flagged wallet from accessing the
+platform — that commitment is unconditional, applies now, and is what `CC-099` builds regardless
+of how `CC-098` resolves.
+
+It is a **separate and deliberate decision not to pre-emptively add identity verification** on
+the strength of an unresolved classification question alone. **D1 stands** — pseudonymous by
+design, no identity verification — until `CC-098`'s legal review concludes it must not. This is a
+considered call, not an oversight: sanctions/address screening is a scoped, address-based control
+that ships either way; full identity-based CDD is a much larger architectural change (it would
+touch `humans`, the whitepages design, and the entire "no KYC" product premise) that should be
+built if and when required, not spent pre-emptively against a question still open with counsel.
+
+### A1.2 — The fee distinction, as an argument for counsel, not a conclusion
+
+`CC-098` records two competing AUSTRAC precedents on who counts as "the customer" in a two-sided
+designated service: real estate brokering (both parties are customers) versus a solicitor's trust
+account (only the instructing client is). Aaron's position, worth putting to the lawyer directly:
+the brokering precedent describes a party paid a **fee** for arranging the two-sided transaction.
+Carbon Contractors currently charges **no platform fee** — consistent with the stated position of
+no personal revenue accrual until the project proves viable, and with D8's own note that
+introducing a fee is "the trigger to watch" for a related exception.
+
+**Where this helps:** it is a real, relevant fact that goes directly to which of `CC-098`'s two
+precedents is the closer analogy.
+
+**Where it may not carry the whole question:** AUSTRAC's guidance is that even occasional,
+non-fee-feeling provision of a designated service can trigger obligations once an activity is
+"carrying on a business" — so the fee argument likely narrows *who counts as a customer* rather
+than removing the designated-service question altogether. Brief the lawyer on both the argument
+and this limit, not the argument alone.
+
+---
 
 ## Handover — implementation order
 
