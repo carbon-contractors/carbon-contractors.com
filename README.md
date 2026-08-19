@@ -173,6 +173,19 @@ all green, because the offending test asserted only that a mock had been reached
 green runs were not evidence that the fix had worked. If you need a live call, write it as a script
 under `scripts/audit/` rather than as a unit test.
 
+## Public repo, pre-launch status
+
+This repo is public on GitHub by deliberate policy (see CC-028, CC-056) — that is a
+disclosure decision, not a launch decision. The project itself is pre-launch: currently
+Sepolia testnet, in active development.
+
+Public-on-GitHub and launched/live are not the same axis. When assessing this project's
+state:
+
+- Testnet flakiness, known backlog gaps, and in-progress/incomplete features are expected and are not production incidents. Don't flag them as if they were live-user-facing failures unless the question at hand is specifically about mainnet-readiness (CC-034, CC-039).
+- Claims in README.md, /learn, or elsewhere should be read in that light too — "not yet true" is the default expectation for anything gated behind mainnet, not a defect to raise on its own.
+- The distinction matters most for anyone (human or agent) reviewing this repo cold — treat the backlog's open P0/P1 count as evidence of an honest, active audit trail, not as a signal the product is broken or behind where a pre-launch project should be.
+
 ## Design constraints
 
 - **Zero PII** — no personal data stored, ever. Wallets and service categories only.
