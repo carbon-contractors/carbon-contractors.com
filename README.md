@@ -195,4 +195,7 @@ state:
 
 ## License
 
-MIT
+Copyright © 2026 Aaron James Clifft.
+
+AGPL-3.0-or-later for the platform; MIT for `contracts/`. Commercial licences available — see
+[`LICENSE`](LICENSE) and [`COMMERCIAL.md`](COMMERCIAL.md).

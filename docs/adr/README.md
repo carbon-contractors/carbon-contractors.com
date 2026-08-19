@@ -28,6 +28,8 @@ made.
 | [ADR-0003](ADR-0003-monitoring-as-correctness-dependency.md) | Monitoring as a correctness dependency, not an ops nicety | accepted | rescopes and splits `CC-040` |
 | [ADR-0004](ADR-0004-public-claims-and-pseudonymity.md) | Public claims — copy describes the target state, and the identity claim is pseudonymity | accepted | two positions `CLAUDE.md` kept re-litigating |
 | [ADR-0005](ADR-0005-worker-acceptance-and-offer-lifecycle.md) | Worker acceptance, the offer lifecycle, and concurrency limits | accepted | the worker never consented to being hired |
+| [ADR-0006](ADR-0006-continuity-succession-and-the-right-to-fork.md) | Continuity, succession, and the right to fork | **proposed** | `CC-091`, `funds_control_aml_gating.md` Track C |
+| [ADR-0007](ADR-0007-adjudication-tier-and-arbitrator-isolation.md) | The adjudication tier — value-weighted review, and what an arbitrator may see | **proposed** | `funds_control_aml_gating.md` Track D |
 
 `ADR-0001` carries two amendments, and both change decisions stated above them:
 
@@ -80,7 +82,12 @@ the index table above current by hand.
 its own decisions. `ADR-0002` next. `ADR-0003` refers to `ADR-0002`'s retention decisions, and
 `ADR-0004` restates `ADR-0002` D1/D6 as an operational rule.
 
-`ADR-0005` is the only one that is **not** about money, custody or claims — it is the matching layer,
+**`ADR-0006` and `ADR-0007` are drafts, not decisions.** Both were written during the 2026-08-19
+documentation-alignment review (`docs/design-review-2026-08-19.md`) and are `proposed` until Aaron
+accepts or rejects them. `ADR-0006` carries contract-level decisions (an arbitration clock, multisig
+ownership) that must land with `CC-034` or not at all for v1, so it is the one with a deadline.
+
+`ADR-0005` is the only accepted one that is **not** about money, custody or claims — it is the matching layer,
 and it needs no contract knowledge to read. Read it before touching the hire path, `CC-074`,
 `CC-075`, or anything that assumes a worker agreed to a task.
 

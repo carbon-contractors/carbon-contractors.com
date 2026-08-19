@@ -1,162 +1,186 @@
-# Security & Trust Disclosure: Zero-Secret Escrow Architecture
+# Security & Trust Disclosure
 
-> ## ⚠️ History — found wrong 2026-07-30, corrected 2026-08-08
+> ## ⚠️ History — this document has been wrong twice, and both are left visible
 >
-> **This document once claimed the HSM-held key controlled the deployed escrow. That claim was
-> false when it was written, for over three months.**
->
-> This document originally asserted the match below and invited readers to confirm it on
-> Basescan. Verified against Base Sepolia on 2026-07-30, it did not hold:
+> **2026-07-30 — the ownership claim was false for over three months.** This document asserted that
+> the HSM-held key controlled the deployed escrow and invited readers to confirm it on Basescan.
+> Verified against Base Sepolia on 2026-07-30, it did not hold:
 >
 > | | Address |
 > | :-- | :-- |
-> | KMS/HSM-derived address (from `docs/carbon-contractors-escrow-signer-1.pub`) | `0xa8931097540e69B474013D294d0bA6A2cC853e4b` |
-> | Actual `CarbonEscrow.owner()` and `ReputationStake.owner()` (as of 2026-07-30) | `0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b` |
+> | KMS/HSM-derived address (from `carbon-contractors-escrow-signer-1.pub`) | `0xa8931097540e69B474013D294d0bA6A2cC853e4b` |
+> | Actual `owner()` on both contracts, as of 2026-07-30 | `0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b` |
 >
-> The second address was a conventional private key held in a local `.env.local` file. The HSM
-> key had been generated and funded back in April, but the `transferOwnership()` step in
-> [HSM-Deployer-Checklist.md](HSM-Deployer-Checklist.md) was never actually performed —
-> the checklist recorded this honestly as an unticked box; this document asserted it as fact
-> anyway. See `Lessons-Learned.md` §10 for the full account of how that happened.
+> The second address was a conventional private key in a local `.env.local`. The HSM key had been
+> generated and funded in April, but the `transferOwnership()` step in
+> [HSM-Deployer-Checklist.md](HSM-Deployer-Checklist.md) was never performed — the checklist recorded
+> that honestly as an unticked box; this document asserted it as fact anyway. `Lessons-Learned.md`
+> §10 has the full account. Corrected 2026-08-08 by calling `transferOwnership()` on both contracts
+> ([`0xcaf22c7…`](https://sepolia.basescan.org/tx/0xcaf22c758ec388adfb51354f33094c2d94f6a96f9b821adc963c45871c882035),
+> [`0xe17a8f0…`](https://sepolia.basescan.org/tx/0xe17a8f0152b65030c99422f9d9099a73157d88c58490c12c7628139ee6f7280f)).
+> That was `CC-059`.
 >
-> **This has since been corrected.** On 2026-08-08, `transferOwnership(0xa8931097540e69B474013D294d0bA6A2cC853e4b)`
-> was called on both contracts — transaction hashes
-> [`0xcaf22c7…`](https://sepolia.basescan.org/tx/0xcaf22c758ec388adfb51354f33094c2d94f6a96f9b821adc963c45871c882035)
-> (CarbonEscrow) and
-> [`0xe17a8f0…`](https://sepolia.basescan.org/tx/0xe17a8f0152b65030c99422f9d9099a73157d88c58490c12c7628139ee6f7280f)
-> (ReputationStake), both confirmed on-chain with `OwnershipTransferred` emitted. The rest of this
-> document now describes the live state, not just the design intent — verify it yourself using the
-> On-Chain Verification section below, which still tells you exactly how to check.
->
-> **What was never affected:** these are testnet contracts holding no real value —
-> `totalLocked()` was `0` throughout. No user funds were ever under the weaker arrangement.
-> Mainnet deployment is gated on `CC-039`, which this closes the way for.
+> **2026-08-19 — this document was pointing at a contract that had been replaced.** The escrow was
+> redeployed as v2 on 2026-08-15 (`CC-082`), and this page still named the v1 address and told
+> readers to check `owner()` on it. Anyone following the verification steps below between 15 and 19
+> August was verifying an abandoned contract. Found during a documentation-alignment review; the
+> addresses below are now v2. **No funds were ever affected** — `totalLocked()` has been `0`
+> throughout, on both versions, because the funding path has never successfully run
+> (`CC-081` Defect 1).
 >
 > Left visible rather than quietly edited, per the disclosure policy in
-> [Lessons-Learned.md](Lessons-Learned.md) §8 and `CC-056` — this is `CC-059`, now closed.
+> [Lessons-Learned.md](Lessons-Learned.md) §8 and `CC-056`.
 
-As a solo developer, I recognize that trust is the most critical component of an escrow system. Rather than asking you to trust me, I have built an architecture where trust is enforced by hardware and infrastructure — not by promises.
-
-**The core guarantee:** No human — including me — can access, view, copy, or extract the private key that controls the escrow contracts. The key exists only inside a hardware security module. There are no static credentials, key files, or long-lived secrets anywhere in the system.
-
-**Status of that guarantee:** the HSM key and the federated signing path described below exist,
-work, and — as of 2026-08-08 — are what actually controls both deployed contracts. See the history
-box above for the period during which that was not yet true.
+As a solo developer, I recognise that trust is the most critical component of an escrow system.
+Rather than asking you to trust me, I have tried to build an architecture where as little as possible
+*depends* on trusting me — and to state plainly the parts that still do.
 
 ---
 
-## How It Works
+## What the platform can and cannot do
 
-### 1. Hardware Security Module (HSM) — FIPS 140-2 Level 3
+This section is the honest summary. Everything below it is detail.
 
-The escrow signing key is generated and stored inside a **Google Cloud HSM**.
+**Cannot — settled by the deployed bytecode, not by policy:**
 
-- **Non-exportable:** The private key material never leaves the hardware. It cannot be viewed, downloaded, or copied — not by me, not by Google, not by anyone.
-- **Hardware-enforced:** The HSM hardware itself performs the cryptographic signing. There is no digital file, string, or environment variable containing the private key.
-- **Industry standard:** FIPS 140-2 Level 3 certification — the same standard used by financial institutions and government agencies.
+- **Send escrowed funds anywhere except the two addresses fixed at funding.** `resolveDispute`'s
+  destination is `releaseToWorker ? task.worker : task.agent`. No arbitrary destination is reachable
+  by anyone, owner included. This holds against a compromised signer and against an order directed at
+  the operator.
+- **Refund, cancel or claw back a task in flight.** v2 has exactly three owner-only functions —
+  `beginArbitration`, `resolveDispute`, `setVerdictSigner`. There is no owner-callable refund, and
+  `resolveDispute` only reaches a task that is already `Disputed` or `Arbitrating`.
+- **Move funds as part of normal settlement.** Since the pull-payment change
+  ([`ADR-0001`](adr/ADR-0001-escrow-resolution-and-dispute-authority.md) Amendment 1) **the platform
+  makes no transaction at all in the happy path.** The worker claims; the agent claims a refund. An
+  earlier version of this document said "the only way to move funds is through the audited platform
+  application" — that was true of v1 and is no longer true. The platform is not in the path.
 
-### 2. Zero Static Credentials (Workload Identity Federation)
+**Can — stated because an unstated power is the dangerous kind:**
 
-I do not use traditional credentials (API keys, service account JSON files, or stored secrets) to access the signing key. Instead, the system uses **OIDC federation** — the same zero-trust authentication pattern used by large enterprises.
+- **Sign verdicts.** The platform operates the deterministic checker and holds the signing key, so in
+  v1 **the platform is the oracle.** That authority is bounded rather than removed: the rules are
+  published, the inputs are committed on-chain as hashes, and the result is re-runnable by anyone —
+  so a wrong verdict is *falsifiable*, not merely disputable. `ADR-0001` D9 sets out the plan to
+  remove the privilege in v2 (permissionless bonded verdicts with a challenge window). Until then,
+  this is a real trust assumption and this document should not be read as claiming otherwise.
+- **Decline to sign.** If the platform will not sign a failing verdict, the review window closes and
+  the worker is paid. The bias is deliberate — platform inaction must never take money from someone
+  who delivered.
+- **Resolve a disputed task**, to one of the two fixed addresses.
 
-- **No key files:** There are no JSON keys, API tokens, or static credentials stored anywhere — not in environment variables, not in code, not on my machine.
-- **Short-lived tokens only:** Every signing operation uses a temporary token that expires within 45 minutes and cannot be reused.
-- **Infrastructure-locked:** Only the specific production deployment of the Carbon Contractors platform can request signatures. The signing path is cryptographically bound to the correct application environment.
-- **No human in the loop:** The authentication chain is machine-to-machine. I cannot manually invoke the signing key, even if I wanted to.
+**Known single points of failure, disclosed:**
 
-### 3. Dual Authentication Paths
+- **One key holds two roles.** The contract owner and the accepted verdict signer are the same
+  HSM-held key today. Separating them is `CC-090`.
+- **Subjective disputes, when that tier exists, will start out platform-curated.** The adjudication
+  tier ([`ADR-0007`](adr/ADR-0007-adjudication-tier-and-arbitrator-isolation.md)) cannot bootstrap a
+  juror pool from a marketplace with no users, so its first form is a vetted pool with
+  platform-operated fallback capacity — which is the platform adjudicating with extra steps. It is
+  designed with a published exit condition for exactly that reason. None of this exists yet.
+- **Tasks in dispute depend on the owner remaining reachable.** `resolveDispute` is owner-only with
+  no timeout, so a task in `Disputed`/`Arbitrating` would be stranded if the key became permanently
+  unavailable. Every other path — worker claim, agent refund, early release — survives the platform
+  disappearing entirely. This is `CC-091`, and the continuity design is
+  [`ADR-0006`](adr/ADR-0006-continuity-succession-and-the-right-to-fork.md).
 
-The system has two separate, independently constrained authentication paths:
+---
+
+## The signing key
+
+**The core guarantee:** no human — including me — can access, view, copy, or extract the private key
+that controls the escrow contracts. The key exists only inside a hardware security module.
+
+### 1. Hardware Security Module — FIPS 140-2 Level 3
+
+The escrow key is generated and stored inside a **Google Cloud HSM**.
+
+- **Non-exportable:** the private key material never leaves the hardware. It cannot be viewed,
+  downloaded or copied.
+- **Hardware-enforced:** the HSM performs the signing. There is no file, string or environment
+  variable containing the key.
+- **FIPS 140-2 Level 3** certified.
+
+### 2. Zero static credentials (Workload Identity Federation)
+
+Access to the key uses **OIDC federation**, not stored credentials.
+
+- **No key files:** no JSON keys, API tokens or static credentials, anywhere.
+- **Short-lived tokens only:** every signing operation uses a token that expires within 45 minutes
+  and cannot be reused.
+- **Infrastructure-locked:** only the production deployment can request signatures.
+
+### 3. Two authentication paths
 
 | Path | Purpose | Constraint |
-|------|---------|-----------|
-| **Runtime signing** | Escrow operations (fund, complete, dispute, expire) | Locked to the production deployment of the platform application |
-| **Contract deployment** | Smart contract upgrades and deployments | Locked to the specific GitHub repository via CI/CD pipeline |
+| :-- | :-- | :-- |
+| Runtime signing | verdict signing, and owner operations such as dispute resolution | locked to the production deployment |
+| Contract deployment | deployments and ownership operations | locked to the repository via CI/CD |
 
-Both paths authenticate via OIDC federation to the same HSM key. Neither path involves static credentials.
+### 4. Audit trail
 
-### 4. Transparent Audit Trail
+Every signature produces an immutable entry in Google Cloud's audit log, traceable to an operation
+and timestamp, and cross-referenceable against on-chain state.
 
-Every time the escrow key signs a transaction, a permanent, immutable log is generated in Google Cloud's audit system.
+### Local development fallback
 
-- Every signature is traceable to a specific operation and timestamp
-- Signing rate is monitored with anomaly detection alerts
-- Audit logs can be cross-referenced against on-chain transactions for full accountability
-
----
-
-## What This Protects Against
-
-As of 2026-08-08 (see the history box at the top), the deployed contracts are owned by the
-HSM-derived address, so the rows below are in force for the currently deployed Sepolia contracts.
-`DEPLOYER_PRIVATE_KEY` still exists in local `.env.local` files for developer convenience on
-testnet — see the note under "Local Development Fallback" — but it no longer holds owner authority
-on either contract, so its exposure is bounded to whatever that fallback path itself allows, not to
-escrow ownership.
-
-| Threat | Protection | In force? |
-|--------|-----------|-----------------|
-| Developer reads/leaks the key | Impossible — key exists only inside HSM hardware | **Yes** — verify via `scripts/audit/verify-contract-owner.mjs` |
-| Attacker compromises developer's machine | No key to steal, no credentials to exfiltrate | **Yes** — the local raw key no longer carries owner authority |
-| Attacker reads environment variables | Only non-sensitive configuration metadata is stored (project IDs, resource paths) — none are secrets, in the deployed environment | **Yes**, for the deployed Vercel environment |
-| Physical coercion ("wrench attack") | Developer cannot reveal a key that does not exist as a string, and cannot produce credentials that only infrastructure can generate | **Yes** |
-| Malicious code exfiltration | Nothing to exfiltrate — no key material, no JSON files, no static tokens | **Yes** |
-| Insider abuse | Developer can trigger operations through the platform but cannot extract the key or bypass audit logging | **Yes** |
-
-The HSM key exists, is non-exportable, is FIPS 140-2 Level 3, and the Workload Identity Federation
-path to it works with no static credentials — and, since 2026-08-08, is what the deployed contracts
-actually answer to. All of the above is independently checkable; none of it is asserted on trust.
+`DEPLOYER_PRIVATE_KEY` still exists in local `.env.local` files for testnet developer convenience. It
+holds **no owner authority** on either deployed contract, so its exposure is bounded to whatever that
+fallback path itself allows. It is confirmed absent from every mainnet-facing environment as a gate
+on `CC-034`.
 
 ---
 
-## Verification for Power Users
+## Verify it yourself
 
-You do not have to take my word for any of this. The following artifacts are available for independent verification:
+Do not take any of the above on trust — including the dated claims, which is the lesson of the
+history box.
 
-### HSM Attestation Bundle
+**Live deployment, Base Sepolia:**
 
-A **cryptographically signed statement from the HSM hardware itself**, proving:
+| | Address |
+| :-- | :-- |
+| `CarbonEscrow` **v2** (deployed 2026-08-15, block `45494043`) | [`0xe80d03688E8fa6270668AD73191d353e522CB1b1`](https://sepolia.basescan.org/address/0xe80d03688E8fa6270668AD73191d353e522CB1b1) |
+| `ReputationStake` | [`0x4cdeF542F9361201f9543512eeCd1eE834793203`](https://sepolia.basescan.org/address/0x4cdeF542F9361201f9543512eeCd1eE834793203) |
+| Expected `owner()` on both — the HSM-derived address | `0xa8931097540e69B474013D294d0bA6A2cC853e4b` |
+| `CarbonEscrow` v1 — **superseded, do not use** | `0xb9bF8dAC51f62cA237F2C439c63c9D8f16FD2ef7` |
 
-1. The key was generated inside a physical HSM
-2. The key is set to non-exportable status
-3. The key uses the correct algorithm (secp256k1) for Ethereum compatibility
+**Derive the HSM address yourself** from the committed public key
+[`carbon-contractors-escrow-signer-1.pub`](carbon-contractors-escrow-signer-1.pub): base64-decode the
+PEM body, take the last 65 bytes (the uncompressed EC point), drop the leading `0x04`, `keccak256`
+the remaining 64 bytes — the address is the last 20 bytes of that hash.
 
-This attestation is signed by Google's HSM infrastructure and can be independently verified against Google's published root certificates.
+**Or run the scripts, which is the point of them being in the repo:**
 
-### On-Chain Verification
+```bash
+node --env-file=.env.local scripts/audit/verify-contract-owner.mjs      # owner() vs KMS-derived address
+node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs   # the deployment is the one described here
+node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs     # USDC.balanceOf(escrow) == totalLocked
+```
 
-**The Ethereum address derived from the KMS public key matches the owner address on both deployed
-contracts, as of 2026-08-08.** This was false for the prior three months (see the history box at
-the top) — check it yourself rather than taking that fixed-date claim on trust either:
+Each exits non-zero on violation. They run on a schedule as well as on demand — see
+[`ADR-0003`](adr/ADR-0003-monitoring-as-correctness-dependency.md), which treats monitoring as a
+correctness dependency rather than an operations nicety, because several of the failure modes in this
+design are silent.
 
-1. `CarbonEscrow` on Base Sepolia — [`0xb9bF8dAC51f62cA237F2C439c63c9D8f16FD2ef7`](https://sepolia.basescan.org/address/0xb9bF8dAC51f62cA237F2C439c63c9D8f16FD2ef7) — read `owner()`
-2. `ReputationStake` on Base Sepolia — [`0x4cdeF542F9361201f9543512eeCd1eE834793203`](https://sepolia.basescan.org/address/0x4cdeF542F9361201f9543512eeCd1eE834793203) — read `owner()`
-3. Compare both against the KMS-derived address, `0xa8931097540e69B474013D294d0bA6A2cC853e4b`,
-   which you can derive yourself from the committed public key
-   [`docs/carbon-contractors-escrow-signer-1.pub`](carbon-contractors-escrow-signer-1.pub):
-   base64-decode the PEM body, take the last 65 bytes (the uncompressed EC point), drop the leading
-   `0x04`, and `keccak256` the remaining 64 bytes — the address is the last 20 bytes of that hash
-4. Both `owner()` calls now return `0xa8931097540e69B474013D294d0bA6A2cC853e4b` — the HSM key —
-   confirmed by the `OwnershipTransferred` events on the transactions linked in the history box
+### HSM attestation bundle
 
-`scripts/audit/verify-contract-owner.mjs` in this repository performs exactly that comparison and
-prints all three addresses plus a PASS/FAIL verdict, so the check is reproducible rather than a
-claim.
-
-### Zero-Credential Verification
-
-The service account used for signing has **zero JSON keys** — this is verifiable and can be demonstrated via GCP IAM console screenshots or audit exports.
-
----
-
-## Why This Matters
-
-Traditional escrow systems ask you to trust the operator. This system removes the operator from the trust model entirely.
-
-By moving trust from a **person** to **hardware and infrastructure** (GCP HSM + Workload Identity Federation + audited CI/CD), the escrow system remains secure even if my personal devices, accounts, or physical person are compromised. The only way to move funds is through the logic defined in the smart contracts, triggered by the audited platform application running in its verified production environment.
-
-The key was born inside the HSM. It has never existed as a string, a file, or a variable. It never will.
+A cryptographically signed statement from the HSM hardware itself
+([`…-attestation.dat`](carbon-contractors-escrow-signer-1-CAVIUM_V2_COMPRESSED-attestation.dat),
+[chain](carbon-contractors-escrow-signer-1-combined-chain.pem)) proving the key was generated inside a
+physical HSM, is non-exportable, and uses secp256k1. Verifiable against Google's published roots.
 
 ---
 
-*For technical inquiries regarding the security architecture, please open an issue on the project repository or contact the maintainer.*
+## Why this matters, and what it does not claim
+
+Traditional escrow asks you to trust the operator. This design tries to reduce that to the smallest
+honest surface: the operator cannot reach the money, and the operator's judgement has been replaced,
+for the parts that can be mechanised, by a published rule anyone can re-run.
+
+**What it does not claim:** that trust has been eliminated. In v1 the platform is still the referee,
+one key still holds two roles, and a disputed task still depends on that key being reachable. Those
+are written above rather than left for a reader to discover, and each has a ticket.
+
+*For technical inquiries regarding the security architecture, open an issue on the project
+repository or contact the maintainer.*

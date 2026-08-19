@@ -50,6 +50,10 @@ dispute (`CC-081` Defect 2). Nothing is lost, because the funding path has still
    the monitoring scope and the public-claims policy. **ADR-0001 first — the others depend on it —
    and read its Amendment 1**, which supersedes several of its own decisions.
 2. **Then the backlog.** It is the source of truth for what needs doing.
+3. **Then `docs/Capability-Surface-Matrix.md`** before reporting any gap as a defect. Contract,
+   scripts, app and MCP are deliberately **not** in lockstep — the matrix says which lag is the plan.
+   Its three-bucket rule (published-and-wrong / one-way door / not built yet) is the triage test;
+   anything that fits none of them is an opinion, not a finding.
 
 ```bash
 cat docs/backlog/INDEX.md          # the board (generated)
