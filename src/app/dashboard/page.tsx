@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from "wagmi";
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
+import { CATEGORIES, validateCategorySelection } from "@/lib/categories";
 import PageShell from "@/components/PageShell";
 import styles from "./dashboard.module.css";
 
@@ -53,6 +54,11 @@ const DISPUTE_ABI = [
 
 const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
 const USDC_DECIMALS = 6;
+
+// ── Profile editing (CC-021) — mirrors the PATCH /api/profile validation ─────
+
+const AVAILABILITY_OPTIONS = ["available", "busy", "offline"] as const;
+const MAX_RATE_USDC = 10_000;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -155,6 +161,11 @@ export default function DashboardPage() {
   const [disputeOpen, setDisputeOpen] = useState<Record<string, boolean>>({});
   const [disputeLoading, setDisputeLoading] = useState<string | null>(null);
   const [stakeStep, setStakeStep] = useState<"idle" | "approving" | "staking" | "unstaking">("idle");
+  const [editOpen, setEditOpen] = useState(false);
+  const [rateInput, setRateInput] = useState("");
+  const [editCategories, setEditCategories] = useState<string[]>([]);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const { writeContract, data: txHash } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
@@ -180,7 +191,13 @@ export default function DashboardPage() {
       .then(([tasksData, repData, profileData]) => {
         if (tasksData.ok) setTasks(tasksData.tasks);
         if (repData.ok) setReputation(repData.reputation);
-        if (profileData.ok) setProfile(profileData.profile);
+        if (profileData.ok) {
+          setProfile(profileData.profile);
+          // Seed the edit form with the current values so saving an untouched
+          // form is a no-op update rather than a surprise rewrite.
+          setRateInput(String(profileData.profile.rate_usdc));
+          setEditCategories(profileData.profile.categories);
+        }
         if (!tasksData.ok && !repData.ok) {
           setError("Failed to fetch data");
         }
@@ -293,6 +310,76 @@ export default function DashboardPage() {
       setDisputeLoading(null);
       fetchData();
     }
+  }
+
+  // ── Profile editing (CC-021) ───────────────────────────────────────────────
+  // Every change is wallet-signed and sent to PATCH /api/profile, which verifies
+  // the signature server-side before writing with the service role.
+
+  async function submitProfileUpdate(updates: {
+    availability?: string;
+    rate_usdc?: number;
+    categories?: string[];
+  }) {
+    if (!address) return;
+    setProfileSaving(true);
+    setProfileMsg(null);
+    try {
+      // The server rejects messages older than 5 minutes and requires the
+      // payload wallet to match the signer.
+      const message = JSON.stringify({
+        action: "profile-update",
+        wallet: address,
+        timestamp: Math.floor(Date.now() / 1000),
+        ...updates,
+      });
+      const signature = await signMessageAsync({ message });
+
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: address, message, signature }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setProfile(data.profile);
+        setProfileMsg({ ok: true, text: "Profile updated" });
+      } else {
+        setProfileMsg({ ok: false, text: data.error ?? "Update failed" });
+      }
+    } catch {
+      setProfileMsg({ ok: false, text: "Signing cancelled or request failed" });
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  function handleAvailabilityChange(next: string) {
+    if (profileSaving || next === profile?.availability) return;
+    void submitProfileUpdate({ availability: next });
+  }
+
+  function handleSaveProfile() {
+    const rate = parseFloat(rateInput);
+    if (!Number.isFinite(rate) || rate <= 0 || rate > MAX_RATE_USDC || Math.round(rate * 100) / 100 !== rate) {
+      setProfileMsg({
+        ok: false,
+        text: `Rate must be a positive number up to ${MAX_RATE_USDC} USDC with at most 2 decimal places`,
+      });
+      return;
+    }
+    const catResult = validateCategorySelection(editCategories);
+    if (!catResult.valid) {
+      setProfileMsg({ ok: false, text: catResult.error });
+      return;
+    }
+    void submitProfileUpdate({ rate_usdc: rate, categories: editCategories });
+  }
+
+  function toggleEditCategory(slug: string) {
+    setEditCategories((prev) =>
+      prev.includes(slug) ? prev.filter((c) => c !== slug) : [...prev, slug],
+    );
   }
 
   return (
@@ -451,6 +538,97 @@ export default function DashboardPage() {
                 <div className={styles.profileRate}>
                   {profile.rate_usdc} USDC/hr
                 </div>
+
+                {/* Availability — one click signs and PATCHes immediately (CC-021) */}
+                <div className={styles.availabilityRow}>
+                  <span className={styles.availabilityLabel}>Availability</span>
+                  <div className={styles.availabilityToggle}>
+                    {AVAILABILITY_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => handleAvailabilityChange(option)}
+                        disabled={profileSaving}
+                        className={`${styles.availabilityOption} ${
+                          profile.availability === option ? styles.availabilityActive : ""
+                        } ${option === "available" ? styles.availabilityAvailable : ""} ${
+                          option === "busy" ? styles.availabilityBusy : ""
+                        } ${option === "offline" ? styles.availabilityOffline : ""
+                        }`}
+                      >
+                        {option === "available"
+                          ? "Available"
+                          : option === "busy"
+                            ? "Busy"
+                            : "Offline"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className={styles.profileEditToggle}
+                  onClick={() => {
+                    setEditOpen((prev) => !prev);
+                    setProfileMsg(null);
+                  }}
+                >
+                  {editOpen ? "Cancel" : "Edit profile"}
+                </button>
+
+                {editOpen && (
+                  <div className={styles.profileEditForm}>
+                    <label className={styles.profileFieldLabel}>
+                      Rate (USDC/hr)
+                      <input
+                        type="number"
+                        min="0.01"
+                        max={MAX_RATE_USDC}
+                        step="0.01"
+                        value={rateInput}
+                        onChange={(e) => setRateInput(e.target.value)}
+                        className={styles.profileInput}
+                      />
+                    </label>
+                    <div className={styles.profileFieldLabel}>
+                      Categories (max 2)
+                      <div className={styles.categoryPicker}>
+                        {CATEGORIES.map((cat) => (
+                          <label key={cat.slug} className={styles.categoryOption}>
+                            <input
+                              type="checkbox"
+                              checked={editCategories.includes(cat.slug)}
+                              onChange={() => toggleEditCategory(cat.slug)}
+                              disabled={
+                                !editCategories.includes(cat.slug) && editCategories.length >= 2
+                              }
+                            />
+                            {cat.label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSaveProfile}
+                      disabled={profileSaving}
+                      className={styles.profileSaveBtn}
+                    >
+                      {profileSaving ? "Confirm in wallet..." : "Save changes"}
+                    </button>
+                    <p className={styles.profileEditNote}>
+                      Saving asks your wallet to sign the update — the server
+                      verifies the signature before applying it.
+                    </p>
+                  </div>
+                )}
+
+                {profileMsg && (
+                  <p className={profileMsg.ok ? styles.profileMsgOk : styles.profileMsgErr}>
+                    {profileMsg.text}
+                  </p>
+                )}
               </div>
             )}
 
