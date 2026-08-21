@@ -5,6 +5,7 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSignMess
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
+import { isNewWorker } from "@/lib/reputation/compute";
 import styles from "./dashboard.module.css";
 
 // ── ABIs for write operations ───────────────────────────────────────────────
@@ -156,11 +157,26 @@ export default function DashboardPage() {
   const [disputeLoading, setDisputeLoading] = useState<string | null>(null);
   const [stakeStep, setStakeStep] = useState<"idle" | "approving" | "staking" | "unstaking">("idle");
 
+  // CC-011: the staking panel starts collapsed for workers with no stake. The override
+  // is null until the user toggles, so the default tracks `hasStake` as it loads.
+  const [stakeOpenOverride, setStakeOpenOverride] = useState<boolean | null>(null);
+
   const { writeContract, data: txHash } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
   const { isSuccess: txConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
   const stakeContractAddress = reputation?.stake?.contract as `0x${string}` | undefined;
+
+  // CC-010: 0 tasks + 0 stake means "new", not "score of zero".
+  const newWorker = reputation
+    ? isNewWorker({
+        totalTasks: reputation.tasks.total,
+        stakeAmountUsdc: reputation.stake.amount_usdc,
+      })
+    : false;
+
+  const hasStake = (reputation?.stake?.amount_usdc ?? 0) > 0;
+  const stakeOpen = stakeOpenOverride ?? hasStake;
 
   const fetchData = useCallback(() => {
     if (!isConnected || !address) {
@@ -314,124 +330,167 @@ export default function DashboardPage() {
             {reputation && (
               <div className={styles.reputationRow}>
                 <div className={styles.reputationCard}>
-                  <div className={styles.scoreDisplay}>
-                    <span className={styles.scoreNumber}>
-                      {reputation.score}
-                    </span>
-                    <span className={styles.scoreLabel}>Reputation</span>
-                  </div>
-                  <div className={styles.breakdownGrid}>
-                    <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.completion}
-                      </span>
-                      <span className={styles.breakdownLabel}>Completion</span>
-                    </div>
-                    <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.volume}
-                      </span>
-                      <span className={styles.breakdownLabel}>Volume</span>
-                    </div>
-                    <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.recency}
-                      </span>
-                      <span className={styles.breakdownLabel}>Recency</span>
-                    </div>
-                    <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.stake}
-                      </span>
-                      <span className={styles.breakdownLabel}>Stake</span>
-                    </div>
-                  </div>
-                  <div className={styles.reputationStats}>
-                    <span>{reputation.tasks.completed} completed</span>
-                    <span>{reputation.tasks.total_earned_usdc} USDC earned</span>
-                    {reputation.tasks.completion_rate !== null && (
-                      <span>{reputation.tasks.completion_rate}% rate</span>
-                    )}
-                  </div>
+                  {newWorker ? (
+                    // CC-010: a freshly registered worker has no history to score —
+                    // show that as a state, not as a big red zero.
+                    <>
+                      <div className={styles.scoreDisplay}>
+                        <span className={styles.scoreNew}>New</span>
+                        <span className={styles.scoreLabel}>Reputation</span>
+                      </div>
+                      <p className={styles.newWorkerNote}>
+                        No history yet — your score builds as you complete tasks.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className={styles.scoreDisplay}>
+                        <span className={styles.scoreNumber}>
+                          {reputation.score}
+                        </span>
+                        <span className={styles.scoreLabel}>Reputation</span>
+                      </div>
+                      <div className={styles.breakdownGrid}>
+                        <div className={styles.breakdownItem}>
+                          <span className={styles.breakdownValue}>
+                            {reputation.breakdown.completion}
+                          </span>
+                          <span className={styles.breakdownLabel}>Completion</span>
+                        </div>
+                        <div className={styles.breakdownItem}>
+                          <span className={styles.breakdownValue}>
+                            {reputation.breakdown.volume}
+                          </span>
+                          <span className={styles.breakdownLabel}>Volume</span>
+                        </div>
+                        <div className={styles.breakdownItem}>
+                          <span className={styles.breakdownValue}>
+                            {reputation.breakdown.recency}
+                          </span>
+                          <span className={styles.breakdownLabel}>Recency</span>
+                        </div>
+                        <div className={styles.breakdownItem}>
+                          <span className={styles.breakdownValue}>
+                            {reputation.breakdown.stake}
+                          </span>
+                          <span className={styles.breakdownLabel}>Stake</span>
+                        </div>
+                      </div>
+                      <div className={styles.reputationStats}>
+                        <span>{reputation.tasks.completed} completed</span>
+                        <span>{reputation.tasks.total_earned_usdc} USDC earned</span>
+                        {reputation.tasks.completion_rate !== null && (
+                          <span>{reputation.tasks.completion_rate}% rate</span>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {stakeContractAddress && (
                   <div className={styles.stakePanel}>
-                    <h3 className={styles.stakePanelTitle}>USDC Stake</h3>
-                    <div className={styles.stakeAmount}>
-                      {reputation.stake.amount_usdc} USDC
+                    <div className={styles.stakePanelHeader}>
+                      <h3 className={styles.stakePanelTitle}>
+                        USDC Stake
+                        {!hasStake && (
+                          <span className={styles.optionalTag}>optional</span>
+                        )}
+                      </h3>
+                      <button
+                        className={styles.stakeToggle}
+                        onClick={() => setStakeOpenOverride(!stakeOpen)}
+                      >
+                        {stakeOpen
+                          ? "Hide"
+                          : hasStake
+                            ? "Manage stake"
+                            : "Add a stake"}
+                      </button>
                     </div>
-                    {reputation.stake.slashed_total_usdc > 0 && (
-                      <div className={styles.slashedNote}>
-                        {reputation.stake.slashed_total_usdc} USDC slashed
-                      </div>
-                    )}
 
-                    <div className={styles.stakeActions}>
-                      <div className={styles.stakeInputGroup}>
-                        <input
-                          type="number"
-                          placeholder="Amount (min 20)"
-                          value={stakeInput}
-                          onChange={(e) => setStakeInput(e.target.value)}
-                          className={styles.stakeInput}
-                          min="20"
-                          step="1"
-                        />
-                        <button
-                          onClick={handleStake}
-                          disabled={
-                            stakeStep !== "idle" || !stakeInput || parseFloat(stakeInput) < 20
-                          }
-                          className={styles.stakeBtn}
-                        >
-                          {stakeStep === "approving"
-                            ? "Approving..."
-                            : stakeStep === "staking"
-                              ? "Staking..."
-                              : "Stake"}
-                        </button>
-                      </div>
+                    <p className={styles.stakeExplainer}>
+                      Optional: Boost search rank and credibility with a stake
+                      deposit. Staking is not required to receive jobs.
+                    </p>
 
-                      {reputation.stake.amount_usdc > 0 && (
-                        <div className={styles.stakeInputGroup}>
-                          <input
-                            type="number"
-                            placeholder="Amount to unstake"
-                            value={unstakeInput}
-                            onChange={(e) => setUnstakeInput(e.target.value)}
-                            className={styles.stakeInput}
-                            max={reputation.stake.amount_usdc}
-                            step="1"
-                          />
-                          <button
-                            onClick={handleUnstake}
-                            disabled={
-                              stakeStep !== "idle" ||
-                              !unstakeInput ||
-                              !cooldownReady
-                            }
-                            className={styles.unstakeBtn}
-                          >
-                            {stakeStep === "unstaking"
-                              ? "Unstaking..."
-                              : "Unstake"}
-                          </button>
+                    {stakeOpen && (
+                      <>
+                        <div className={styles.stakeAmount}>
+                          {reputation.stake.amount_usdc} USDC
                         </div>
-                      )}
+                        {reputation.stake.slashed_total_usdc > 0 && (
+                          <div className={styles.slashedNote}>
+                            {reputation.stake.slashed_total_usdc} USDC slashed
+                          </div>
+                        )}
 
-                      {!cooldownReady && cooldownDate && (
-                        <p className={styles.cooldownNote}>
-                          Cooldown until{" "}
-                          {cooldownDate.toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
-                      )}
-                    </div>
+                        <div className={styles.stakeActions}>
+                          <div className={styles.stakeInputGroup}>
+                            <input
+                              type="number"
+                              placeholder="Amount (min 20)"
+                              value={stakeInput}
+                              onChange={(e) => setStakeInput(e.target.value)}
+                              className={styles.stakeInput}
+                              min="20"
+                              step="1"
+                            />
+                            <button
+                              onClick={handleStake}
+                              disabled={
+                                stakeStep !== "idle" || !stakeInput || parseFloat(stakeInput) < 20
+                              }
+                              className={styles.stakeBtn}
+                            >
+                              {stakeStep === "approving"
+                                ? "Approving..."
+                                : stakeStep === "staking"
+                                  ? "Staking..."
+                                  : "Stake"}
+                            </button>
+                          </div>
+
+                          {reputation.stake.amount_usdc > 0 && (
+                            <div className={styles.stakeInputGroup}>
+                              <input
+                                type="number"
+                                placeholder="Amount to unstake"
+                                value={unstakeInput}
+                                onChange={(e) => setUnstakeInput(e.target.value)}
+                                className={styles.stakeInput}
+                                max={reputation.stake.amount_usdc}
+                                step="1"
+                              />
+                              <button
+                                onClick={handleUnstake}
+                                disabled={
+                                  stakeStep !== "idle" ||
+                                  !unstakeInput ||
+                                  !cooldownReady
+                                }
+                                className={styles.unstakeBtn}
+                              >
+                                {stakeStep === "unstaking"
+                                  ? "Unstaking..."
+                                  : "Unstake"}
+                              </button>
+                            </div>
+                          )}
+
+                          {!cooldownReady && cooldownDate && (
+                            <p className={styles.cooldownNote}>
+                              Cooldown until{" "}
+                              {cooldownDate.toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -459,12 +518,23 @@ export default function DashboardPage() {
 
             {!loading && !error && tasks.length === 0 && (
               <div className={styles.emptyState}>
-                <p>No tasks assigned yet.</p>
-                <p>
-                  Make sure you&apos;ve{" "}
-                  <Link href="/connect">registered your services</Link> so agents
-                  can find you.
-                </p>
+                {profile ? (
+                  // CC-010: this worker is already listed in the whitepages — never
+                  // send them back to /connect.
+                  <>
+                    <p>You&apos;re listed — agents can now find and hire you.</p>
+                    <p>No tasks yet.</p>
+                  </>
+                ) : (
+                  <>
+                    <p>No tasks assigned yet.</p>
+                    <p>
+                      Make sure you&apos;ve{" "}
+                      <Link href="/connect">registered your services</Link> so agents
+                      can find you.
+                    </p>
+                  </>
+                )}
               </div>
             )}
 
