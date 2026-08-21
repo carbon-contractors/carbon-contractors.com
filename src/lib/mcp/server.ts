@@ -121,7 +121,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   // to the authenticated caller and cannot be asserted.
   server.tool(
     "request_human_work",
-    "Initiate a task to hire a verified human on Base L2. Requires an authenticated session — the hiring agent is taken from your verified wallet, not from an argument. Returns a payment_request_id and a fund_url. POST { payment_request_id } to fund_url using an x402-compatible HTTP client (@x402/fetch) — the endpoint returns 402 Payment Required, your client auto-pays USDC, and the task activates.",
+    "Initiate a task to hire a verified human on Base L2. Requires an authenticated session — the hiring agent is taken from your verified wallet, not from an argument. Returns a payment_request_id and a fund_url. POST { payment_request_id } to fund_url using an x402-compatible HTTP client (@x402/fetch) — the endpoint returns 402 Payment Required, your client auto-pays USDC, and the task activates. NOTICE — you are the controller of the evidence: do not request personal information in the description or acceptance spec beyond what the task requires. The task content and the evidence the worker produces may contain personal information (including about third parties — addresses, faces, number plates); you commission the work, you receive the evidence, and you are the data controller for it. The platform stores hashes only and holds none of the bytes.",
     {
       to_human_wallet: z
         .string()
