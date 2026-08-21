@@ -47,11 +47,15 @@ vi.mock("@/lib/contracts/signer", () => ({
 const AGENT_WALLET = "0xAGENTagentAGENTagentAGENTagentAGENTagent";
 const WORKER_WALLET = "0xWORKERworkerWORKERworkerWORKERworkerWORK";
 
+const VALID_SPEC = '{"schema_version":1,"criteria":{"min_artefacts":8}}';
+
 const VALID_ARGS = {
   to_human_wallet: WORKER_WALLET,
   task_description: "Photograph the switchboard in Rack Room 2",
   amount_usdc: 25,
   deadline_hours: 24,
+  review_window_hours: 48,
+  acceptance_spec: VALID_SPEC,
 };
 
 // The MCP SDK stores each registered tool's raw callback on
@@ -102,6 +106,14 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     expect(result.isError).toBeUndefined();
     expect(mockInitiateX402Payment).toHaveBeenCalledWith(
       expect.objectContaining({ from_agent_wallet: AGENT_WALLET }),
+    );
+  });
+
+  it("derives review_window_seconds from the agent's chosen window (CC-081 Defect 1)", async () => {
+    await callRequestHumanWork({ ...VALID_ARGS, review_window_hours: 72 });
+
+    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+      expect.objectContaining({ review_window_seconds: 72 * 3600 }),
     );
   });
 
@@ -195,12 +207,35 @@ describe("request_human_work acceptance spec (CC-084)", () => {
     );
   });
 
-  it("passes spec: null when the agent supplies none", async () => {
-    await callRequestHumanWork();
+  it("rejects a missing acceptance_spec before any task row is created (CC-081 Defect 1)", async () => {
+    const { acceptance_spec: _omitted, ...argsWithoutSpec } = VALID_ARGS as Record<string, unknown>;
+    void _omitted;
+    const { result, json } = await callRequestHumanWork(argsWithoutSpec);
 
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
-      expect.objectContaining({ spec: null }),
-    );
+    expect(result.isError).toBe(true);
+    expect(json.error).toContain("acceptance_spec is required");
+    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+  });
+
+  it("declares acceptance_spec as required in the tool schema", async () => {
+    // The schema is the contract real callers meet; the handler guard above only
+    // covers direct invocation. Assert both so one cannot silently loosen.
+    const { tool } = await callRequestHumanWork();
+    const shape = tool.inputSchema.shape;
+
+    expect(Object.keys(shape)).toContain("acceptance_spec");
+    expect(shape.acceptance_spec.isOptional()).toBe(false);
+  });
+
+  it("rejects a review window outside the contract's 12h–14d bounds at the schema layer", async () => {
+    const { tool } = await callRequestHumanWork();
+
+    expect(() =>
+      tool.inputSchema.parse({ ...VALID_ARGS, review_window_hours: 6 }),
+    ).toThrow();
+    expect(() =>
+      tool.inputSchema.parse({ ...VALID_ARGS, review_window_hours: 400 }),
+    ).toThrow();
   });
 
   it("rejects a malformed spec before any task row is created", async () => {

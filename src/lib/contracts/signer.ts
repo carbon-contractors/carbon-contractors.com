@@ -141,6 +141,12 @@ export async function completeTaskOnChain(
 
 /**
  * Call escrow.resolveDispute(taskId, releaseToWorker) on-chain.
+ *
+ * CC-081 Defect 3: waits for the receipt before returning. The hash from
+ * `writeContract` only proves the transaction was *submitted* — a reorg or a dropped
+ * transaction would leave the caller (and the DB update gated on this call) claiming
+ * an outcome that never settled. The returned hash is now guaranteed to be that of a
+ * confirmed, non-reverted transaction.
  */
 export async function resolveDisputeOnChain(
   taskId: `0x${string}`,
@@ -167,8 +173,19 @@ export async function resolveDisputeOnChain(
 
   const hash = await wallet.writeContract(request);
 
-  log("info", "signer_resolve_dispute_sent", { taskId, txHash: hash });
-  return hash;
+  const receipt = await pub.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") {
+    throw new Error(
+      `resolveDispute transaction reverted on-chain: ${hash} (CC-081 Defect 3 — the DB must not record an outcome that never settled)`,
+    );
+  }
+
+  log("info", "signer_resolve_dispute_confirmed", {
+    taskId,
+    txHash: receipt.transactionHash,
+    blockNumber: Number(receipt.blockNumber),
+  });
+  return receipt.transactionHash;
 }
 
 /**
@@ -182,6 +199,10 @@ export async function resolveDisputeOnChain(
  * That is the intended posture — the platform should not be in any settlement path — but
  * it means this function is dead until the agent-side call exists. Removing it belongs
  * with `CC-081` Defect 1, which rewrites the whole app layer against the v2 ABI.
+ *
+ * CC-081 Defect 3: like `resolveDisputeOnChain`, this waits for the receipt before
+ * returning, so a caller gating a DB status change on the result is gating on a
+ * confirmed transaction, not a submitted one.
  */
 export async function expireTaskOnChain(
   taskId: `0x${string}`,
@@ -203,8 +224,19 @@ export async function expireTaskOnChain(
 
   const hash = await wallet.writeContract(request);
 
-  log("info", "signer_expire_task_sent", { taskId, txHash: hash });
-  return hash;
+  const receipt = await pub.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") {
+    throw new Error(
+      `expireTask transaction reverted on-chain: ${hash} (CC-081 Defect 3)`,
+    );
+  }
+
+  log("info", "signer_expire_task_confirmed", {
+    taskId,
+    txHash: receipt.transactionHash,
+    blockNumber: Number(receipt.blockNumber),
+  });
+  return receipt.transactionHash;
 }
 
 /** Reset cached clients (for testing). */
