@@ -1,6 +1,11 @@
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
-import { CATEGORY_DETAILS, MAX_CATEGORIES } from "@/lib/categories";
+import {
+  CATEGORY_DETAILS,
+  CHECKABILITY_LABELS,
+  EVIDENCE_PRIVACY_RULE,
+  MAX_CATEGORIES,
+} from "@/lib/categories";
 import styles from "./services.module.css";
 
 export const metadata = {
@@ -41,6 +46,20 @@ export default function ServicesPage() {
           </div>
         </div>
 
+        <div className={styles.privacyNotice}>
+          <span className={styles.privacyLabel}>
+            {"// evidence & privacy"}
+          </span>
+          <p>{EVIDENCE_PRIVACY_RULE}</p>
+          <p>
+            Payment follows the machine-checkable acceptance criteria, not the
+            written brief — so the criteria are what you are agreeing to. Each
+            category below notes how well a task in it can be checked
+            automatically, and what personal information the evidence tends to
+            pick up.
+          </p>
+        </div>
+
         <div className={styles.categories}>
           {CATEGORY_DETAILS.map((cat, i) => (
             <section key={cat.slug} className={styles.categoryCard}>
@@ -75,6 +94,19 @@ export default function ServicesPage() {
                 <span className={styles.disruptsLabel}>Disrupts:</span>{" "}
                 {cat.disrupts}
               </p>
+
+              <dl className={styles.metaList}>
+                <div className={styles.metaRow}>
+                  <dt className={styles.metaLabel}>
+                    {CHECKABILITY_LABELS[cat.checkability]}
+                  </dt>
+                  <dd className={styles.metaValue}>{cat.checkabilityNote}</dd>
+                </div>
+                <div className={styles.metaRow}>
+                  <dt className={styles.metaLabel}>Personal info</dt>
+                  <dd className={styles.metaValue}>{cat.piiNote}</dd>
+                </div>
+              </dl>
             </section>
           ))}
         </div>
