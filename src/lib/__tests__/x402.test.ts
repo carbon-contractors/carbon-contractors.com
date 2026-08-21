@@ -25,6 +25,19 @@ vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
 import { initiateX402Payment } from "@/lib/payments/x402";
+import { parseAndHashSpec } from "@/lib/spec/hash";
+
+const VALID_SPEC = '{"schema_version":1,"criteria":{"min_artefacts":8}}';
+
+const BASE_REQUEST = {
+  from_agent_wallet: "0x" + "a".repeat(40),
+  to_human_wallet: "0x" + "b".repeat(40),
+  task_description: "Build a smart contract for NFT minting",
+  amount_usdc: 100,
+  deadline_unix: Math.floor(Date.now() / 1000) + 3600,
+  review_window_seconds: 24 * 60 * 60,
+  spec: parseAndHashSpec(VALID_SPEC),
+};
 
 describe("x402 payment", () => {
   beforeEach(() => {
@@ -32,13 +45,7 @@ describe("x402 payment", () => {
   });
 
   it("creates payment request with correct fields", async () => {
-    const result = await initiateX402Payment({
-      from_agent_wallet: "0x" + "a".repeat(40),
-      to_human_wallet: "0x" + "b".repeat(40),
-      task_description: "Build a smart contract for NFT minting",
-      amount_usdc: 100,
-      deadline_unix: Math.floor(Date.now() / 1000) + 3600,
-    });
+    const result = await initiateX402Payment(BASE_REQUEST);
 
     expect(result.status).toBe("awaiting_funding");
     expect(result.payment_request_id).toBeTruthy();
@@ -47,27 +54,69 @@ describe("x402 payment", () => {
     expect(result.fund_url).toContain("/api/fund-task");
   });
 
+  it("returns every v2 createTask parameter (CC-081 Defect 1)", async () => {
+    const result = await initiateX402Payment(BASE_REQUEST);
+
+    // The six ABI arguments plus the addresses an agent needs to build the call.
+    expect(result.task_id_bytes32).toBe("0x" + "ab".repeat(32));
+    expect(result.worker).toBe(BASE_REQUEST.to_human_wallet);
+    expect(result.amount_wei).toBe("100000000");
+    expect(result.deadline_unix).toBe(BASE_REQUEST.deadline_unix);
+    expect(result.review_window_seconds).toBe(24 * 60 * 60);
+    expect(result.spec_hash).toBe(parseAndHashSpec(VALID_SPEC).hash);
+    expect(result.escrow_contract).toBe("0x1234567890123456789012345678901234567890");
+    expect(result.chain_id).toBe(84532);
+    // Echoed so the agent can verify the hash commitment itself.
+    expect(result.acceptance_spec).toBe(VALID_SPEC);
+    expect(result.spec_schema_version).toBe(1);
+  });
+
+  it("instructs the agent to fund via approve + createTask, not to pay the endpoint", async () => {
+    const result = await initiateX402Payment(BASE_REQUEST);
+
+    expect(result.instructions).toContain("createTask");
+    expect(result.instructions).toContain("approve");
+    // The old instructions sent the agent to an x402 auto-pay flow that stranded USDC.
+    expect(result.instructions).not.toContain("402");
+    expect(result.instructions).not.toContain("auto-pay");
+    // And the confirmation step is described as a read, not a payment.
+    expect(result.instructions).toContain("not a payment endpoint");
+  });
+
   it("rejects zero amount", async () => {
     await expect(
-      initiateX402Payment({
-        from_agent_wallet: "0x" + "a".repeat(40),
-        to_human_wallet: "0x" + "b".repeat(40),
-        task_description: "Some task description here",
-        amount_usdc: 0,
-        deadline_unix: Math.floor(Date.now() / 1000) + 3600,
-      })
+      initiateX402Payment({ ...BASE_REQUEST, amount_usdc: 0 })
     ).rejects.toThrow("amount_usdc must be > 0");
   });
 
   it("rejects invalid wallet address", async () => {
     await expect(
-      initiateX402Payment({
-        from_agent_wallet: "invalid",
-        to_human_wallet: "0x" + "b".repeat(40),
-        task_description: "Some task description here",
-        amount_usdc: 50,
-        deadline_unix: Math.floor(Date.now() / 1000) + 3600,
-      })
+      initiateX402Payment({ ...BASE_REQUEST, from_agent_wallet: "invalid" })
     ).rejects.toThrow("from_agent_wallet must be a valid 0x address");
+  });
+
+  it("rejects a review window below the contract's 12h floor", async () => {
+    await expect(
+      initiateX402Payment({ ...BASE_REQUEST, review_window_seconds: 3600 })
+    ).rejects.toThrow("review_window_seconds");
+  });
+
+  it("rejects a review window above the contract's 14d ceiling", async () => {
+    await expect(
+      initiateX402Payment({ ...BASE_REQUEST, review_window_seconds: 15 * 24 * 60 * 60 })
+    ).rejects.toThrow("review_window_seconds");
+  });
+
+  it("persists the spec commitment so the confirmation endpoint can check it", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+    await initiateX402Payment(BASE_REQUEST);
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptance_spec: VALID_SPEC,
+        spec_hash: parseAndHashSpec(VALID_SPEC).hash,
+        spec_schema_version: 1,
+      }),
+    );
   });
 });

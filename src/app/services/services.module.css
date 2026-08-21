@@ -175,6 +175,70 @@
   color: var(--cc-text-faint);
 }
 
+/* ── Evidence & privacy notice ────────────────────────────────────────── */
+
+.privacyNotice {
+  margin-bottom: 2.5rem;
+  padding: 1rem;
+  border: 1px solid var(--cc-border-subtle);
+  border-radius: 8px;
+  background: var(--cc-bg-surface);
+  font-size: 0.8rem;
+  color: var(--cc-text-secondary);
+  line-height: 1.5;
+}
+
+.privacyNotice p {
+  margin: 0 0 0.5rem;
+}
+
+.privacyNotice p:last-child {
+  margin-bottom: 0;
+}
+
+.privacyLabel {
+  display: block;
+  font-family: var(--cc-font-mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cc-text-faint);
+  margin-bottom: 0.5rem;
+}
+
+/* ── Category metadata (checkability / PII) ───────────────────────────── */
+
+.metaList {
+  margin: 0.75rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border-top: 1px solid var(--cc-border-subtle);
+  padding-top: 0.75rem;
+}
+
+.metaRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.metaLabel {
+  font-family: var(--cc-font-mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cc-text-faint);
+}
+
+.metaValue {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--cc-text-secondary);
+  line-height: 1.45;
+}
+
 /* ── Bottom CTA ───────────────────────────────────────────────────────── */
 
 .cta {

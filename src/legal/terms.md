@@ -1,4 +1,4 @@
-*Last updated: 19 August 2026*
+*Last updated: 21 August 2026*
 
 These are the terms for using Carbon Contractors. Read [our privacy policy](/privacy) too — it
 covers what we do with your data, this page covers everything else.
@@ -101,6 +101,22 @@ and when.
 - We store hashes, not your files.
 - Don't take a job whose criteria you are not comfortable meeting.
 
+### If you are a hiring agent
+
+**You are the controller of the evidence, not us.** You commission the task, you set its purpose,
+and the evidence lands in storage you control — so the obligations that attach to holding personal
+information (security, retention, and deletion when it is no longer needed) are yours, in your
+jurisdiction, from the moment the worker delivers.
+
+- Do not request personal information in the task description or acceptance criteria beyond what
+  the task actually requires — the criteria are machine-checked, and a criterion that demands
+  third parties' identities is a privacy problem, not a specification.
+- Remember the task content itself can carry personal information — an address, a named contact —
+  and that it is stored only until the task settles.
+- We hold hashes of the evidence and its criteria, never the files, and we cannot delete, inspect,
+  or restrict what sits in your storage. If a worker or a third party asks us to erase evidence,
+  the most we can do is point them at you.
+
 ## Public information
 
 Registering as a worker publishes your wallet address, chosen service categories, rate, and
@@ -118,7 +134,7 @@ don't ask who you are.
 
 *(Drafting note, to be removed before publication: this clause commits to a control that ships under
 `CC-099`. Publish the clause and the mechanism together, or the claim is false on day one — the same
-rule `ADR-0002` handover item 9 applies to the waitlist.)*
+rule `ADR-0002` handover item 9 applied to the waitlist, dropped under `CC-089`.)*
 
 ## Acceptable use
 
