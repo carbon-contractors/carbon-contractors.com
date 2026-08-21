@@ -82,7 +82,8 @@ it is unflattering.
 This repo is public **on purpose**, defects included (`CC-056`, `Lessons-Learned.md` §8). Defects are
 published as found, with two carve-outs that are fixed *before* being described in a pushed commit:
 
-1. anything exposing third-party data (the `waitlist` table holds real email addresses until `CC-089`)
+1. anything exposing third-party data (`notification_channels` holds workers' contact addresses; the
+   `waitlist` table is gone — dropped 2026-08-21, `CC-089`)
 2. anything trivially exploitable against real funds
 
 ## Public claims — see ADR-0004
@@ -150,8 +151,9 @@ exists rather than reasoning from this file.**
   `qual: true`, deliberately — it is the whitepages. Never put anything there that should not be
   public. → `CC-030`
 - **"Anon denied" and "anon reads zero rows" are different, and it differs per table.** After
-  migration `015`, `waitlist`/`tasks`/`notification_channels`/`used_nonces`/`mcp_challenges` hard-deny
-  with `401` + `42501`; `humans` and `tasks_public` keep anon `SELECT` by design. Anything written
+  migration `015`, `tasks`/`notification_channels`/`used_nonces`/`mcp_challenges` hard-deny
+  with `401` + `42501` (`waitlist` was on this list until `CC-089` dropped it); `humans` and
+  `tasks_public` keep anon `SELECT` by design. Anything written
   before 2026-08-11 describes the pre-revoke posture. **A newly added table inherits Supabase's
   default `GRANT ALL` — revoke it in the same migration.** → `CC-062`
   · `scripts/audit/inspect-live-schema.sql` block 4
@@ -277,7 +279,7 @@ src/lib/categories.ts  The 10 service categories, max 2 per worker
 contracts/             CarbonEscrow.sol (v2, CC-082), ReputationStake.sol
                        mocks/ is test-only — never deployed to a live network
 test/                  Hardhat/mocha contract tests. `npm run test:contracts`
-supabase/migrations/   001-015, applied by hand in order. Add new ones, never edit an applied one.
+supabase/migrations/   001-017, applied by hand in order. Add new ones, never edit an applied one.
                        No migration runner — check the directory for the next number (CC-057).
 scripts/audit/         Read-only verification scripts. Run these instead of trusting this file.
 ```
