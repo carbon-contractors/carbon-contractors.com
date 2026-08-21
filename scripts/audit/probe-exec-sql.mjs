@@ -151,7 +151,7 @@ console.log("\n" + "=".repeat(70));
 if (anonCanExecute) {
   console.log("VERDICT: CRITICAL — the anon key can execute arbitrary SQL.");
   console.log("The anon key ships to every browser. This bypasses every RLS policy");
-  console.log("in migrations 003, 005, 010 and 011, and exposes the waitlist emails.");
+  console.log("in migrations 003, 005, 010 and 011, and exposes the notification channel addresses.");
   console.log("Revoke now, then rotate the anon and service role keys.");
 } else if (signature) {
   console.log("VERDICT: exec_sql EXISTS but the anon key cannot execute it.");

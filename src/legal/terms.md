@@ -134,7 +134,7 @@ don't ask who you are.
 
 *(Drafting note, to be removed before publication: this clause commits to a control that ships under
 `CC-099`. Publish the clause and the mechanism together, or the claim is false on day one — the same
-rule `ADR-0002` handover item 9 applies to the waitlist.)*
+rule `ADR-0002` handover item 9 applied to the waitlist, dropped under `CC-089`.)*
 
 ## Acceptable use
 

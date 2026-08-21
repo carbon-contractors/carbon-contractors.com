@@ -149,19 +149,13 @@ view_opts AS (
   WHERE n.nspname = 'public' AND c.relkind = 'v'
 ),
 
--- ── 8. Row counts and waitlist age spread. Aggregates only — no addresses. ──
+-- ── 8. Row counts. Aggregates only — no addresses. ──
 row_counts AS (
   SELECT '8_counts' AS section, 'humans' AS name, count(*)::text AS detail_a,
          ''::text AS detail_b, ''::text AS detail_c, ''::text AS detail_d FROM public.humans
   UNION ALL SELECT '8_counts', 'tasks', count(*)::text, '', '', '' FROM public.tasks
   UNION ALL SELECT '8_counts', 'notification_channels', count(*)::text, '', '', ''
     FROM public.notification_channels
-  UNION ALL
-  SELECT '8_counts', 'waitlist', count(*)::text,
-         'earliest=' || COALESCE(min(created_at)::text, 'n/a'),
-         'latest='   || COALESCE(max(created_at)::text, 'n/a'),
-         'distinct_days=' || count(DISTINCT created_at::date)
-  FROM public.waitlist
 )
 
 SELECT * FROM exec_sql
