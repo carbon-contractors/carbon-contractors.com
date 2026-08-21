@@ -118,6 +118,33 @@ interface Reputation {
   };
 }
 
+type ChannelType = "email" | "webhook" | "telegram" | "discord";
+
+interface Channel {
+  id: string;
+  type: ChannelType;
+  address: string;
+  accepts_auto_booking: boolean;
+}
+
+const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
+  { value: "email", label: "Email" },
+  { value: "webhook", label: "Webhook" },
+  { value: "telegram", label: "Telegram" },
+  { value: "discord", label: "Discord" },
+];
+
+const CHANNEL_EXPLAINERS: Record<ChannelType, string> = {
+  email:
+    "Notifications are sent to this email address. It is stored privately and never shown on your public profile.",
+  webhook:
+    "An HTTPS URL that receives a POST request when something happens. Use an automation endpoint or webhook relay you control.",
+  telegram:
+    "Your Telegram chat ID — a number, not your @username. Message @userinfobot on Telegram to find yours (group chats have negative IDs).",
+  discord:
+    "Your Discord user ID — a long number, not your @handle. Enable Developer Mode in Discord, then right-click your name and choose Copy User ID.",
+};
+
 function truncateAddress(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
@@ -171,6 +198,16 @@ export default function DashboardPage() {
   // CC-011: the staking panel starts collapsed for workers with no stake. The override
   // is null until the user toggles, so the default tracks `hasStake` as it loads.
   const [stakeOpenOverride, setStakeOpenOverride] = useState<boolean | null>(null);
+
+  // ── Notification channels (CC-073) ────────────────────────────────────────
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [channelsLoaded, setChannelsLoaded] = useState(false);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+  const [channelsError, setChannelsError] = useState("");
+  const [channelFormOpen, setChannelFormOpen] = useState(false);
+  const [newChannelType, setNewChannelType] = useState<ChannelType>("email");
+  const [newChannelAddress, setNewChannelAddress] = useState("");
+  const [channelBusy, setChannelBusy] = useState(false);
 
   const { writeContract, data: txHash } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
@@ -327,6 +364,118 @@ export default function DashboardPage() {
       fetchData();
     }
   }
+
+  // ── Notification channels (CC-073) ──────────────────────────────────────
+
+  // Every channels call needs a fresh challenge-response signature (CC-004),
+  // so each load/add/remove prompts one wallet signature.
+  async function signedChannelHeaders(): Promise<Record<string, string>> {
+    if (!address) throw new Error("Wallet not connected");
+    const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ walletAddress: address }),
+    });
+    const { nonce, message } = await challengeRes.json();
+    const signature = await signMessageAsync({ message });
+    return {
+      "Content-Type": "application/json",
+      "x-caller-wallet": address,
+      "x-caller-signature": signature,
+      "x-caller-nonce": nonce,
+    };
+  }
+
+  async function loadChannels() {
+    if (!address) return;
+    setChannelsLoading(true);
+    setChannelsError("");
+    try {
+      const res = await fetch("/api/channels", {
+        headers: await signedChannelHeaders(),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setChannels(data.channels);
+        setChannelsLoaded(true);
+      } else {
+        setChannelsError(data.error ?? "Failed to load channels");
+      }
+    } catch {
+      setChannelsError("Network error");
+    } finally {
+      setChannelsLoading(false);
+    }
+  }
+
+  async function handleAddChannel() {
+    if (!newChannelAddress.trim()) return;
+    setChannelBusy(true);
+    setChannelsError("");
+    try {
+      const res = await fetch("/api/channels", {
+        method: "POST",
+        headers: await signedChannelHeaders(),
+        body: JSON.stringify({
+          type: newChannelType,
+          address: newChannelAddress,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        // One channel per type — replace any existing channel of that type.
+        setChannels((prev) => [
+          ...prev.filter((c) => c.type !== data.channel.type),
+          data.channel,
+        ]);
+        setChannelFormOpen(false);
+        setNewChannelAddress("");
+      } else {
+        setChannelsError(data.error ?? "Failed to add channel");
+      }
+    } catch {
+      setChannelsError("Network error");
+    } finally {
+      setChannelBusy(false);
+    }
+  }
+
+  async function handleRemoveChannel(channel: Channel) {
+    if (
+      !window.confirm(
+        `Remove this ${channel.type} channel (${channel.address})? You will sign one message to confirm.`
+      )
+    ) {
+      return;
+    }
+    setChannelBusy(true);
+    setChannelsError("");
+    try {
+      const res = await fetch("/api/channels", {
+        method: "DELETE",
+        headers: await signedChannelHeaders(),
+        body: JSON.stringify({ channel_id: channel.id }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setChannels((prev) => prev.filter((c) => c.id !== channel.id));
+      } else {
+        setChannelsError(data.error ?? "Failed to remove channel");
+      }
+    } catch {
+      setChannelsError("Network error");
+    } finally {
+      setChannelBusy(false);
+    }
+  }
+
+  // Reset the channels view when the wallet changes
+  useEffect(() => {
+    setChannels([]);
+    setChannelsLoaded(false);
+    setChannelFormOpen(false);
+    setChannelsError("");
+  }, [address]);
 
   // ── Profile editing (CC-021) ───────────────────────────────────────────────
   // Every change is wallet-signed and sent to PATCH /api/profile, which verifies
@@ -690,6 +839,139 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+
+            {/* ── Notification Channels (CC-073) ────────────────────── */}
+            <h2 className={styles.pageTitle}>Notification Channels</h2>
+            <div className={styles.channelsCard}>
+              <p className={styles.channelsIntro}>
+                Choose how agents notify you when a task is assigned. Your
+                wallet will be asked to sign a message to prove ownership —
+                channel destinations are private and never shown on your
+                public profile.
+              </p>
+
+              {channelsError && (
+                <p className={styles.channelsError}>{channelsError}</p>
+              )}
+
+              {!channelsLoaded ? (
+                <button
+                  className={styles.channelsLoadBtn}
+                  onClick={loadChannels}
+                  disabled={channelsLoading}
+                >
+                  {channelsLoading ? "Confirm in wallet..." : "Manage channels"}
+                </button>
+              ) : (
+                <>
+                  {channels.length === 0 && (
+                    <p className={styles.channelsEmpty}>
+                      No notification channels yet. Add one below so agents
+                      can reach you when you&apos;re hired.
+                    </p>
+                  )}
+
+                  {channels.length > 0 && (
+                    <ul className={styles.channelList}>
+                      {channels.map((channel) => (
+                        <li key={channel.id} className={styles.channelRow}>
+                          <span
+                            className={`${styles.channelBadge} ${styles[`channel_${channel.type}`] ?? ""}`}
+                          >
+                            {channel.type}
+                          </span>
+                          <span className={styles.channelAddress}>
+                            {channel.address}
+                          </span>
+                          <button
+                            className={styles.channelRemoveBtn}
+                            onClick={() => handleRemoveChannel(channel)}
+                            disabled={channelBusy}
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {channelFormOpen ? (
+                    <div className={styles.channelForm}>
+                      <label className={styles.channelFieldLabel}>
+                        Type
+                        <select
+                          className={styles.channelSelect}
+                          value={newChannelType}
+                          onChange={(e) =>
+                            setNewChannelType(e.target.value as ChannelType)
+                          }
+                        >
+                          {CHANNEL_TYPES.map((t) => (
+                            <option key={t.value} value={t.value}>
+                              {t.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className={styles.channelFieldLabel}>
+                        Destination
+                        <input
+                          type="text"
+                          className={styles.channelInput}
+                          value={newChannelAddress}
+                          onChange={(e) => setNewChannelAddress(e.target.value)}
+                          placeholder={
+                            newChannelType === "email"
+                              ? "you@example.com"
+                              : newChannelType === "webhook"
+                                ? "https://example.com/hook"
+                                : newChannelType === "telegram"
+                                  ? "123456789"
+                                  : "123456789012345678"
+                          }
+                        />
+                      </label>
+                      <p className={styles.channelExplainer}>
+                        {CHANNEL_EXPLAINERS[newChannelType]}
+                      </p>
+                      <div className={styles.channelFormActions}>
+                        <button
+                          className={styles.channelAddBtn}
+                          onClick={handleAddChannel}
+                          disabled={channelBusy || !newChannelAddress.trim()}
+                        >
+                          {channelBusy ? "Signing..." : "Sign & Save"}
+                        </button>
+                        <button
+                          className={styles.channelCancelBtn}
+                          onClick={() => {
+                            setChannelFormOpen(false);
+                            setNewChannelAddress("");
+                            setChannelsError("");
+                          }}
+                          disabled={channelBusy}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      {channels.length > 0 && (
+                        <p className={styles.channelUpdateNote}>
+                          Adding a channel of a type you already have replaces
+                          the existing one.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      className={styles.channelsLoadBtn}
+                      onClick={() => setChannelFormOpen(true)}
+                    >
+                      + Add channel
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
 
             {/* ── Tasks ──────────────────────────────────────────────── */}
             <h2 className={styles.pageTitle}>Your Tasks</h2>
