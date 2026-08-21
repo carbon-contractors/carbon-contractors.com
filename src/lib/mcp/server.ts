@@ -121,7 +121,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   // to the authenticated caller and cannot be asserted.
   server.tool(
     "request_human_work",
-    "Initiate a task to hire a verified human on Base L2. Requires an authenticated session — the hiring agent is taken from your verified wallet, not from an argument. Returns a payment_request_id and a fund_url. POST { payment_request_id } to fund_url using an x402-compatible HTTP client (@x402/fetch) — the endpoint returns 402 Payment Required, your client auto-pays USDC, and the task activates. NOTICE — you are the controller of the evidence: do not request personal information in the description or acceptance spec beyond what the task requires. The task content and the evidence the worker produces may contain personal information (including about third parties — addresses, faces, number plates); you commission the work, you receive the evidence, and you are the data controller for it. The platform stores hashes only and holds none of the bytes.",
+    "Initiate a task to hire a verified human on Base L2. Requires an authenticated session — the hiring agent is taken from your verified wallet, not from an argument. Returns every parameter needed to fund the escrow yourself: call USDC.approve then escrow.createTask(task_id_bytes32, worker, amount_wei, deadline_unix, review_window_seconds, spec_hash) from your own wallet, then POST { payment_request_id } to fund_url to confirm — that endpoint reads the chain and only activates the task once it is Funded. It is not a payment endpoint and never charges. NOTICE — you are the controller of the evidence: do not request personal information in the description or acceptance spec beyond what the task requires. The task content and the evidence the worker produces may contain personal information (including about third parties — addresses, faces, number plates); you commission the work, you receive the evidence, and you are the data controller for it. The platform stores hashes only and holds none of the bytes.",
     {
       to_human_wallet: z
         .string()
@@ -144,12 +144,19 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         .min(1)
         .max(720)
         .describe("Deadline in hours from now (1–720)"),
+      review_window_hours: z
+        .number()
+        .int()
+        .min(12)
+        .max(336)
+        .describe(
+          "Review window in hours (12–336): how long you have to review after the worker submits before funds release to them automatically. Bounded by the contract."
+        ),
       acceptance_spec: z
         .string()
         .max(MAX_SPEC_BYTES)
-        .optional()
         .describe(
-          'Machine-checkable acceptance criteria, as a JSON STRING (not an object) — e.g. \'{"schema_version":1,"criteria":{"min_artefacts":8}}\'. Sent as a string because the exact bytes you send are the hash preimage: the returned spec_hash is keccak256 of them, and re-serialising would change it. Without a spec there is nothing to check, so the task can only resolve in the worker\'s favour.'
+          'Machine-checkable acceptance criteria, as a JSON STRING (not an object) — e.g. \'{"schema_version":1,"criteria":{"min_artefacts":8}}\'. Sent as a string because the exact bytes you send are the hash preimage: the returned spec_hash is keccak256 of them, and re-serialising would change it. Pass it verbatim as specHash to createTask. Required — without a spec there is nothing to check, so a task can only resolve in the worker\'s favour, and that must be a commitment you made, not an omission.'
         ),
     },
     async ({
@@ -157,10 +164,12 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       task_description,
       amount_usdc,
       deadline_hours,
+      review_window_hours,
       acceptance_spec,
     }) => {
       const deadline_unix =
         Math.floor(Date.now() / 1000) + deadline_hours * 3600;
+      const review_window_seconds = review_window_hours * 3600;
 
       try {
         // Emergency Intake Kill Switch (ADR-0003 D4 / CC-086):
@@ -260,20 +269,38 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
 
         // Validate and hash before any row is written, so a malformed spec fails
         // the whole call rather than creating a task the agent cannot commit.
-        let spec = null;
-        if (acceptance_spec !== undefined) {
-          try {
-            spec = parseAndHashSpec(acceptance_spec);
-          } catch (err) {
-            const message =
-              err instanceof SpecValidationError ? err.message : String(err);
-            return {
-              isError: true,
-              content: [
-                { type: "text", text: JSON.stringify({ ok: false, error: message }) },
-              ],
-            };
-          }
+        // CC-081 Defect 1: required. The hash is the specHash argument to
+        // createTask — a task funded without one commits to nothing checkable and
+        // can only resolve in the worker's favour, so that must never happen by
+        // omission. The schema makes it required for real callers; the guard below
+        // covers direct handler invocation (tests, internal use) that bypasses it.
+        if (acceptance_spec === undefined) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error:
+                    "acceptance_spec is required. Without it there is nothing to check, so the task could only resolve in the worker's favour — see ADR-0001 D6.",
+                }),
+              },
+            ],
+          };
+        }
+        let spec;
+        try {
+          spec = parseAndHashSpec(acceptance_spec);
+        } catch (err) {
+          const message =
+            err instanceof SpecValidationError ? err.message : String(err);
+          return {
+            isError: true,
+            content: [
+              { type: "text", text: JSON.stringify({ ok: false, error: message }) },
+            ],
+          };
         }
 
         const response = await initiateX402Payment({
@@ -282,6 +309,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           task_description,
           amount_usdc,
           deadline_unix,
+          review_window_seconds,
           spec,
         });
 

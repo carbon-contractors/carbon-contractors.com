@@ -26,7 +26,7 @@ const TOOLS = [
   {
     name: "request_human_work",
     description:
-      "Initiate a task to hire a verified human. Requires an authenticated session — the hiring agent is your verified wallet. Returns a payment_request_id and fund_url. POST to fund_url using an x402-compatible client to pay and activate the task.",
+      "Initiate a task to hire a verified human. Requires an authenticated session — the hiring agent is your verified wallet. Returns every parameter needed to fund the escrow yourself: call USDC.approve then escrow.createTask from your own wallet, then POST { payment_request_id } to fund_url to confirm. The confirmation endpoint reads the chain and activates the task once it is Funded.",
     params: [
       "to_human_wallet: 0x... (must be registered)",
       "task_description: string",
@@ -184,7 +184,7 @@ Sign \`message\` with that wallet, then initialize the MCP session with:
           </div>
         </section>
         <section className={styles.section}>
-          <h2 className={styles.sectionTitle}>x402 Payment Flow</h2>
+          <h2 className={styles.sectionTitle}>Funding Flow</h2>
           <div className={styles.flowSteps}>
             <div className={styles.flowStep}>
               <span className={styles.stepNum}>1</span>
@@ -192,19 +192,19 @@ Sign \`message\` with that wallet, then initialize the MCP session with:
             </div>
             <div className={styles.flowStep}>
               <span className={styles.stepNum}>2</span>
-              <span>Server returns <code>fund_url</code> + <code>payment_request_id</code></span>
+              <span>Server returns <code>payment_request_id</code> + all <code>createTask</code> parameters</span>
             </div>
             <div className={styles.flowStep}>
               <span className={styles.stepNum}>3</span>
-              <span>Agent POSTs to <code>/api/fund-task</code> — gets HTTP 402</span>
+              <span>Agent calls <code>USDC.approve</code> + <code>escrow.createTask</code> from its own wallet</span>
             </div>
             <div className={styles.flowStep}>
               <span className={styles.stepNum}>4</span>
-              <span>x402 client auto-pays USDC via facilitator</span>
+              <span>Agent POSTs <code>{`{ payment_request_id }`}</code> to <code>/api/fund-task</code> to confirm</span>
             </div>
             <div className={styles.flowStep}>
               <span className={styles.stepNum}>5</span>
-              <span>Task activates, worker is notified</span>
+              <span>Server verifies the on-chain task is <code>Funded</code>, then the task activates</span>
             </div>
           </div>
         </section>

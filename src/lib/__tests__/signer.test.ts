@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Hoisted mocks — vi.mock factories are hoisted so referenced values must be too
-const { mockCreateKmsAccount, mockSimulateContract, mockWriteContract } = vi.hoisted(() => ({
+const { mockCreateKmsAccount, mockSimulateContract, mockWriteContract, mockWaitForReceipt } = vi.hoisted(() => ({
   mockCreateKmsAccount: vi.fn(),
   mockSimulateContract: vi.fn(),
   mockWriteContract: vi.fn(),
+  mockWaitForReceipt: vi.fn(),
 }));
 
 vi.mock("@/lib/contracts/kms-signer", () => ({
@@ -39,7 +40,10 @@ vi.mock("viem", async (importOriginal) => {
   const actual = await importOriginal<typeof import("viem")>();
   return {
     ...actual,
-    createPublicClient: () => ({ simulateContract: mockSimulateContract }),
+    createPublicClient: () => ({
+      simulateContract: mockSimulateContract,
+      waitForTransactionReceipt: mockWaitForReceipt,
+    }),
     createWalletClient: () => ({ writeContract: mockWriteContract }),
   };
 });
@@ -67,9 +71,16 @@ describe("signer", () => {
     mockCreateKmsAccount.mockReset();
     mockSimulateContract.mockReset();
     mockWriteContract.mockReset();
-    // Default happy path: simulate returns a prepared request, write returns a hash.
+    mockWaitForReceipt.mockReset();
+    // Default happy path: simulate returns a prepared request, write returns a hash,
+    // and the receipt confirms it (CC-081 Defect 3).
     mockSimulateContract.mockResolvedValue({ request: { __prepared: true } });
     mockWriteContract.mockResolvedValue("0x" + "ff".repeat(32));
+    mockWaitForReceipt.mockResolvedValue({
+      status: "success",
+      transactionHash: "0x" + "ff".repeat(32),
+      blockNumber: BigInt(12345),
+    });
   });
 
   it("no longer exports completeTaskOnChain — CC-080 removed it", async () => {
@@ -188,6 +199,102 @@ describe("signer", () => {
 
     // This is the property the original test assumed and never checked.
     expect(mockWriteContract).not.toHaveBeenCalled();
+  });
+
+  // ── CC-081 Defect 3: confirmation before return ─────────────────────────────
+
+  it("resolveDisputeOnChain waits for the receipt before returning the hash", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+    const confirmed = "0x" + "ee".repeat(32);
+    mockWaitForReceipt.mockResolvedValue({
+      status: "success",
+      transactionHash: confirmed,
+      blockNumber: BigInt(999),
+    });
+
+    const { resolveDisputeOnChain } = await import("@/lib/contracts/signer");
+    const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
+    const hash = await resolveDisputeOnChain(taskId, true);
+
+    expect(mockWaitForReceipt).toHaveBeenCalledTimes(1);
+    expect(mockWaitForReceipt).toHaveBeenCalledWith({
+      hash: "0x" + "ff".repeat(32),
+    });
+    // The receipt's hash, not the raw writeContract return — under a hash-and-send
+    // flow these can differ (replacement detection), and only the receipt is confirmed.
+    expect(hash).toBe(confirmed);
+  });
+
+  it("expireTaskOnChain waits for the receipt before returning the hash", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+    const confirmed = "0x" + "dd".repeat(32);
+    mockWaitForReceipt.mockResolvedValue({
+      status: "success",
+      transactionHash: confirmed,
+      blockNumber: BigInt(999),
+    });
+
+    const { expireTaskOnChain } = await import("@/lib/contracts/signer");
+    const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
+    const hash = await expireTaskOnChain(taskId);
+
+    expect(mockWaitForReceipt).toHaveBeenCalledTimes(1);
+    expect(mockWaitForReceipt).toHaveBeenCalledWith({
+      hash: "0x" + "ff".repeat(32),
+    });
+    expect(hash).toBe(confirmed);
+  });
+
+  it("resolveDisputeOnChain throws when the transaction reverts after submission", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+    // The failure Defect 3 is about: writeContract *succeeds* (the tx was submitted),
+    // but it reverts on-chain. Pre-fix, the function returned the hash and the caller
+    // recorded the outcome as settled.
+    mockWaitForReceipt.mockResolvedValue({
+      status: "reverted",
+      transactionHash: "0x" + "ff".repeat(32),
+      blockNumber: BigInt(999),
+    });
+
+    const { resolveDisputeOnChain } = await import("@/lib/contracts/signer");
+    const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
+
+    await expect(resolveDisputeOnChain(taskId, false)).rejects.toThrow(
+      "reverted on-chain",
+    );
+  });
+
+  it("expireTaskOnChain throws when the transaction reverts after submission", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+    mockWaitForReceipt.mockResolvedValue({
+      status: "reverted",
+      transactionHash: "0x" + "ff".repeat(32),
+      blockNumber: BigInt(999),
+    });
+
+    const { expireTaskOnChain } = await import("@/lib/contracts/signer");
+    const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
+
+    await expect(expireTaskOnChain(taskId)).rejects.toThrow(
+      "reverted on-chain",
+    );
+  });
+
+  it("propagates a receipt-wait failure rather than returning a submitted-only hash", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+    mockWaitForReceipt.mockRejectedValue(new Error("transaction replaced"));
+
+    const { resolveDisputeOnChain } = await import("@/lib/contracts/signer");
+    const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
+
+    await expect(resolveDisputeOnChain(taskId, true)).rejects.toThrow(
+      "transaction replaced",
+    );
   });
 
   // Integration coverage for these functions against a real chain belongs in
