@@ -40,7 +40,6 @@ vi.mock("@/lib/contracts/escrow", () => ({
 }));
 
 vi.mock("@/lib/contracts/signer", () => ({
-  completeTaskOnChain: vi.fn(),
   resolveDisputeOnChain: vi.fn(),
 }));
 

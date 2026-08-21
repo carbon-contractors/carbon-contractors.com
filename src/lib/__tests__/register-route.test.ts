@@ -211,3 +211,99 @@ describe("POST /api/register (CC-005 contact capture)", () => {
     consoleSpy.mockRestore();
   });
 });
+
+describe("POST /api/register (CC-022 rate validation)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVerifyWalletSignature.mockResolvedValue(true);
+  });
+
+  async function postRate(rate: number) {
+    const message = JSON.stringify(validPayload({ rate_usdc: rate }));
+    const { POST } = await import("@/app/api/register/route");
+    return POST(
+      makeRequest({ message, signature: "0xsig", wallet: MIXED_CASE_WALLET }),
+    );
+  }
+
+  it.each([-50, 0])("rejects a non-positive rate (%s) with a 400", async (rate) => {
+    const res = await postRate(rate);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toMatch(/greater than zero/i);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("rejects a rate above the sane maximum instead of 500ing on NUMERIC(10,2) overflow", async () => {
+    const res = await postRate(1_000_000_000);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toMatch(/cannot exceed 10,000 USDC/i);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("rejects more than two decimal places instead of letting the column round silently", async () => {
+    const res = await postRate(50.123);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toMatch(/2 decimal places/i);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("accepts a rate with exactly two decimal places at the maximum bound", async () => {
+    const { humansUpsertChain } = stubHappyPathChain();
+
+    const res = await postRate(10_000);
+
+    expect(res.status).toBe(200);
+    expect(humansUpsertChain.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ rate_usdc: 10_000 }),
+      { onConflict: "wallet" },
+    );
+  });
+
+  it("accepts fractional rates with one or two decimals", async () => {
+    stubHappyPathChain();
+    expect((await postRate(50.5)).status).toBe(200);
+
+    vi.clearAllMocks();
+    mockVerifyWalletSignature.mockResolvedValue(true);
+    stubHappyPathChain();
+    expect((await postRate(50.55)).status).toBe(200);
+  });
+});
+
+describe("POST /api/register (CC-023 clock-skew self-diagnosis)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVerifyWalletSignature.mockResolvedValue(true);
+  });
+
+  it.each([
+    ["ahead of the server", 10_000],
+    ["behind the server", -400],
+  ])(
+    "tells the worker their device clock is the problem when timestamp is %s",
+    async (_label, offsetS) => {
+      const message = JSON.stringify(
+        validPayload({ timestamp: Math.floor(Date.now() / 1000) + offsetS }),
+      );
+      const { POST } = await import("@/app/api/register/route");
+
+      const res = await POST(
+        makeRequest({ message, signature: "0xsig", wallet: MIXED_CASE_WALLET }),
+      );
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toBe(
+        "Device clock is out of sync with the server. Please check your device date/time settings and enable automatic network time.",
+      );
+      expect(json.detail).toMatch(/ahead of|behind/);
+      expect(mockFrom).not.toHaveBeenCalled();
+    },
+  );
+});

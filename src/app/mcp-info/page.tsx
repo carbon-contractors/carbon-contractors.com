@@ -46,7 +46,7 @@ const TOOLS = [
   {
     name: "confirm_task_completion",
     description:
-      "Mark a task as completed. Triggers escrow release of USDC to the worker.",
+      "Record the agent's confirmation that work is complete, returning the taskId and escrow address. Settlement is the agent's own on-chain action, not the platform's.",
     params: ["payment_request_id: string"],
     phase: "Settle",
   },
