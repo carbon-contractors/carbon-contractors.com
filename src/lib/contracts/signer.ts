@@ -103,41 +103,11 @@ function getEscrowAddress(): Address {
 
 // ── Write operations ────────────────────────────────────────────────────────
 
-/**
- * Call escrow.completeTask(taskId) on-chain as the platform signer.
- *
- * **This can never succeed and is not called from a working path — CC-080.**
- * `completeTask` requires `msg.sender == task.agent` and `createTask` records the funder
- * as the agent, so the platform signer is structurally the wrong sender. It fails safely,
- * returning `isError` without flipping the DB. Left in place because CC-080 owns its
- * removal and the replacement (the agent signing for itself) is CC-081 Defect 1's work.
- *
- * CC-082 did not change this. Under v2 the worker's route to payment no longer depends on
- * it at all: `releaseAfterReview` and `claimWithVerdict` are worker-called.
- */
-export async function completeTaskOnChain(
-  taskId: `0x${string}`,
-): Promise<Hash> {
-  const escrow = getEscrowAddress();
-  const wallet = await getWalletClient();
-  const pub = getPublicClient();
-  const account = await getPlatformAccount();
-
-  log("info", "signer_complete_task_submit", { taskId, escrow });
-
-  const { request } = await pub.simulateContract({
-    account,
-    address: escrow,
-    abi: CARBON_ESCROW_ABI,
-    functionName: "completeTask",
-    args: [taskId],
-  });
-
-  const hash = await wallet.writeContract(request);
-
-  log("info", "signer_complete_task_sent", { taskId, txHash: hash });
-  return hash;
-}
+// completeTaskOnChain was removed here (CC-080). It could never succeed:
+// `completeTask` requires `msg.sender == task.agent` and the platform signer is
+// structurally the wrong sender. Under ADR-0001 completion is the agent's own
+// early path; the worker's default path is the pull-payment claim. There is no
+// platform transaction anywhere in settlement — do not reintroduce one.
 
 /**
  * Call escrow.resolveDispute(taskId, releaseToWorker) on-chain.

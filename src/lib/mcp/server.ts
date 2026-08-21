@@ -30,7 +30,7 @@ import {
   toTaskId,
   getTaskResolvedOutcome,
 } from "@/lib/contracts/escrow";
-import { completeTaskOnChain, resolveDisputeOnChain } from "@/lib/contracts/signer";
+import { resolveDisputeOnChain } from "@/lib/contracts/signer";
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
@@ -395,14 +395,21 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   );
 
   // ─── Tool: confirm_task_completion ────────────────────────────────────────
+  // CC-080: this tool previously called escrow.completeTask as the platform signer,
+  // which reverts unconditionally — completeTask is agent-only and the platform is
+  // structurally the wrong sender. It now records the agent's confirmation and hands
+  // settlement back. Under ADR-0001 the platform transacts nowhere in settlement:
+  // the agent's completeTask is the *early* path; the worker's pull-payment claim
+  // after the review window is the default. The DB stays untouched here — it flips
+  // to 'completed' when the TaskCompleted event is observed, never on this call.
   server.tool(
     "confirm_task_completion",
-    "Mark a task as completed and release escrowed USDC to the worker on-chain.",
+    "Record the originating agent's confirmation that a task's work is complete, and return the taskId and escrow address needed to settle. This tool does NOT release funds: settlement is the agent's own on-chain action (completeTask early, or the worker claims via releaseAfterReview after the review window).",
     {
       payment_request_id: z
         .string()
         .min(1)
-        .describe("The payment_request_id of the task to complete"),
+        .describe("The payment_request_id of the task to confirm complete"),
     },
     async ({ payment_request_id }) => {
       try {
@@ -459,8 +466,6 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         }
 
         if (task.status !== "active" && task.status !== "pending") {
-          // If DB says not active/pending, check if this is a partial-failure
-          // recovery case: on-chain completed but DB update failed previously.
           if (task.status !== "completed") {
             return {
               isError: true,
@@ -469,13 +474,13 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                   type: "text",
                   text: JSON.stringify({
                     ok: false,
-                    error: `Task is ${task.status}, cannot complete`,
+                    error: `Task is ${task.status}, cannot confirm completion`,
                   }),
                 },
               ],
             };
           }
-          // Already completed in DB — return success idempotently
+          // Already completed — the settlement this tool points at has happened.
           return {
             content: [
               {
@@ -484,7 +489,6 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                   ok: true,
                   payment_request_id,
                   status: "completed",
-                  txHash: null,
                   note: "Task was already completed.",
                 }),
               },
@@ -492,60 +496,34 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
-        // Release USDC on-chain via platform signer
         const taskId = toTaskId(payment_request_id);
-        let txHash: string | null = null;
-
-        // Check on-chain state first — handles partial-failure recovery where
-        // a previous call completed on-chain but the DB update failed.
-        let alreadyCompletedOnChain = false;
         const escrowConfig = getEscrowConfig();
+
+        // Best-effort read of on-chain state so the response can tell the agent
+        // where settlement actually stands. Read-only — never a gate for a write,
+        // since this tool no longer writes to the chain at all.
+        let onChainState: string | null = null;
         if (escrowConfig.address) {
           try {
             const onChainTask = await getOnChainTask(payment_request_id);
-            if (onChainTask.state === "Completed") {
-              alreadyCompletedOnChain = true;
-              log("info", "signer_complete_task_already_done", {
-                payment_request_id,
-                onChainState: onChainTask.state,
-              });
-            }
+            onChainState = onChainTask.state;
           } catch {
-            // Contract may not be deployed yet — proceed with on-chain call
+            // Contract may not be deployed or reachable — omit, don't fail
           }
         }
 
-        if (!alreadyCompletedOnChain) {
-          try {
-            txHash = await completeTaskOnChain(taskId);
-          } catch (chainErr: unknown) {
-            const chainMsg = chainErr instanceof Error ? chainErr.message : String(chainErr);
-            log("error", "signer_complete_task_failed", {
-              payment_request_id,
-              error: chainMsg,
-            });
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify({
-                    ok: false,
-                    error: `On-chain completeTask failed: ${chainMsg}`,
-                  }),
-                },
-              ],
-            };
-          }
-        }
-
-        await updateTaskStatus(payment_request_id, "completed");
-
-        log("info", "task_completed", {
+        log("info", "task_completion_confirmed_by_agent", {
           payment_request_id,
           amount_usdc: task.amount_usdc,
-          txHash,
+          onChainState,
         });
+
+        const settled =
+          onChainState === "Completed" || onChainState === "Resolved"
+            ? "Settlement has already occurred on-chain."
+            : onChainState === "Delivered"
+              ? "Work is delivered and the review window is running. Pay early by calling completeTask, or let the worker claim via releaseAfterReview after the review deadline."
+              : "Settlement is the agent's action. Call escrow.completeTask(taskId) from the originating agent wallet to pay early; otherwise the worker claims via releaseAfterReview once the review window passes.";
 
         return {
           content: [
@@ -554,8 +532,16 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
               text: JSON.stringify({
                 ok: true,
                 payment_request_id,
-                status: "completed",
-                txHash,
+                task_id_bytes32: taskId,
+                status: task.status,
+                on_chain_state: onChainState,
+                escrow_contract: escrowConfig.address,
+                settlement: {
+                  performed_by: "agent",
+                  early_path: "escrow.completeTask(taskId) from the agent's own wallet",
+                  default_path: "worker calls releaseAfterReview after the review window",
+                  note: settled,
+                },
               }),
             },
           ],
