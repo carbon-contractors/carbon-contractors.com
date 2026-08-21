@@ -69,6 +69,7 @@ describe("rpc-retry classification (CC-085)", () => {
   it("treats transport and rate-limit failures as transient", () => {
     for (const msg of [
       "HTTP request failed.\nStatus: 429",
+      "RPC Request failed.\n\nURL: https://sepolia.base.org\nDetails: over rate limit",
       "fetch failed",
       "socket hang up",
       "connect ETIMEDOUT 1.2.3.4:443",
