@@ -297,7 +297,7 @@ npm run compile          # Hardhat compile
 npm run gen:abi          # Regenerate src/lib/contracts/*-abi.ts from artifacts (CC-082)
 npm run monitors         # Run every invariant monitor against the LIVE chain (CC-085)
 npm run monitors:list    # Offline — validates the monitor registry. Runs in CI
-npm run seed             # BROKEN — still writes the pre-migration-008 `skills` column (CC-017)
+npm run seed             # Seeds demo workers into Supabase (fixed in CC-017; needs real env)
 ```
 
 CI runs `npm ci`, `npm audit --audit-level=high`, lint, typecheck, compile, `typecheck:contracts`,

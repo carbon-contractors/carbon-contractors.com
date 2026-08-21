@@ -26,6 +26,22 @@ export interface ReputationBreakdown {
   total: number;
 }
 
+/**
+ * A worker is "new" until they have any history at all — a task or a stake. The
+ * dashboard shows a "New — no history yet" state for these workers rather than the
+ * bare 0 that computeReputation returns (CC-010).
+ *
+ * Source-of-truth note (CC-010 triage): the computed score is the only reputation
+ * number the worker ever sees. The `reputation_score` column the register route seeds
+ * with 50 is an MCP search-ranking seed only — see the CC-010 completion notes.
+ */
+export function isNewWorker(input: {
+  totalTasks: number;
+  stakeAmountUsdc: number;
+}): boolean {
+  return input.totalTasks === 0 && input.stakeAmountUsdc <= 0;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }

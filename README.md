@@ -6,9 +6,9 @@ Human-as-a-Service infrastructure for the agentic web. AI agents autonomously di
 
 Large language models can already write code, analyse data, and generate content. What they can't do is the physical, subjective, or trust-dependent work that still requires a human. Carbon Contractors bridges that gap.
 
-Workers register their service categories and hourly rates on-chain. AI agents query the worker registry via MCP (Model Context Protocol), select a worker, and lock USDC in escrow. When the task is done, funds release automatically. No platform middleman, no invoicing, no accounts payable.
+Workers register their service categories and hourly rates on-chain. AI agents query the worker registry via MCP (Model Context Protocol), select a worker, and lock USDC in escrow. When the work is delivered, the worker claims payment directly from the escrow contract — the platform is never in the money path. No invoicing, no accounts payable.
 
-The trust layer is reputation staking — workers put skin in the game, and their track record is public and verifiable. No KYC, no resumes, no interviews. Just wallets, services, and outcomes.
+The trust layer is staked capital and a public, verifiable track record: every task's lifecycle is an on-chain event, and reputation is computed from escrow event logs anyone can read. A stake is only ever slashed for established fault — a published, re-runnable check failure or a staked jury ruling, never one party's bare assertion ([ADR-0001](docs/adr/ADR-0001-escrow-resolution-and-dispute-authority.md)). No KYC, no resumes, no interviews. Just wallets, services, and outcomes.
 
 ## Why Base
 
@@ -32,7 +32,7 @@ The flow works like this:
 2. The server returns a `402 Payment Required` response with a payment header specifying the amount, recipient, and escrow contract
 3. The agent's x402-compatible wallet reads the header, signs the USDC transfer, and broadcasts it to Base
 4. The server verifies the on-chain payment and creates the task
-5. On task completion, the escrow releases funds to the worker
+5. On delivery, the worker claims the escrowed funds — a pull-payment, verified against a signed verdict where one applies
 
 No API keys. No Stripe integration. No payment processor taking a cut. The agent's wallet pays directly, and the protocol is the invoice. Any agent with a funded wallet and an MCP client can participate — the payment negotiation happens entirely within the HTTP request/response cycle.
 
@@ -79,8 +79,8 @@ flowchart LR
 | Hire | `request_human_work` | Create task + escrow funding instructions |
 | Hire | `get_task_status` | Poll task state (DB + on-chain) |
 | Settle | `confirm_task_completion` | Mark task complete, release escrow |
-| Dispute | `dispute_task` | Flag task as disputed, freeze escrowed funds |
-| Dispute | `resolve_dispute` | Arbitrate dispute: release to worker or refund agent |
+| Dispute | `dispute_task` | Open a dispute — either party, but only by presenting a signed failing verdict |
+| Dispute | `resolve_dispute` | Resolve a disputed task on-chain to one of the two wallets fixed at funding — no agent adjudication of its own dispute |
 | Config | `register_notification_channel` | Set notification prefs + auto-booking flag |
 
 **MCP Resources:**
@@ -188,10 +188,33 @@ state:
 
 ## Design constraints
 
-- **Zero PII** — no personal data stored, ever. Wallets and service categories only.
+- **Pseudonymous by design** — no identity verification, ever. See *Privacy posture* below.
 - **Passkeys only** — no seed phrases, no SMS OTP. WebAuthn or nothing.
 - **Escrow everything** — every task is wrapped in a smart contract. No trust required.
 - **MCP-native** — any LLM with an MCP client can hire humans. No proprietary API.
+
+### Privacy posture
+
+The platform is **pseudonymous, not anonymous** — a wallet address plus a service history plus a
+payout pattern can constitute personal information where an individual is reasonably identifiable,
+under both Australian and EU law. Two separate data classes, never merged into one claim
+([ADR-0002](docs/adr/ADR-0002-pseudonymity-and-task-data-retention.md)):
+
+1. **Registration.** The platform holds a wallet address, service categories, a rate, and derived
+   reputation. It does not hold, request or verify names, emails, phone numbers, documents or
+   location, and there is no account in the conventional sense. The one deliberate addition: a
+   worker may *optionally* register a notification channel (webhook, Telegram, Discord or email) so
+   they can be told they have been hired — none is required, none is verified, and none is used for
+   anything but notification.
+2. **Task payload.** Task content is authored by the hiring agent and evidence is produced by the
+   worker. It is arbitrary and may contain personal information about third parties. The platform
+   stores no task evidence and retains no task content after settlement — the chain holds one-way
+   hashes, the bytes go to storage the hiring agent controls, and the platform is not in the data
+   path.
+
+On-chain data is permanent and world-readable: wallet addresses, amounts, timestamps and state
+transitions. That is not deletable and is not described as if it were — the hashes are the feature,
+because without their preimages they identify no one.
 
 ## License
 
