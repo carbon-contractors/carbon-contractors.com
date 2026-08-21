@@ -44,6 +44,17 @@ const TOOLS = [
     phase: "Hire",
   },
   {
+    name: "get_signed_verdict",
+    description:
+      "Obtain an EIP-712 signed verdict from the platform verdict signer for a delivered task. A passing verdict lets the worker claim early via escrow.claimWithVerdict(); a failing one is required to dispute via escrow.disputeTask(). Either party to the task may request one.",
+    params: [
+      "payment_request_id: string",
+      "passed?: boolean (true to claim, false to dispute)",
+      "failure_reason?: string (required when passed is false)",
+    ],
+    phase: "Settle",
+  },
+  {
     name: "confirm_task_completion",
     description:
       "Mark a task as completed. Triggers escrow release of USDC to the worker.",

@@ -31,6 +31,15 @@ import {
   getTaskResolvedOutcome,
 } from "@/lib/contracts/escrow";
 import { completeTaskOnChain, resolveDisputeOnChain } from "@/lib/contracts/signer";
+import {
+  issueSignedVerdictForTask,
+  VerdictServiceError,
+} from "@/lib/contracts/verdict-service";
+import {
+  serializeVerdict,
+  verifyPresentedVerdict,
+  type SerializedVerdict,
+} from "@/lib/contracts/verdict-signer";
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
@@ -783,9 +792,13 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   );
 
   // ─── Tool: dispute_task ──────────────────────────────────────────────────
+  // CC-092 / ADR-0001 D2: a dispute carries a *signed failing verdict* — there is
+  // no bare-assertion dispute in v2. Obtain one from get_signed_verdict
+  // (passed: false, with a failure_reason), then present the same verdict and
+  // signature here and to escrow.disputeTask(taskId, verdict, signature) on-chain.
   server.tool(
     "dispute_task",
-    "Flag a task as disputed in the database. The caller (agent or worker) should also call escrow.disputeTask(taskId) on-chain to freeze escrowed funds. Requires task status 'active' or 'pending'.",
+    "Record a dispute against a delivered task in the database. v2 requires a signed failing verdict from the platform verdict signer (get get_signed_verdict with passed=false first) — a bare assertion is refused. Either party to the task may dispute. The caller must also submit escrow.disputeTask(taskId, verdict, signature) on-chain from their own wallet to freeze the escrowed funds.",
     {
       payment_request_id: z
         .string()
@@ -796,8 +809,24 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         .min(10)
         .max(500)
         .describe("Reason for the dispute"),
+      verdict: z
+        .object({
+          taskId: z.string().length(66),
+          specHash: z.string().length(66),
+          evidenceHash: z.string().length(66),
+          checkerHash: z.string().length(66),
+          passed: z.boolean(),
+          breakdownHash: z.string().length(66),
+          expiry: z.string(),
+          nonce: z.string(),
+        })
+        .describe("The signed failing verdict object, exactly as returned by get_signed_verdict"),
+      signature: z
+        .string()
+        .min(132)
+        .describe("The hex signature returned alongside the verdict by get_signed_verdict"),
     },
-    async ({ payment_request_id, reason }) => {
+    async ({ payment_request_id, reason, verdict, signature }) => {
       try {
         // Authorization: only the originating agent may dispute a task
         if (!context?.callerWallet) {
@@ -831,11 +860,16 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
-        if (task.from_agent_wallet.toLowerCase() !== context.callerWallet.toLowerCase()) {
+        const normalizedCaller = context.callerWallet.toLowerCase();
+        const isAgent = task.from_agent_wallet.toLowerCase() === normalizedCaller;
+        const isWorker = task.to_human_wallet.toLowerCase() === normalizedCaller;
+
+        if (!isAgent && !isWorker) {
           log("warn", "dispute_task_unauthorized", {
             payment_request_id,
             caller: context.callerWallet,
             task_agent: task.from_agent_wallet,
+            task_worker: task.to_human_wallet,
           });
           return {
             isError: true,
@@ -844,7 +878,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                 type: "text" as const,
                 text: JSON.stringify({
                   ok: false,
-                  error: "Not authorized. Only the originating agent may dispute this task.",
+                  error: "Not authorized. Caller is not a party to this task.",
                 }),
               },
             ],
@@ -866,6 +900,35 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
+        // ADR-0001 D2: refuse a bare assertion before anything is recorded or
+        // broadcast. The verdict must be failing, unexpired, name this task, and
+        // recover to the platform verdict signer.
+        const verdictCheck = await verifyPresentedVerdict({
+          paymentRequestId: payment_request_id,
+          serialized: verdict as SerializedVerdict,
+          signature: signature as `0x${string}`,
+          requirePassing: false,
+        });
+        if (!verdictCheck.ok) {
+          log("warn", "dispute_task_verdict_rejected", {
+            payment_request_id,
+            caller: context.callerWallet,
+            reason: verdictCheck.reason,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: `Verdict refused: ${verdictCheck.reason}`,
+                }),
+              },
+            ],
+          };
+        }
+
         await updateTaskStatus(payment_request_id, "disputed");
 
         const taskIdBytes32 = toTaskId(payment_request_id);
@@ -875,6 +938,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           payment_request_id,
           reason,
           amount_usdc: task.amount_usdc,
+          verdictDigest: verdictCheck.digest,
         });
 
         return {
@@ -887,7 +951,142 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                 status: "disputed",
                 task_id_bytes32: taskIdBytes32,
                 escrow_contract: escrowConfig.address,
-                note: "Database updated. Call escrow.disputeTask(taskId) on-chain to freeze funds.",
+                verdict_digest: verdictCheck.digest,
+                note: "Database updated. Submit escrow.disputeTask(taskId, verdict, signature) on-chain from your own wallet with the same verdict and signature to freeze the funds.",
+              }),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ ok: false, error: message }),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ─── Tool: get_signed_verdict ─────────────────────────────────────────────
+  // CC-092: Requests an EIP-712 signed verdict for an on-chain task.
+  // Both parties (worker and hiring agent) can request this.
+  server.tool(
+    "get_signed_verdict",
+    "Obtain an EIP-712 signed verdict from the platform verdict signer. Workers use passing verdicts to call escrow.claimWithVerdict(); either party uses failing verdicts to call escrow.disputeTask().",
+    {
+      payment_request_id: z
+        .string()
+        .min(1)
+        .describe("The payment_request_id of the task"),
+      passed: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe("True for a passing verdict (for claimWithVerdict), false for a failing verdict (for disputeTask)"),
+      failure_reason: z
+        .string()
+        .max(1000)
+        .optional()
+        .describe("Required when passed is false — states why the work failed. Becomes the verdict's breakdownHash."),
+    },
+    async ({ payment_request_id, passed, failure_reason }) => {
+      try {
+        if (!context?.callerWallet) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Authentication required. Provide a verified wallet to request verdicts.",
+                }),
+              },
+            ],
+          };
+        }
+
+        const task = await getTaskByPaymentId(payment_request_id);
+        if (!task) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ ok: false, error: "Task not found" }),
+              },
+            ],
+          };
+        }
+
+        const normalizedCaller = context.callerWallet.toLowerCase();
+        const isAgent = task.from_agent_wallet.toLowerCase() === normalizedCaller;
+        const isWorker = task.to_human_wallet.toLowerCase() === normalizedCaller;
+
+        if (!isAgent && !isWorker) {
+          log("warn", "verdict_mcp_unauthorized", {
+            payment_request_id,
+            caller: context.callerWallet,
+            worker: task.to_human_wallet,
+            agent: task.from_agent_wallet,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Not authorized. Caller is not a party to this task.",
+                }),
+              },
+            ],
+          };
+        }
+
+        // The spec/evidence commitments come from the chain inside the service —
+        // a verdict bound to anything else reverts VerdictCommitmentMismatch().
+        let signed;
+        try {
+          signed = await issueSignedVerdictForTask({
+            paymentRequestId: payment_request_id,
+            passed: Boolean(passed),
+            failureReason: failure_reason,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: message,
+                  ...(err instanceof VerdictServiceError ? { code: err.code } : {}),
+                }),
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: true,
+                payment_request_id,
+                taskId: signed.verdict.taskId,
+                verdict: serializeVerdict(signed.verdict),
+                digest: signed.digest,
+                signature: signed.signature,
+                signer: signed.signer,
               }),
             },
           ],

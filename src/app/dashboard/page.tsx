@@ -2,9 +2,18 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from "wagmi";
-import { keccak256, toHex } from "viem";
+import type { Hash } from "viem";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
+import { CARBON_ESCROW_ABI } from "@/lib/contracts/escrow-abi";
+import {
+  ZERO_BYTES32,
+  computeEvidenceHash,
+  parseBytes32,
+  paymentIdToTaskId,
+  toVerdictTuple,
+} from "@/lib/contracts/worker-actions";
+import type { SerializedVerdict } from "@/lib/contracts/verdict-signer";
 import styles from "./dashboard.module.css";
 
 // ── ABIs for write operations ───────────────────────────────────────────────
@@ -39,15 +48,9 @@ const STAKE_ABI = [
   },
 ] as const;
 
-const DISPUTE_ABI = [
-  {
-    type: "function",
-    name: "disputeTask",
-    inputs: [{ name: "taskId", type: "bytes32" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
+// Escrow write calls (submitWork, releaseAfterReview, claimWithVerdict,
+// disputeTask — CC-092) use the generated CARBON_ESCROW_ABI, so the client can
+// never drift from the deployed contract.
 
 // ── USDC address (set via env var — differs per network) ────────────────────
 
@@ -67,6 +70,11 @@ interface OnChainState {
   state: string;
   amount_wei: string;
   deadline: number;
+  /** CC-092 — the worker write path keys off these. */
+  review_deadline?: number;
+  spec_hash?: string;
+  evidence_hash?: string;
+  worker?: string;
 }
 
 interface Task {
@@ -296,6 +304,269 @@ function AcceptanceSpecDisplay({
   );
 }
 
+// ── Worker write path (CC-092) ───────────────────────────────────────────────
+//
+// submitWork, releaseAfterReview, claimWithVerdict and disputeTask are all
+// worker-signed from the connected wallet — the platform is never the sender
+// (ADR-0001 A1.2/A1.3). Each action keys off the *on-chain* task state, not the
+// DB projection: the chain is the authority on money.
+
+type WriteContractFn = ReturnType<typeof useWriteContract>["writeContract"];
+
+function WorkerTaskActions({
+  task,
+  escrowContract,
+  authHeaders,
+  writeContract,
+  onDone,
+}: {
+  task: Task;
+  escrowContract: `0x${string}`;
+  authHeaders: AuthHeaders;
+  writeContract: WriteContractFn;
+  onDone: () => void;
+}) {
+  const onChain = task.on_chain;
+  const taskId = paymentIdToTaskId(task.payment_request_id);
+
+  const [evidence, setEvidence] = useState("");
+  const [attestation, setAttestation] = useState("");
+  const [disputeReason, setDisputeReason] = useState("");
+  const [busy, setBusy] = useState<"submit" | "claim" | "claim-verdict" | "dispute" | null>(null);
+  const [actionError, setActionError] = useState("");
+
+  if (!onChain) return null;
+  // Narrowed copy — the early return above doesn't extend into the handlers'
+  // closures, but this assignment does.
+  const chain: OnChainState = onChain;
+
+  const isFunded = chain.state === "Funded";
+  const isDelivered = chain.state === "Delivered";
+  const reviewClosed =
+    typeof chain.review_deadline === "number" &&
+    Date.now() / 1000 >= chain.review_deadline;
+
+  /** Ask the platform verdict service for a signature over this task. */
+  async function fetchVerdict(
+    passed: boolean,
+    failureReason?: string,
+  ): Promise<{ verdict: SerializedVerdict; signature: `0x${string}` } | null> {
+    const res = await fetch("/api/verdict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({
+        payment_request_id: task.payment_request_id,
+        passed,
+        failure_reason: failureReason,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      setActionError(data.error || "The platform declined to sign a verdict.");
+      return null;
+    }
+    return {
+      verdict: data.verdict as SerializedVerdict,
+      signature: data.signature as `0x${string}`,
+    };
+  }
+
+  async function handleSubmitWork() {
+    setBusy("submit");
+    setActionError("");
+    try {
+      if (!evidence.trim()) {
+        setActionError("Describe your evidence first — only its hash is published.");
+        return;
+      }
+      // submitWork reverts SpecAckMismatch() unless this echoes the committed
+      // specHash exactly — prefer the chain's copy, fall back to the DB's.
+      const specVersionAck = (chain.spec_hash ?? task.spec_hash) as Hash | null;
+      if (!specVersionAck) {
+        setActionError("No committed spec hash available to acknowledge — cannot submit.");
+        return;
+      }
+      let attestationUid: Hash = ZERO_BYTES32;
+      if (attestation.trim()) {
+        const parsed = parseBytes32(attestation);
+        if (!parsed) {
+          setActionError("Attestation UID must be a 0x-prefixed 32-byte value.");
+          return;
+        }
+        attestationUid = parsed;
+      }
+      await writeContract({
+        address: escrowContract,
+        abi: CARBON_ESCROW_ABI,
+        functionName: "submitWork",
+        args: [taskId, computeEvidenceHash(evidence), specVersionAck, attestationUid],
+      });
+      onDone();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "submitWork failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleClaimAfterReview() {
+    setBusy("claim");
+    setActionError("");
+    try {
+      await writeContract({
+        address: escrowContract,
+        abi: CARBON_ESCROW_ABI,
+        functionName: "releaseAfterReview",
+        args: [taskId],
+      });
+      onDone();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Claim failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleClaimWithVerdict() {
+    setBusy("claim-verdict");
+    setActionError("");
+    try {
+      const signed = await fetchVerdict(true);
+      if (!signed) return;
+      await writeContract({
+        address: escrowContract,
+        abi: CARBON_ESCROW_ABI,
+        functionName: "claimWithVerdict",
+        args: [taskId, toVerdictTuple(signed.verdict), signed.signature],
+      });
+      onDone();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Claim failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDispute() {
+    setBusy("dispute");
+    setActionError("");
+    try {
+      const signed = await fetchVerdict(false, disputeReason.trim());
+      if (!signed) return;
+      // On-chain first: the dispute only exists once the contract has it.
+      await writeContract({
+        address: escrowContract,
+        abi: CARBON_ESCROW_ABI,
+        functionName: "disputeTask",
+        args: [taskId, toVerdictTuple(signed.verdict), signed.signature],
+      });
+      // Then record it — best-effort; the chain, not the DB, is the authority.
+      await fetch("/api/dispute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({
+          payment_request_id: task.payment_request_id,
+          reason: disputeReason.trim(),
+          verdict: signed.verdict,
+          signature: signed.signature,
+        }),
+      });
+      onDone();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Dispute failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className={styles.workerActions}>
+      {isFunded && (
+        <>
+          <p className={styles.actionNote}>
+            Deliver your work: describe or link the evidence — only its hash is published
+            on-chain, and it freezes the spec you are delivering against.
+          </p>
+          <textarea
+            className={styles.actionTextarea}
+            rows={3}
+            placeholder="Evidence — description, links, artefact manifest…"
+            value={evidence}
+            onChange={(e) => setEvidence(e.target.value)}
+          />
+          <input
+            className={styles.actionTextarea}
+            placeholder="Attestation UID (optional, 0x…)"
+            value={attestation}
+            onChange={(e) => setAttestation(e.target.value)}
+          />
+          <button
+            className={styles.actionBtn}
+            disabled={busy !== null || !evidence.trim()}
+            onClick={handleSubmitWork}
+          >
+            {busy === "submit" ? "Submitting…" : "Submit work"}
+          </button>
+        </>
+      )}
+
+      {isDelivered && (
+        <>
+          <p className={styles.actionNote}>
+            {reviewClosed
+              ? "The review window has closed — claim your payment."
+              : chain.review_deadline
+                ? `Review window open until ${formatDeadline(chain.review_deadline)} — claim now with a passing verdict, or wait and claim without one.`
+                : "Claim now with a passing verdict, or wait out the review window."}
+          </p>
+          <button
+            className={styles.actionBtn}
+            disabled={busy !== null || !reviewClosed}
+            onClick={handleClaimAfterReview}
+          >
+            {busy === "claim" ? "Claiming…" : "Claim payment"}
+          </button>
+          <button
+            className={styles.actionBtnSecondary}
+            disabled={busy !== null}
+            onClick={handleClaimWithVerdict}
+          >
+            {busy === "claim-verdict" ? "Signing…" : "Claim now with verdict"}
+          </button>
+          <p className={styles.actionNote}>
+            If the platform declines to sign a verdict, waiting out the review window still
+            pays — your claim never depends on the platform being reachable.
+          </p>
+
+          <div className={styles.disputeForm}>
+            <p className={styles.disputeWarning}>
+              Escalating a dispute freezes the escrowed funds until the platform owner
+              resolves it, and requires the platform to have signed a failing verdict — a
+              bare assertion cannot freeze funds.
+            </p>
+            <textarea
+              className={styles.actionTextarea}
+              rows={2}
+              placeholder="Why this task cannot be completed (min 10 chars)…"
+              value={disputeReason}
+              onChange={(e) => setDisputeReason(e.target.value)}
+            />
+            <button
+              className={styles.disputeBtn}
+              disabled={busy !== null || disputeReason.trim().length < 10}
+              onClick={handleDispute}
+            >
+              {busy === "dispute" ? "Disputing…" : "Raise dispute"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {actionError && <p className={styles.actionError}>{actionError}</p>}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { address, isConnected } = useAccount();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -308,8 +579,6 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [stakeInput, setStakeInput] = useState("");
   const [unstakeInput, setUnstakeInput] = useState("");
-  const [disputeOpen, setDisputeOpen] = useState<Record<string, boolean>>({});
-  const [disputeLoading, setDisputeLoading] = useState<string | null>(null);
   const [stakeStep, setStakeStep] = useState<"idle" | "approving" | "staking" | "unstaking">("idle");
 
   const { writeContract, data: txHash } = useWriteContract();
@@ -464,46 +733,6 @@ export default function DashboardPage() {
     : null;
 
   const escrowContract = process.env.NEXT_PUBLIC_ESCROW_CONTRACT as `0x${string}` | undefined;
-
-  async function handleDispute(task: Task) {
-    if (!escrowContract || !address) return;
-    setDisputeLoading(task.payment_request_id);
-    try {
-      // 1. Call escrow.disputeTask on-chain
-      const taskIdBytes32 = keccak256(toHex(task.payment_request_id));
-      writeContract({
-        address: escrowContract,
-        abi: DISPUTE_ABI,
-        functionName: "disputeTask",
-        args: [taskIdBytes32],
-      });
-
-      // 2. Prove wallet ownership (CC-004), then update DB via REST
-      const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: address }),
-      });
-      const { nonce, message } = await challengeRes.json();
-      const signature = await signMessageAsync({ message });
-
-      await fetch("/api/dispute", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-caller-wallet": address,
-          "x-caller-signature": signature,
-          "x-caller-nonce": nonce,
-        },
-        body: JSON.stringify({ payment_request_id: task.payment_request_id }),
-      });
-    } catch {
-      // on-chain tx or signing may fail — best-effort
-    } finally {
-      setDisputeLoading(null);
-      fetchData();
-    }
-  }
 
   return (
     <PageShell>
@@ -715,39 +944,19 @@ export default function DashboardPage() {
                           )}
                         </div>
 
-                        {/* Dispute section for active tasks */}
-                        {task.status === "active" && escrowContract && (
-                          <div className={styles.disputeSection}>
-                            <button
-                              className={styles.disputeToggle}
-                              onClick={() =>
-                                setDisputeOpen((prev) => ({
-                                  ...prev,
-                                  [task.id]: !prev[task.id],
-                                }))
-                              }
-                            >
-                              {disputeOpen[task.id] ? "Cancel" : "Dispute this task"}
-                            </button>
-                            {disputeOpen[task.id] && (
-                              <div className={styles.disputeForm}>
-                                <p className={styles.disputeWarning}>
-                                  Disputing will freeze escrowed funds until the platform owner
-                                  resolves the dispute.
-                                </p>
-                                <button
-                                  className={styles.disputeBtn}
-                                  onClick={() => handleDispute(task)}
-                                  disabled={disputeLoading === task.payment_request_id}
-                                >
-                                  {disputeLoading === task.payment_request_id
-                                    ? "Submitting..."
-                                    : "Confirm Dispute"}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {/* Worker write path: submit / claim / dispute (CC-092).
+                            All three are signed by the worker's own wallet and
+                            gate on on-chain state, which /api/tasks enriches. */}
+                        {escrowContract && address && authHeaders &&
+                          task.to_human_wallet.toLowerCase() === address.toLowerCase() && (
+                            <WorkerTaskActions
+                              task={task}
+                              escrowContract={escrowContract}
+                              authHeaders={authHeaders}
+                              writeContract={writeContract}
+                              onDone={fetchData}
+                            />
+                          )}
                       </div>
                     ))}
                   </div>

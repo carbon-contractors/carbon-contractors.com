@@ -65,6 +65,13 @@ export async function GET(req: NextRequest): Promise<Response> {
                 state: onChainTask.state,
                 amount_wei: onChainTask.amount.toString(),
                 deadline: Number(onChainTask.deadline),
+                // CC-092: the worker write path keys off these — specVersionAck for
+                // submitWork, the review clock for releaseAfterReview vs claimWithVerdict,
+                // and the evidence commitment a verdict must bind.
+                review_deadline: Number(onChainTask.reviewDeadline),
+                spec_hash: onChainTask.specHash,
+                evidence_hash: onChainTask.evidenceHash,
+                worker: onChainTask.worker,
               };
             } catch {
               onChain = null;

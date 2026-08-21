@@ -560,3 +560,85 @@
   font-weight: 600;
   color: var(--cc-green);
 }
+
+/* ── Worker write path: submit / claim (CC-092) ─────────────────────────── */
+
+.workerActions {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.actionNote {
+  font-size: 0.75rem;
+  color: var(--cc-text-faint);
+  line-height: 1.4;
+}
+
+.actionError {
+  font-size: 0.75rem;
+  color: var(--cc-red);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.actionTextarea {
+  background: var(--cc-bg-elevated);
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  color: var(--cc-text);
+  font-family: var(--cc-font-mono);
+  font-size: 0.8rem;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.actionTextarea:focus {
+  outline: none;
+  border-color: var(--cc-blue-bright);
+}
+
+.actionBtn {
+  background: var(--cc-blue);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.actionBtn:hover:not(:disabled) {
+  background: var(--cc-blue-bright);
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.actionBtnSecondary {
+  background: none;
+  color: var(--cc-blue-bright);
+  border: 1px solid var(--cc-blue);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.actionBtnSecondary:hover:not(:disabled) {
+  background: rgba(77, 159, 255, 0.1);
+}
+
+.actionBtnSecondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -267,7 +267,7 @@ frontmatter field.
 src/app/api/           REST + MCP routes. basedhuman.mcp/ is the MCP server entry point.
 src/app/               Pages: / /connect /dashboard /services /learn /mcp-info
 src/learn/             The 7 Learn modules (markdown); registry in src/lib/learn/modules.ts
-src/lib/mcp/server.ts  All 10 MCP tools and 3 resources
+src/lib/mcp/server.ts  All 11 MCP tools and 3 resources
 src/lib/db/            Supabase access. whitepages.ts reads with the ANON key;
                        register/notifications use the SERVICE ROLE key. Know which you are in.
 src/lib/contracts/     signer.ts (KMS or raw key), kms-signer.ts, escrow.ts (read-only), ABIs
