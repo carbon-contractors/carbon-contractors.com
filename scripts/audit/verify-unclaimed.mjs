@@ -45,11 +45,12 @@
  * state. It is how you answer "will this fire tomorrow" without waiting, and how the
  * detection path gets exercised while no violation exists yet.
  *
- * Exit codes: 0 clean · 1 violation · 2 misconfigured or RPC failure
+ * Exit codes: 0 clean · 1 violation · 2 misconfigured · 3 transient RPC failure
  */
 
 import { createPublicClient, http, getAddress, formatUnits, parseAbiItem } from "viem";
 import { base, baseSepolia } from "viem/chains";
+import { withRpcRetry, isTransient, shortError } from "./rpc-retry.mjs";
 
 const WORK_SUBMITTED = parseAbiItem(
   "event WorkSubmitted(bytes32 indexed taskId, address indexed worker, bytes32 evidenceHash, uint64 submittedAt, bytes32 attestationUid)",
@@ -175,14 +176,17 @@ async function main() {
 
   let head, submitted, created;
   try {
-    head = await client.getBlockNumber();
+    head = await withRpcRetry("head", () => client.getBlockNumber());
     const range = { address: escrow, fromBlock: deployBlock, toBlock: head, span };
-    [submitted, created] = await Promise.all([
-      getLogsChunked(client, { ...range, event: WORK_SUBMITTED }),
-      getLogsChunked(client, { ...range, event: TASK_CREATED }),
-    ]);
+    // Sequential getLogs sweeps with retry to avoid provoking 429 rate limits on public RPC
+    submitted = await withRpcRetry("submitted", () => getLogsChunked(client, { ...range, event: WORK_SUBMITTED }));
+    created = await withRpcRetry("created", () => getLogsChunked(client, { ...range, event: TASK_CREATED }));
   } catch (err) {
-    console.error(`RPC read failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (isTransient(err)) {
+      console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(err)}`);
+      return 3;
+    }
+    console.error(`MISCONFIGURED: RPC read failed: ${shortError(err)}`);
     return 2;
   }
 
@@ -203,13 +207,19 @@ async function main() {
 
   let tasks;
   try {
-    tasks = await Promise.all(
-      allIds.map((taskId) =>
-        client.readContract({ address: escrow, abi: GET_TASK_ABI, functionName: "getTask", args: [taskId] }),
+    tasks = await withRpcRetry("getTask", () =>
+      Promise.all(
+        allIds.map((taskId) =>
+          client.readContract({ address: escrow, abi: GET_TASK_ABI, functionName: "getTask", args: [taskId] }),
+        ),
       ),
     );
   } catch (err) {
-    console.error(`getTask read failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (isTransient(err)) {
+      console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(err)}`);
+      return 3;
+    }
+    console.error(`MISCONFIGURED: getTask read failed: ${shortError(err)}`);
     return 2;
   }
 

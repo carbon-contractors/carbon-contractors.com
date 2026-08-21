@@ -20,6 +20,8 @@
  * Executes no writes and sends no transactions.
  *
  *   node --env-file=.env.local scripts/audit/verify-contract-owner.mjs
+ *
+ * Exit codes: 0 pass · 1 unexpected or local owner · 2 misconfigured · 3 transient RPC failure
  */
 
 import { readFileSync } from "node:fs";
@@ -35,6 +37,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia, base } from "viem/chains";
+import { withRpcRetry, isTransient, shortError } from "./rpc-retry.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PUB_KEY = join(REPO, "docs", "carbon-contractors-escrow-signer-1.pub");
@@ -107,6 +110,7 @@ if (!process.env.BASE_SEPOLIA_RPC_URL && !mainnet) {
 
 const client = createPublicClient({ chain, transport: http(rpcUrl) });
 const owners = {};
+let readError = null;
 
 for (const [name, address] of [
   ["CarbonEscrow", process.env.NEXT_PUBLIC_ESCROW_CONTRACT],
@@ -115,19 +119,23 @@ for (const [name, address] of [
   console.log(`\n    ── ${name} @ ${address ?? "(not configured)"}`);
   if (!address) continue;
   try {
-    const code = await client.getCode({ address });
+    const code = await withRpcRetry(`${name} code`, () => client.getCode({ address }));
     if (!code || code === "0x") {
       console.log("       no contract deployed at this address");
       continue;
     }
     console.log(`       bytecode:      ${(code.length - 2) / 2} bytes`);
 
-    owners[name] = await client.readContract({ address, abi: OWNER_ABI, functionName: "owner" });
+    owners[name] = await withRpcRetry(`${name} owner`, () =>
+      client.readContract({ address, abi: OWNER_ABI, functionName: "owner" }),
+    );
     console.log(`       owner():       ${owners[name]}`);
 
     for (const fn of VIEW_ABI) {
       try {
-        const value = await client.readContract({ address, abi: VIEW_ABI, functionName: fn.name });
+        const value = await withRpcRetry(`${name} ${fn.name}`, () =>
+          client.readContract({ address, abi: VIEW_ABI, functionName: fn.name }),
+        );
         console.log(`       ${(fn.name + "():").padEnd(15)}${value}`);
       } catch {
         /* function not present on this contract */
@@ -140,6 +148,7 @@ for (const [name, address] of [
       console.log(`       completeTask "only agent" require present on chain: ${present}`);
     }
   } catch (err) {
+    readError = err;
     console.log(`       read failed: ${err.shortMessage ?? err.message}`);
   }
 }
@@ -153,7 +162,7 @@ for (const [name, owner] of Object.entries(owners)) {
 }
 for (const [address, label] of labelled) {
   try {
-    const balance = await client.getBalance({ address });
+    const balance = await withRpcRetry("balance", () => client.getBalance({ address }));
     console.log(`    ${address}  ${formatEther(balance).padStart(20)} ETH   ${label}`);
   } catch (err) {
     console.log(`    ${address}  balance read failed: ${err.shortMessage ?? err.message}`);
@@ -167,8 +176,16 @@ console.log(line());
 
 const escrowOwner = owners.CarbonEscrow;
 if (!escrowOwner) {
-  console.log("  Could not read CarbonEscrow.owner() — inconclusive, do not draw a conclusion.");
-  process.exitCode = 1;
+  if (readError && isTransient(readError)) {
+    console.log(`  TRANSIENT — RPC unreachable after retries: ${shortError(readError)}`);
+    process.exitCode = 3;
+  } else if (readError) {
+    console.log(`  MISCONFIGURED: RPC read failed: ${shortError(readError)}`);
+    process.exitCode = 2;
+  } else {
+    console.log("  Could not read CarbonEscrow.owner() — inconclusive, do not draw a conclusion.");
+    process.exitCode = 1;
+  }
 } else if (eq(escrowOwner, kmsAddress)) {
   console.log("  PASS — the escrow is owned by the HSM-derived address.");
   console.log("  docs/Security-Trust-Disclosure.md can state this as verified.");

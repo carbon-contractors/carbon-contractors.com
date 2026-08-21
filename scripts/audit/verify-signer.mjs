@@ -54,7 +54,7 @@
  * NEW key before you start signing with it, and afterwards that the old one was removed.
  * It implies --no-kms, since KMS holds only the one key.
  *
- * Exit codes: 0 clean · 1 violation · 2 misconfigured or RPC failure
+ * Exit codes: 0 clean · 1 violation · 2 misconfigured · 3 transient RPC failure
  *
  * Note: sets `process.exitCode` rather than calling process.exit(), for the Windows
  * libuv reason documented at the top of verify-escrow-solvency.mjs.
@@ -73,6 +73,7 @@ import {
   hashDomain,
 } from "viem";
 import { base, baseSepolia } from "viem/chains";
+import { withRpcRetry, isTransient, shortError } from "./rpc-retry.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PUB_KEY = join(REPO, "docs", "carbon-contractors-escrow-signer-1.pub");
@@ -248,18 +249,24 @@ async function main() {
   // ── On-chain reads ────────────────────────────────────────────────────────
   let accepted, onChainDomain, onChainTypehash;
   try {
-    [accepted, onChainDomain, onChainTypehash] = await Promise.all([
-      client.readContract({
-        address: escrow,
-        abi: ESCROW_ABI,
-        functionName: "acceptedSigners",
-        args: [hsmAddress],
-      }),
-      client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "domainSeparator" }),
-      client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "VERDICT_TYPEHASH" }),
-    ]);
+    [accepted, onChainDomain, onChainTypehash] = await withRpcRetry("signer reads", () =>
+      Promise.all([
+        client.readContract({
+          address: escrow,
+          abi: ESCROW_ABI,
+          functionName: "acceptedSigners",
+          args: [hsmAddress],
+        }),
+        client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "domainSeparator" }),
+        client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "VERDICT_TYPEHASH" }),
+      ]),
+    );
   } catch (err) {
-    console.error(`RPC read failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (isTransient(err)) {
+      console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(err)}`);
+      return 3;
+    }
+    console.error(`MISCONFIGURED: RPC read failed: ${shortError(err)}`);
     console.error("A v1 escrow has none of these functions — check NEXT_PUBLIC_ESCROW_CONTRACT");
     console.error("points at the v2 deployment (CC-082).");
     return 2;

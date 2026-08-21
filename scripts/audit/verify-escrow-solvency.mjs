@@ -28,7 +28,7 @@
  *
  *   node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs
  *
- * Exit codes: 0 clean · 1 stranded or deficit · 2 misconfigured or RPC failure
+ * Exit codes: 0 clean · 1 stranded or deficit · 2 misconfigured · 3 transient RPC failure
  *
  * Note: this sets `process.exitCode` and returns rather than calling process.exit().
  * On Windows, process.exit() while an HTTP keep-alive socket is still open trips a libuv
@@ -38,6 +38,7 @@
 
 import { createPublicClient, http, getAddress, formatUnits } from "viem";
 import { base, baseSepolia } from "viem/chains";
+import { withRpcRetry, isTransient, shortError } from "./rpc-retry.mjs";
 
 const ERC20_ABI = [
   {
@@ -98,18 +99,24 @@ async function main() {
 
   let balance, totalLocked, owner;
   try {
-    [balance, totalLocked, owner] = await Promise.all([
-      client.readContract({
-        address: usdc,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [escrow],
-      }),
-      client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "totalLocked" }),
-      client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "owner" }),
-    ]);
+    [balance, totalLocked, owner] = await withRpcRetry("solvency reads", () =>
+      Promise.all([
+        client.readContract({
+          address: usdc,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [escrow],
+        }),
+        client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "totalLocked" }),
+        client.readContract({ address: escrow, abi: ESCROW_ABI, functionName: "owner" }),
+      ]),
+    );
   } catch (err) {
-    console.error(`RPC read failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (isTransient(err)) {
+      console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(err)}`);
+      return 3;
+    }
+    console.error(`MISCONFIGURED: RPC read failed: ${shortError(err)}`);
     console.error("If this is a rate-limit error, set BASE_SEPOLIA_RPC_URL — see CC-048.");
     return 2;
   }

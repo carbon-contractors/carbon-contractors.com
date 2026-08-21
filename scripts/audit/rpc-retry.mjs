@@ -25,6 +25,7 @@ const TRANSIENT = [
   /ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i,
   /socket hang up/i,
   /HTTP request failed/i,
+  /RPC request failed/i,
   /fetch failed/i,
   /502|503|504/,
   /service unavailable/i,
