@@ -200,6 +200,20 @@
   letter-spacing: 0.05em;
 }
 
+/* CC-010: brand-new worker — "New" instead of a bare 0 */
+.scoreNew {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--cc-blue-bright);
+  line-height: 1.2;
+}
+
+.newWorkerNote {
+  font-size: 0.8rem;
+  color: var(--cc-text-muted);
+  line-height: 1.5;
+}
+
 .breakdownGrid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -252,6 +266,46 @@
   color: var(--cc-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+/* CC-011: collapsed-by-default optional staking */
+.stakePanelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.optionalTag {
+  margin-left: 0.5rem;
+  font-size: 0.65rem;
+  color: var(--cc-text-faint);
+  border: 1px solid var(--cc-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  letter-spacing: 0.05em;
+}
+
+.stakeToggle {
+  background: transparent;
+  color: var(--cc-blue-bright);
+  border: none;
+  padding: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.stakeToggle:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.stakeExplainer {
+  font-size: 0.78rem;
+  color: var(--cc-text-muted);
+  line-height: 1.5;
 }
 
 .stakeAmount {
