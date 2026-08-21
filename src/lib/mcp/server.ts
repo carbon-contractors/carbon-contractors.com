@@ -35,6 +35,7 @@ import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
 import { MAX_SPEC_BYTES } from "@/lib/spec/schema";
+import { isIntakePaused } from "@/lib/config";
 import { log } from "@/lib/logging";
 
 /** Context provided when a caller authenticates their session. */
@@ -162,7 +163,32 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         Math.floor(Date.now() / 1000) + deadline_hours * 3600;
 
       try {
-        // Authorization: the hiring agent must be an authenticated wallet, and the
+        // Emergency Intake Kill Switch (ADR-0003 D4 / CC-086):
+        // Pause intake only, never claims or settlements. If active, reject new tasks cleanly.
+        const pauseStatus = isIntakePaused();
+        if (pauseStatus.paused) {
+          log("warn", "request_human_work_intake_paused", {
+            caller: context?.callerWallet ?? "unauthenticated",
+            notice: pauseStatus.notice,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: `Task creation is temporarily paused: ${pauseStatus.notice}`,
+                  intake_paused: true,
+                  claims_active: true,
+                  retry_after_s: 300,
+                }),
+              },
+            ],
+          };
+        }
+
+        // Authorization: the *** agent must be an authenticated wallet, and the
         // task is attributed to it. Same shape as the three mutating tools below.
         if (!context?.callerWallet) {
           return {

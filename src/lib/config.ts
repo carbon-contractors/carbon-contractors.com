@@ -129,6 +129,18 @@ const envSchema = z.object({
   SESSION_TIMEOUT_MS: envInt(1_800_000), // 30 min
   MAX_SESSIONS: envInt(100),
 
+  // ── Emergency Intake Kill Switch (ADR-0003 D4 / CC-086) ───────────────────
+  // When active ("true" / "1" / "yes"), blocks new task creation across MCP
+  // and APIs while keeping in-flight tasks, claims, and reviews unpaused.
+  NEXT_PUBLIC_INTAKE_PAUSED: envOptional(z.string().default("false")),
+  NEXT_PUBLIC_INTAKE_PAUSE_NOTICE: envOptional(
+    z
+      .string()
+      .default(
+        "Task intake is temporarily paused for system maintenance. In-flight tasks and settlements continue normally."
+      )
+  ),
+
   // ── Rate limiting ─────────────────────────────────────────────────────────
   // Shape shared with getRateLimitConfig() — see rateLimitShape above.
   ...rateLimitShape,
@@ -157,6 +169,29 @@ function describeFailure(error: z.ZodError): string {
     .map((i) => `  ${i.path.join(".")}: ${i.message}`)
     .join("\n");
   return `Invalid environment configuration:\n${issues}`;
+}
+
+/**
+ * Check whether task intake is temporarily paused (ADR-0003 D4 / CC-086).
+ * Safe to call in any context without throwing.
+ */
+export function isIntakePaused(): { paused: boolean; notice: string } {
+  try {
+    const config = getConfig();
+    const val = config.NEXT_PUBLIC_INTAKE_PAUSED?.toLowerCase();
+    const paused = val === "true" || val === "1" || val === "yes";
+    const notice =
+      config.NEXT_PUBLIC_INTAKE_PAUSE_NOTICE ||
+      "Task intake is temporarily paused for system maintenance. In-flight tasks and settlements continue normally.";
+    return { paused, notice };
+  } catch {
+    const val = process.env.NEXT_PUBLIC_INTAKE_PAUSED?.toLowerCase();
+    const paused = val === "true" || val === "1" || val === "yes";
+    const notice =
+      process.env.NEXT_PUBLIC_INTAKE_PAUSE_NOTICE ||
+      "Task intake is temporarily paused for system maintenance. In-flight tasks and settlements continue normally.";
+    return { paused, notice };
+  }
 }
 
 /**
