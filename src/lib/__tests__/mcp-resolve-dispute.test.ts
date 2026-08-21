@@ -18,7 +18,6 @@ vi.mock("@/lib/contracts/escrow", () => ({
 
 const mockResolveDisputeOnChain = vi.fn();
 vi.mock("@/lib/contracts/signer", () => ({
-  completeTaskOnChain: vi.fn(),
   resolveDisputeOnChain: (...args: unknown[]) => mockResolveDisputeOnChain(...args),
 }));
 

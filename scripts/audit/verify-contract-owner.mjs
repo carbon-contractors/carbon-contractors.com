@@ -14,8 +14,9 @@
  *
  * Also probes the DEPLOYED runtime bytecode for the "only agent" revert string, which
  * settles whether completeTask() is agent-gated on chain rather than only in the local
- * source. This matters because completeTaskOnChain() calls it as the platform signer,
- * which cannot satisfy that check under any key. See CC-037.
+ * source. This mattered because the platform signer could not satisfy that check under
+ * any key — the app-side call was removed by CC-080, and the gate itself is correct.
+ * See CC-037, CC-080.
  *
  * Executes no writes and sends no transactions.
  *
@@ -205,6 +206,6 @@ if (!escrowOwner) {
 
 console.log("");
 console.log("  Independent of ownership: completeTask() is gated on msg.sender == task.agent,");
-console.log("  not on owner. completeTaskOnChain() calls it as the platform signer, so that");
-console.log("  path cannot succeed for any key. That is CC-037, not an ownership problem.");
+console.log("  not on owner. The platform-signer call path was removed by CC-080 — settlement");
+console.log("  is the agent's own transaction. That is CC-037/CC-080, not an ownership problem.");
 console.log(line());
