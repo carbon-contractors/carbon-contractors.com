@@ -73,6 +73,48 @@ export async function getChannelsForContractor(
 }
 
 /**
+ * Get a single channel by ID, or null if not found.
+ * Used by /api/channels to check ownership before removing (CC-073).
+ */
+export async function getChannelById(
+  channelId: string
+): Promise<NotificationChannel | null> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("notification_channels")
+    .select()
+    .eq("id", channelId)
+    .single();
+
+  if (error && error.code !== "PGRST116") {
+    throw new Error(`getChannelById failed: ${error.message}`);
+  }
+  return (data as NotificationChannel) ?? null;
+}
+
+/**
+ * Delete a notification channel by ID.
+ * Returns true if a row was removed, false if it did not exist (CC-073).
+ */
+export async function removeNotificationChannel(
+  channelId: string
+): Promise<boolean> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("notification_channels")
+    .delete()
+    .eq("id", channelId)
+    .select();
+
+  if (error) {
+    throw new Error(`removeNotificationChannel failed: ${error.message}`);
+  }
+  return (data ?? []).length > 0;
+}
+
+/**
  * Find all contractors who accept auto-booking.
  * Used by orchestrator agents to find workers they can hire directly.
  */

@@ -3,7 +3,7 @@ import { verifyWalletSignature } from "@/lib/wallet/verify";
 import { getSupabaseAdmin } from "@/lib/db/client";
 import { log } from "@/lib/logging";
 import { validateCategorySelection } from "@/lib/categories";
-import { isValidEmail } from "@/lib/validation";
+import { isValidEmail, rateUsdcError } from "@/lib/validation";
 import { registerNotificationChannel } from "@/lib/db/notifications";
 
 /** Maximum age (in seconds) for a registration message to be considered valid. */
@@ -88,8 +88,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     parsed = JSON.parse(message);
     if (
       !Array.isArray(parsed.categories) ||
-      typeof parsed.rate_usdc !== "number" ||
-      parsed.rate_usdc <= 0
+      typeof parsed.rate_usdc !== "number"
     ) {
       throw new Error("Invalid registration data");
     }
@@ -104,6 +103,13 @@ export async function POST(req: NextRequest): Promise<Response> {
       { error: "Invalid registration payload. Required: categories, rate_usdc, nonce, timestamp." },
       { status: 400 },
     );
+  }
+
+  // Rate bounds and 2-decimal check — the NUMERIC(10,2) column turns anything
+  // above its ceiling into a 500 and silently rounds extra decimals (CC-022).
+  const rateError = rateUsdcError(parsed.rate_usdc);
+  if (rateError) {
+    return Response.json({ error: rateError }, { status: 400 });
   }
 
   // Trim/lowercase before validating — the signed payload may carry incidental
@@ -128,8 +134,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   const nowS = Math.floor(Date.now() / 1000);
   const age = nowS - parsed.timestamp;
   if (age < 0 || age > MAX_MESSAGE_AGE_S) {
+    // CC-023: the timestamp comes from the client's clock, so a rejection here
+    // almost always means a skewed device clock — name the cause and the remedy
+    // rather than leaving the worker at a dead end.
     return Response.json(
-      { error: `Message expired or clock skew. Must be within ${MAX_MESSAGE_AGE_S}s.` },
+      {
+        error:
+          "Device clock is out of sync with the server. Please check your device date/time settings and enable automatic network time.",
+        detail: `Your message was timestamped ${Math.abs(age)}s ${age < 0 ? "ahead of" : "behind"} the server; the allowed window is ${MAX_MESSAGE_AGE_S}s.`,
+      },
       { status: 400 },
     );
   }
