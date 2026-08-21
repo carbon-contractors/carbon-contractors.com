@@ -119,6 +119,17 @@ const MONITORS = [
     invariant: "peak concurrent USDC per funding agent, against CC-051's exemption limbs",
     requires: ["NEXT_PUBLIC_ESCROW_CONTRACT", "ESCROW_DEPLOY_BLOCK"],
   },
+  {
+    name: "verify-checker",
+    script: "verify-checker.mjs",
+    exec: "tsx",
+    tier: "normal",
+    invariant:
+      "the deterministic evidence checker returns the known-correct verdicts for the canary set (CC-083)",
+    // Nothing required: fully offline by design — the one monitor that cannot fail for
+    // infrastructure reasons, so any red here is the checker itself being wrong.
+    requires: [],
+  },
 ];
 
 /**
@@ -130,10 +141,10 @@ const MONITORS = [
  *                              since the CC-082 redeploy. It is CC-070 acceptance
  *                              evidence, not a live invariant.
  *
- * And the four monitors in CC-085's table that do not exist yet — verify-commitments,
- * verify-checker, verify-retention, verify-verdict-rate — are blocked on CC-084, CC-083
- * and the ADR-0002 retention job respectively. Adding a stub that always passes would be
- * worse than their absence, because it would read as coverage.
+ * And the three monitors in CC-085's table that do not exist yet — verify-commitments,
+ * verify-retention, verify-verdict-rate — are blocked on the CC-081 funding-path fix and
+ * the ADR-0002 retention job. Adding a stub that always passes would be worse than their
+ * absence, because it would read as coverage.
  */
 
 // TRAN is a monitor that could not reach the chain after retries. It counts as a failure —
@@ -143,9 +154,18 @@ const MONITORS = [
 // `misconfig`, which reads as "you set this up wrong".
 const ICON = { PASS: "PASS", FAIL: "FAIL", MISCONFIG: "CONF", TRANSIENT: "TRAN", SKIP: "SKIP" };
 
-function runScript(script, args) {
+/**
+ * `exec: "tsx"` on a registry entry runs the script through the pinned tsx CLI rather
+ * than bare node — for monitors whose subject is TypeScript under src/lib (verify-checker
+ * and the checker it watches). Resolved to the exact file so it never depends on PATH or
+ * npx, in a runner whose whole job is to behave identically everywhere it fires.
+ */
+const TSX_CLI = join(REPO, "node_modules", "tsx", "dist", "cli.mjs");
+
+function runScript(script, args, exec) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [join(HERE, script), ...args], {
+    const argv = exec === "tsx" ? [TSX_CLI, join(HERE, script)] : [join(HERE, script)];
+    const child = spawn(process.execPath, [...argv, ...args], {
       cwd: REPO,
       env: process.env,
     });
@@ -291,7 +311,7 @@ async function main() {
     }
 
     const t0 = Date.now();
-    const { code, out } = await runScript(m.script, [...(m.args ?? []), ...extraArgs]);
+    const { code, out } = await runScript(m.script, [...(m.args ?? []), ...extraArgs], m.exec);
     const status =
       code === 0 ? "PASS" : code === 2 ? "MISCONFIG" : code === 3 ? "TRANSIENT" : "FAIL";
     const verdict = verdictLine(out);
