@@ -59,6 +59,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: invariant-monitors
@@ -92,6 +93,11 @@ jobs:
       MONITOR_TELEGRAM_CHAT_ID: ${{ secrets.MONITOR_TELEGRAM_CHAT_ID }}
       MONITOR_HEARTBEAT_URL: ${{ secrets.MONITOR_HEARTBEAT_URL }}
 
+      # GCP KMS Signer verification via Workload Identity Federation (WIF)
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+      GCP_KMS_KEY_PATH: ${{ secrets.GCP_KMS_KEY_PATH }}
+
     steps:
       - uses: actions/checkout@v5
 
@@ -100,6 +106,14 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
+      # Authenticate to GCP via Workload Identity Federation for verify-signer live KMS round trip
+      - name: Authenticate to GCP
+        if: env.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && env.GCP_SERVICE_ACCOUNT_EMAIL != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       # viem only — the monitors do not need the Next build or the Hardhat toolchain.
       - name: Install dependencies
