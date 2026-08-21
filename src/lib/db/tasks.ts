@@ -152,6 +152,57 @@ export async function getTasksByWallet(
   return (data as TaskRecord[]) ?? [];
 }
 
+/**
+ * Fetch all tasks where the wallet is either the assigned worker (to_human_wallet)
+ * or the hiring agent (from_agent_wallet). Used for authenticated task queries (CC-093).
+ */
+export async function getTasksForParty(
+  wallet: string,
+): Promise<TaskRecord[]> {
+  const supabase = getSupabaseAdmin();
+  const normalized = wallet.toLowerCase();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select()
+    .or(`to_human_wallet.eq.${normalized},from_agent_wallet.eq.${normalized}`)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(`getTasksForParty failed: ${error.message}`);
+  return (data as TaskRecord[]) ?? [];
+}
+
+export interface PublicTaskRecord {
+  id: string;
+  payment_request_id: string;
+  from_agent_wallet: string;
+  to_human_wallet: string;
+  amount_usdc: number;
+  deadline_unix: number;
+  status: TaskStatus;
+  tx_hash: string | null;
+  escrow_contract: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+/**
+ * Fetch public tasks projection (tasks_public view) without sensitive
+ * task_description or acceptance_spec fields (migration 011 / CC-093).
+ */
+export async function getPublicTasks(limit = 50): Promise<PublicTaskRecord[]> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("tasks_public")
+    .select()
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`getPublicTasks failed: ${error.message}`);
+  return (data as PublicTaskRecord[]) ?? [];
+}
+
 export interface ReputationSummary {
   wallet: string;
   total_tasks: number;

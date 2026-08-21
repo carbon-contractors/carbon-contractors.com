@@ -258,11 +258,11 @@
   font-family: var(--cc-font-mono);
   font-size: 1.5rem;
   font-weight: 700;
-  color: var(--cc-green);
+  color: var(--cc-text);
 }
 
 .slashedNote {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--cc-red);
 }
 
@@ -278,39 +278,35 @@
 }
 
 .stakeInput {
-  flex: 1;
   background: var(--cc-bg-elevated);
   border: 1px solid var(--cc-border);
   border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  padding: 0.4rem 0.6rem;
   color: var(--cc-text);
   font-family: var(--cc-font-mono);
   font-size: 0.85rem;
-  outline: none;
+  width: 140px;
 }
 
 .stakeInput:focus {
-  border-color: var(--cc-green);
-}
-
-.stakeInput::placeholder {
-  color: var(--cc-text-faint);
+  outline: none;
+  border-color: var(--cc-blue-bright);
 }
 
 .stakeBtn {
-  background: var(--cc-green);
-  color: #0A0B0D;
+  background: var(--cc-blue);
+  color: #fff;
   border: none;
   border-radius: 6px;
-  padding: 0.5rem 1rem;
+  padding: 0.4rem 0.8rem;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .stakeBtn:hover:not(:disabled) {
-  background: var(--cc-green-hover);
+  background: var(--cc-blue-bright);
 }
 
 .stakeBtn:disabled {
@@ -320,19 +316,18 @@
 
 .unstakeBtn {
   background: transparent;
-  color: var(--cc-text-muted);
+  color: var(--cc-text-secondary);
   border: 1px solid var(--cc-border);
   border-radius: 6px;
-  padding: 0.5rem 1rem;
+  padding: 0.4rem 0.8rem;
   font-size: 0.85rem;
-  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .unstakeBtn:hover:not(:disabled) {
+  border-color: var(--cc-text-secondary);
   color: var(--cc-text);
-  border-color: var(--cc-text-muted);
 }
 
 .unstakeBtn:disabled {
@@ -345,23 +340,143 @@
   color: var(--cc-yellow);
 }
 
-/* ── Dispute ─────────────────────────────────────────────────────────── */
+/* ── Acceptance Spec (CC-084) ─────────────────────────────────────────── */
+
+.specSection {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--cc-bg-elevated);
+  border: 1px solid var(--cc-border-subtle);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.specHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.specTitle {
+  font-family: var(--cc-font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cc-text-muted);
+}
+
+.specBadges {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.specVersionBadge {
+  font-family: var(--cc-font-mono);
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  background: rgba(0, 0, 255, 0.12);
+  color: var(--cc-blue-bright);
+}
+
+.specHashBadge {
+  font-family: var(--cc-font-mono);
+  font-size: 0.65rem;
+  color: var(--cc-text-faint);
+  border: 1px solid var(--cc-border-subtle);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+}
+
+.specCriteriaList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.specCriterion {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--cc-text-secondary);
+  line-height: 1.4;
+}
+
+.specCriterionIcon {
+  color: var(--cc-green);
+  font-weight: bold;
+}
+
+.specUnstructured {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--cc-text-faint);
+}
+
+/* ── Auth Prompt (CC-093) ─────────────────────────────────────────────── */
+
+.authPromptCard {
+  border: 1px dashed var(--cc-border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  background: var(--cc-bg-surface);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.authPromptText {
+  font-size: 0.88rem;
+  color: var(--cc-text-secondary);
+  max-width: 440px;
+  line-height: 1.5;
+}
+
+.authPromptBtn {
+  background: var(--cc-blue);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.authPromptBtn:hover:not(:disabled) {
+  background: var(--cc-blue-bright);
+}
+
+.authPromptBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Disputes ─────────────────────────────────────────────────────────── */
 
 .disputeSection {
   margin-top: 0.75rem;
-  padding-top: 0.75rem;
   border-top: 1px solid var(--cc-border-subtle);
+  padding-top: 0.75rem;
 }
 
 .disputeToggle {
   background: none;
   border: none;
-  color: var(--cc-text-muted);
+  color: var(--cc-text-faint);
   font-size: 0.75rem;
   cursor: pointer;
   padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 .disputeToggle:hover {

@@ -80,6 +80,9 @@ interface Task {
   status: string;
   tx_hash: string | null;
   escrow_contract: string | null;
+  acceptance_spec: string | null;
+  spec_hash: string | null;
+  spec_schema_version: number | null;
   created_at: string;
   on_chain: OnChainState | null;
 }
@@ -109,6 +112,12 @@ interface Reputation {
     slashed_total_usdc: number;
     contract: string | null;
   };
+}
+
+interface AuthHeaders extends Record<string, string> {
+  "x-caller-wallet": string;
+  "x-caller-signature": string;
+  "x-caller-nonce": string;
 }
 
 function truncateAddress(addr: string): string {
@@ -143,12 +152,159 @@ function statusClass(status: string): string {
   }
 }
 
+function AcceptanceSpecDisplay({
+  specJson,
+  specHash,
+  version,
+}: {
+  specJson: string | null;
+  specHash: string | null;
+  version: number | null;
+}) {
+  if (!specJson) {
+    return (
+      <div className={styles.specSection}>
+        <div className={styles.specHeader}>
+          <span className={styles.specTitle}>Acceptance Criteria</span>
+        </div>
+        <p className={styles.specUnstructured}>
+          Unstructured task — qualitative review by hiring agent (no automated checks).
+        </p>
+      </div>
+    );
+  }
+
+  let criteria: {
+    min_artefacts?: number;
+    exif_gps_within_m?: { lat: number; lon: number; radius_m: number };
+    captured_after?: string;
+    provenance?: { require_camera_model?: boolean; reject_c2pa_ai_generated?: boolean };
+    phash_max_similarity_to?: { source: string; threshold: number };
+  } | null = null;
+
+  let bucket: { provider: string; target: string } | null = null;
+
+  try {
+    const parsed = JSON.parse(specJson);
+    criteria = parsed.criteria;
+    bucket = parsed.evidence_bucket;
+  } catch {
+    return null;
+  }
+
+  const items: React.ReactNode[] = [];
+
+  if (criteria?.min_artefacts) {
+    items.push(
+      <div key="artefacts" className={styles.specCriterion}>
+        <span className={styles.specCriterionIcon}>✓</span>
+        <span>
+          <strong>Artifacts:</strong> {criteria.min_artefacts} evidence file(s) required
+        </span>
+      </div>,
+    );
+  }
+
+  if (criteria?.exif_gps_within_m) {
+    const { lat, lon, radius_m } = criteria.exif_gps_within_m;
+    items.push(
+      <div key="gps" className={styles.specCriterion}>
+        <span className={styles.specCriterionIcon}>✓</span>
+        <span>
+          <strong>GPS Radius:</strong> [{lat.toFixed(4)}, {lon.toFixed(4)}] within {radius_m}m
+        </span>
+      </div>,
+    );
+  }
+
+  if (criteria?.captured_after) {
+    const afterText =
+      criteria.captured_after === "task_funding_block_timestamp"
+        ? "Must be captured after task funding block"
+        : `Captured after ${criteria.captured_after}`;
+    items.push(
+      <div key="captured_after" className={styles.specCriterion}>
+        <span className={styles.specCriterionIcon}>✓</span>
+        <span>
+          <strong>Capture Window:</strong> {afterText}
+        </span>
+      </div>,
+    );
+  }
+
+  if (criteria?.provenance) {
+    const prov = criteria.provenance;
+    const provParts: string[] = [];
+    if (prov.require_camera_model) provParts.push("Camera Make/Model metadata required");
+    if (prov.reject_c2pa_ai_generated) provParts.push("AI Generation rejected (C2PA)");
+    if (provParts.length > 0) {
+      items.push(
+        <div key="provenance" className={styles.specCriterion}>
+          <span className={styles.specCriterionIcon}>✓</span>
+          <span>
+            <strong>Provenance:</strong> {provParts.join(" · ")}
+          </span>
+        </div>,
+      );
+    }
+  }
+
+  if (criteria?.phash_max_similarity_to) {
+    const { source, threshold } = criteria.phash_max_similarity_to;
+    items.push(
+      <div key="phash" className={styles.specCriterion}>
+        <span className={styles.specCriterionIcon}>✓</span>
+        <span>
+          <strong>Visual Similarity:</strong> Max {Math.round(threshold * 100)}% similarity to {source}
+        </span>
+      </div>,
+    );
+  }
+
+  if (bucket) {
+    items.push(
+      <div key="bucket" className={styles.specCriterion}>
+        <span className={styles.specCriterionIcon}>✓</span>
+        <span>
+          <strong>Evidence Store:</strong> {bucket.provider.toUpperCase()} ({bucket.target})
+        </span>
+      </div>,
+    );
+  }
+
+  return (
+    <div className={styles.specSection}>
+      <div className={styles.specHeader}>
+        <span className={styles.specTitle}>Machine-Checkable Spec</span>
+        <div className={styles.specBadges}>
+          <span className={styles.specVersionBadge}>v{version ?? 1}</span>
+          {specHash && (
+            <span className={styles.specHashBadge} title={specHash}>
+              {specHash.slice(0, 10)}...{specHash.slice(-6)}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className={styles.specCriteriaList}>
+        {items.length > 0 ? (
+          items
+        ) : (
+          <p className={styles.specUnstructured}>No machine criteria committed</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { address, isConnected } = useAccount();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [reputation, setReputation] = useState<Reputation | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
+  const [authenticating, setAuthenticating] = useState(false);
+  const [authHeaders, setAuthHeaders] = useState<AuthHeaders | null>(null);
+  const [authError, setAuthError] = useState("");
   const [error, setError] = useState("");
   const [stakeInput, setStakeInput] = useState("");
   const [unstakeInput, setUnstakeInput] = useState("");
@@ -162,6 +318,56 @@ export default function DashboardPage() {
 
   const stakeContractAddress = reputation?.stake?.contract as `0x${string}` | undefined;
 
+  // Clear state on disconnect or wallet change
+  useEffect(() => {
+    setAuthHeaders(null);
+    setTasks([]);
+    setReputation(null);
+    setProfile(null);
+    setAuthError("");
+  }, [address, isConnected]);
+
+  const authenticateWallet = useCallback(async () => {
+    if (!address) return;
+    setAuthenticating(true);
+    setAuthError("");
+    try {
+      const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: address }),
+      });
+      const challengeData = await challengeRes.json();
+      if (!challengeRes.ok || !challengeData.nonce) {
+        throw new Error(challengeData.error || "Failed to obtain authentication challenge");
+      }
+
+      const signature = (await signMessageAsync({
+        message: challengeData.message,
+      })) as `0x${string}`;
+
+      const headers: AuthHeaders = {
+        "x-caller-wallet": address,
+        "x-caller-signature": signature,
+        "x-caller-nonce": challengeData.nonce,
+      };
+
+      setAuthHeaders(headers);
+
+      // Fetch private tasks immediately with authenticated headers
+      const tasksRes = await fetch("/api/tasks", { headers }).then((r) => r.json());
+      if (tasksRes.ok) {
+        setTasks(tasksRes.tasks);
+      } else {
+        setAuthError(tasksRes.error || "Failed to fetch private tasks");
+      }
+    } catch (err: unknown) {
+      setAuthError(err instanceof Error ? err.message : "Authentication cancelled or failed");
+    } finally {
+      setAuthenticating(false);
+    }
+  }, [address, signMessageAsync]);
+
   const fetchData = useCallback(() => {
     if (!isConnected || !address) {
       setTasks([]);
@@ -172,22 +378,26 @@ export default function DashboardPage() {
     setLoading(true);
     setError("");
 
+    const fetchTasksPromise = authHeaders
+      ? fetch("/api/tasks", { headers: authHeaders }).then((r) => r.json())
+      : Promise.resolve(null);
+
     Promise.all([
-      fetch(`/api/tasks?wallet=${address}`).then((r) => r.json()),
+      fetchTasksPromise,
       fetch(`/api/reputation?wallet=${address}`).then((r) => r.json()),
       fetch(`/api/profile?wallet=${address}`).then((r) => r.json()),
     ])
       .then(([tasksData, repData, profileData]) => {
-        if (tasksData.ok) setTasks(tasksData.tasks);
-        if (repData.ok) setReputation(repData.reputation);
-        if (profileData.ok) setProfile(profileData.profile);
-        if (!tasksData.ok && !repData.ok) {
-          setError("Failed to fetch data");
+        if (tasksData?.ok) setTasks(tasksData.tasks);
+        if (repData?.ok) setReputation(repData.reputation);
+        if (profileData?.ok) setProfile(profileData.profile);
+        if (!repData?.ok && !profileData?.ok) {
+          setError("Failed to fetch profile/reputation data");
         }
       })
       .catch(() => setError("Network error"))
       .finally(() => setLoading(false));
-  }, [isConnected, address]);
+  }, [isConnected, address, authHeaders]);
 
   useEffect(() => {
     fetchData();
@@ -301,9 +511,7 @@ export default function DashboardPage() {
         {!isConnected ? (
           <div className={styles.hero}>
             <h2>Worker Dashboard</h2>
-            <p>
-              Connect your wallet to view tasks assigned to you by AI agents.
-            </p>
+            <p>Connect your wallet to view tasks assigned to you by AI agents.</p>
           </div>
         ) : (
           <>
@@ -315,34 +523,24 @@ export default function DashboardPage() {
               <div className={styles.reputationRow}>
                 <div className={styles.reputationCard}>
                   <div className={styles.scoreDisplay}>
-                    <span className={styles.scoreNumber}>
-                      {reputation.score}
-                    </span>
+                    <span className={styles.scoreNumber}>{reputation.score}</span>
                     <span className={styles.scoreLabel}>Reputation</span>
                   </div>
                   <div className={styles.breakdownGrid}>
                     <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.completion}
-                      </span>
+                      <span className={styles.breakdownValue}>{reputation.breakdown.completion}</span>
                       <span className={styles.breakdownLabel}>Completion</span>
                     </div>
                     <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.volume}
-                      </span>
+                      <span className={styles.breakdownValue}>{reputation.breakdown.volume}</span>
                       <span className={styles.breakdownLabel}>Volume</span>
                     </div>
                     <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.recency}
-                      </span>
+                      <span className={styles.breakdownValue}>{reputation.breakdown.recency}</span>
                       <span className={styles.breakdownLabel}>Recency</span>
                     </div>
                     <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.stake}
-                      </span>
+                      <span className={styles.breakdownValue}>{reputation.breakdown.stake}</span>
                       <span className={styles.breakdownLabel}>Stake</span>
                     </div>
                   </div>
@@ -358,9 +556,7 @@ export default function DashboardPage() {
                 {stakeContractAddress && (
                   <div className={styles.stakePanel}>
                     <h3 className={styles.stakePanelTitle}>USDC Stake</h3>
-                    <div className={styles.stakeAmount}>
-                      {reputation.stake.amount_usdc} USDC
-                    </div>
+                    <div className={styles.stakeAmount}>{reputation.stake.amount_usdc} USDC</div>
                     {reputation.stake.slashed_total_usdc > 0 && (
                       <div className={styles.slashedNote}>
                         {reputation.stake.slashed_total_usdc} USDC slashed
@@ -380,9 +576,7 @@ export default function DashboardPage() {
                         />
                         <button
                           onClick={handleStake}
-                          disabled={
-                            stakeStep !== "idle" || !stakeInput || parseFloat(stakeInput) < 20
-                          }
+                          disabled={stakeStep !== "idle" || !stakeInput || parseFloat(stakeInput) < 20}
                           className={styles.stakeBtn}
                         >
                           {stakeStep === "approving"
@@ -406,16 +600,10 @@ export default function DashboardPage() {
                           />
                           <button
                             onClick={handleUnstake}
-                            disabled={
-                              stakeStep !== "idle" ||
-                              !unstakeInput ||
-                              !cooldownReady
-                            }
+                            disabled={stakeStep !== "idle" || !unstakeInput || !cooldownReady}
                             className={styles.unstakeBtn}
                           >
-                            {stakeStep === "unstaking"
-                              ? "Unstaking..."
-                              : "Unstake"}
+                            {stakeStep === "unstaking" ? "Unstaking..." : "Unstake"}
                           </button>
                         </div>
                       )}
@@ -448,105 +636,123 @@ export default function DashboardPage() {
                     </span>
                   ))}
                 </div>
-                <div className={styles.profileRate}>
-                  {profile.rate_usdc} USDC/hr
-                </div>
+                <div className={styles.profileRate}>{profile.rate_usdc} USDC/hr</div>
               </div>
             )}
 
             {/* ── Tasks ──────────────────────────────────────────────── */}
             <h2 className={styles.pageTitle}>Your Tasks</h2>
 
-            {!loading && !error && tasks.length === 0 && (
-              <div className={styles.emptyState}>
-                <p>No tasks assigned yet.</p>
-                <p>
-                  Make sure you&apos;ve{" "}
-                  <Link href="/connect">registered your services</Link> so agents
-                  can find you.
+            {!authHeaders ? (
+              <div className={styles.authPromptCard}>
+                <p className={styles.authPromptText}>
+                  Task descriptions and acceptance criteria are private. Sign a challenge with your
+                  connected wallet to securely access your task list.
                 </p>
+                {authError && <p style={{ color: "#ff4444", fontSize: "0.8rem" }}>{authError}</p>}
+                <button
+                  onClick={authenticateWallet}
+                  disabled={authenticating}
+                  className={styles.authPromptBtn}
+                >
+                  {authenticating ? "Verifying Signature..." : "Sign to View Tasks"}
+                </button>
               </div>
-            )}
-
-            {tasks.length > 0 && (
-              <div className={styles.taskList}>
-                {tasks.map((task) => (
-                  <div key={task.id} className={styles.taskCard}>
-                    <div className={styles.taskHeader}>
-                      <span
-                        className={`${styles.statusBadge} ${statusClass(task.status)}`}
-                      >
-                        {task.status}
-                      </span>
-                      <span className={styles.amount}>
-                        {task.amount_usdc} USDC
-                      </span>
-                    </div>
-                    <p className={styles.description}>
-                      {task.task_description}
+            ) : (
+              <>
+                {!loading && tasks.length === 0 && (
+                  <div className={styles.emptyState}>
+                    <p>No tasks assigned yet.</p>
+                    <p>
+                      Make sure you&apos;ve <Link href="/connect">registered your services</Link> so
+                      agents can find you.
                     </p>
-                    <div className={styles.meta}>
-                      <span>
-                        <span className={styles.metaLabel}>Agent: </span>
-                        <span className={styles.metaValue}>
-                          {truncateAddress(task.from_agent_wallet)}
-                        </span>
-                      </span>
-                      <span>
-                        <span className={styles.metaLabel}>Deadline: </span>
-                        <span className={styles.metaValue}>
-                          {formatDeadline(task.deadline_unix)}
-                        </span>
-                      </span>
-                      <span>
-                        <span className={styles.metaLabel}>ID: </span>
-                        <span className={styles.metaValue}>
-                          {task.payment_request_id.slice(0, 12)}...
-                        </span>
-                      </span>
-                      {task.on_chain && (
-                        <span className={styles.onChainBadge}>
-                          on-chain: {task.on_chain.state}
-                        </span>
-                      )}
-                    </div>
+                  </div>
+                )}
 
-                    {/* Dispute section for active tasks */}
-                    {task.status === "active" && escrowContract && (
-                      <div className={styles.disputeSection}>
-                        <button
-                          className={styles.disputeToggle}
-                          onClick={() =>
-                            setDisputeOpen((prev) => ({
-                              ...prev,
-                              [task.id]: !prev[task.id],
-                            }))
-                          }
-                        >
-                          {disputeOpen[task.id] ? "Cancel" : "Dispute this task"}
-                        </button>
-                        {disputeOpen[task.id] && (
-                          <div className={styles.disputeForm}>
-                            <p className={styles.disputeWarning}>
-                              Disputing will freeze escrowed funds until the
-                              platform owner resolves the dispute.
-                            </p>
+                {tasks.length > 0 && (
+                  <div className={styles.taskList}>
+                    {tasks.map((task) => (
+                      <div key={task.id} className={styles.taskCard}>
+                        <div className={styles.taskHeader}>
+                          <span className={`${styles.statusBadge} ${statusClass(task.status)}`}>
+                            {task.status}
+                          </span>
+                          <span className={styles.amount}>{task.amount_usdc} USDC</span>
+                        </div>
+                        <p className={styles.description}>{task.task_description}</p>
+
+                        {/* Machine-checkable Acceptance Spec display (CC-084) */}
+                        <AcceptanceSpecDisplay
+                          specJson={task.acceptance_spec}
+                          specHash={task.spec_hash}
+                          version={task.spec_schema_version}
+                        />
+
+                        <div className={styles.meta} style={{ marginTop: "0.75rem" }}>
+                          <span>
+                            <span className={styles.metaLabel}>Agent: </span>
+                            <span className={styles.metaValue}>
+                              {truncateAddress(task.from_agent_wallet)}
+                            </span>
+                          </span>
+                          <span>
+                            <span className={styles.metaLabel}>Deadline: </span>
+                            <span className={styles.metaValue}>
+                              {formatDeadline(task.deadline_unix)}
+                            </span>
+                          </span>
+                          <span>
+                            <span className={styles.metaLabel}>ID: </span>
+                            <span className={styles.metaValue}>
+                              {task.payment_request_id.slice(0, 12)}...
+                            </span>
+                          </span>
+                          {task.on_chain && (
+                            <span className={styles.onChainBadge}>
+                              on-chain: {task.on_chain.state}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Dispute section for active tasks */}
+                        {task.status === "active" && escrowContract && (
+                          <div className={styles.disputeSection}>
                             <button
-                              className={styles.disputeBtn}
-                              onClick={() => handleDispute(task)}
-                              disabled={disputeLoading === task.payment_request_id}
+                              className={styles.disputeToggle}
+                              onClick={() =>
+                                setDisputeOpen((prev) => ({
+                                  ...prev,
+                                  [task.id]: !prev[task.id],
+                                }))
+                              }
                             >
-                              {disputeLoading === task.payment_request_id
-                                ? "Submitting..."
-                                : "Confirm Dispute"}
+                              {disputeOpen[task.id] ? "Cancel" : "Dispute this task"}
                             </button>
+                            {disputeOpen[task.id] && (
+                              <div className={styles.disputeForm}>
+                                <p className={styles.disputeWarning}>
+                                  Disputing will freeze escrowed funds until the platform owner
+                                  resolves the dispute.
+                                </p>
+                                <button
+                                  className={styles.disputeBtn}
+                                  onClick={() => handleDispute(task)}
+                                  disabled={disputeLoading === task.payment_request_id}
+                                >
+                                  {disputeLoading === task.payment_request_id
+                                    ? "Submitting..."
+                                    : "Confirm Dispute"}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
-                    )}
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </>
         )}
