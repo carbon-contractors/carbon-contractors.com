@@ -3,7 +3,7 @@
  * CRUD operations for the tasks table.
  */
 
-import { getSupabaseAdmin } from "./client";
+import { getSupabaseAdmin, getSupabase } from "./client";
 import type { TaskStatus } from "./types";
 
 export interface TaskRecord {
@@ -150,6 +150,91 @@ export async function getTasksByWallet(
 
   if (error) throw new Error(`getTasksByWallet failed: ${error.message}`);
   return (data as TaskRecord[]) ?? [];
+}
+
+/**
+ * The tasks_public projection (migration 011) — every column except
+ * task_description. The view's explicit column list IS the access control;
+ * never SELECT * from the underlying table into this shape (CC-093).
+ */
+export interface PublicTaskRecord {
+  id: string;
+  payment_request_id: string;
+  from_agent_wallet: string;
+  to_human_wallet: string;
+  amount_usdc: number;
+  deadline_unix: number;
+  status: TaskStatus;
+  tx_hash: string | null;
+  escrow_contract: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Full task records for a caller who has proven ownership of `wallet`, where
+ * they are either party — the worker (to_human_wallet) or the hiring agent
+ * (from_agent_wallet), matching the on-chain NotParty posture of
+ * CarbonEscrow.disputeTask. Callers must be authenticated by the route first;
+ * this bypasses RLS via the service role (CC-093).
+ */
+export async function getTasksForParties(wallet: string): Promise<TaskRecord[]> {
+  const w = wallet.toLowerCase();
+  const supabase = getSupabaseAdmin();
+
+  // Two explicit queries rather than a single .or() string filter, so the
+  // wallet stays a bound parameter. A self-hired task would match both, so
+  // dedupe by id before returning.
+  const [workerRes, agentRes] = await Promise.all([
+    supabase
+      .from("tasks")
+      .select()
+      .eq("to_human_wallet", w)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("tasks")
+      .select()
+      .eq("from_agent_wallet", w)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (workerRes.error) {
+    throw new Error(`getTasksForParties failed: ${workerRes.error.message}`);
+  }
+  if (agentRes.error) {
+    throw new Error(`getTasksForParties failed: ${agentRes.error.message}`);
+  }
+
+  const seen = new Set<string>();
+  const merged: TaskRecord[] = [];
+  for (const t of [
+    ...((workerRes.data as TaskRecord[]) ?? []),
+    ...((agentRes.data as TaskRecord[]) ?? []),
+  ]) {
+    if (seen.has(t.id)) continue;
+    seen.add(t.id);
+    merged.push(t);
+  }
+  merged.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return merged;
+}
+
+/**
+ * The public task feed, via the anon client and the tasks_public view.
+ * RLS/grants do the enforcing here: the view excludes task_description and
+ * anon holds SELECT on it only (migrations 011 and 015) (CC-093).
+ */
+export async function getPublicTasks(): Promise<PublicTaskRecord[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from("tasks_public")
+    .select()
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (error) throw new Error(`getPublicTasks failed: ${error.message}`);
+  return (data ?? []) as PublicTaskRecord[];
 }
 
 export interface ReputationSummary {

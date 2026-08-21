@@ -162,32 +162,71 @@ export default function DashboardPage() {
 
   const stakeContractAddress = reputation?.stake?.contract as `0x${string}` | undefined;
 
+  // Tasks require proof of wallet ownership (CC-093): an unsigned fetch only
+  // returns the public projection, which has no task_description. Same
+  // challenge round trip the dispute flow uses.
+  const fetchTasks = useCallback(async () => {
+    if (!isConnected || !address) {
+      setTasks([]);
+      return;
+    }
+    try {
+      const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: address }),
+      });
+      const { nonce, message } = await challengeRes.json();
+      const signature = await signMessageAsync({ message });
+
+      const res = await fetch("/api/tasks", {
+        headers: {
+          "x-caller-wallet": address,
+          "x-caller-signature": signature,
+          "x-caller-nonce": nonce,
+        },
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setTasks(data.tasks);
+      } else {
+        setTasks([]);
+        setError("Failed to fetch tasks");
+      }
+    } catch {
+      // Signature declined or the round trip failed — without it the server
+      // will not release task content, by design.
+      setTasks([]);
+      setError("Sign the verification message to view your tasks");
+    }
+  }, [isConnected, address, signMessageAsync]);
+
   const fetchData = useCallback(() => {
     if (!isConnected || !address) {
       setTasks([]);
       setReputation(null);
+      setProfile(null);
       return;
     }
 
     setLoading(true);
     setError("");
 
+    fetchTasks();
     Promise.all([
-      fetch(`/api/tasks?wallet=${address}`).then((r) => r.json()),
       fetch(`/api/reputation?wallet=${address}`).then((r) => r.json()),
       fetch(`/api/profile?wallet=${address}`).then((r) => r.json()),
     ])
-      .then(([tasksData, repData, profileData]) => {
-        if (tasksData.ok) setTasks(tasksData.tasks);
+      .then(([repData, profileData]) => {
         if (repData.ok) setReputation(repData.reputation);
         if (profileData.ok) setProfile(profileData.profile);
-        if (!tasksData.ok && !repData.ok) {
+        if (!repData.ok) {
           setError("Failed to fetch data");
         }
       })
       .catch(() => setError("Network error"))
       .finally(() => setLoading(false));
-  }, [isConnected, address]);
+  }, [isConnected, address, fetchTasks]);
 
   useEffect(() => {
     fetchData();

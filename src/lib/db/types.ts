@@ -199,7 +199,24 @@ export interface Database {
         Relationships: [];
       };
     };
-    Views: Record<string, never>;
+    Views: {
+      tasks_public: {
+        Row: {
+          id: string;
+          payment_request_id: string;
+          from_agent_wallet: string;
+          to_human_wallet: string;
+          amount_usdc: number;
+          deadline_unix: number;
+          status: TaskStatus;
+          tx_hash: string | null;
+          escrow_contract: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [];
+      };
+    };
     Functions: Record<string, never>;
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
