@@ -149,7 +149,12 @@ export default function DashboardPage() {
   const [reputation, setReputation] = useState<Reputation | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  // CC-026: each endpoint reports its own failure, so a single broken one is
+  // visible instead of presenting as "no work available".
+  const [errors, setErrors] = useState<{ tasks: string | null; reputation: string | null }>({
+    tasks: null,
+    reputation: null,
+  });
   const [stakeInput, setStakeInput] = useState("");
   const [unstakeInput, setUnstakeInput] = useState("");
   const [disputeOpen, setDisputeOpen] = useState<Record<string, boolean>>({});
@@ -170,7 +175,7 @@ export default function DashboardPage() {
     }
 
     setLoading(true);
-    setError("");
+    setErrors({ tasks: null, reputation: null });
 
     Promise.all([
       fetch(`/api/tasks?wallet=${address}`).then((r) => r.json()),
@@ -178,14 +183,18 @@ export default function DashboardPage() {
       fetch(`/api/profile?wallet=${address}`).then((r) => r.json()),
     ])
       .then(([tasksData, repData, profileData]) => {
+        const next: { tasks: string | null; reputation: string | null } = {
+          tasks: null,
+          reputation: null,
+        };
         if (tasksData.ok) setTasks(tasksData.tasks);
+        else next.tasks = tasksData.error ?? "Failed to fetch tasks";
         if (repData.ok) setReputation(repData.reputation);
+        else next.reputation = repData.error ?? "Failed to fetch reputation";
         if (profileData.ok) setProfile(profileData.profile);
-        if (!tasksData.ok && !repData.ok) {
-          setError("Failed to fetch data");
-        }
+        setErrors(next);
       })
-      .catch(() => setError("Network error"))
+      .catch(() => setErrors({ tasks: "Network error", reputation: "Network error" }))
       .finally(() => setLoading(false));
   }, [isConnected, address]);
 
@@ -308,7 +317,23 @@ export default function DashboardPage() {
         ) : (
           <>
             {loading && <p className={styles.loading}>Loading...</p>}
-            {error && <p style={{ color: "#ff4444" }}>{error}</p>}
+            {(errors.tasks || errors.reputation) && (
+              <div className={styles.fetchErrorBanner}>
+                {errors.tasks && (
+                  <p className={styles.fetchError}>Tasks: {errors.tasks}</p>
+                )}
+                {errors.reputation && (
+                  <p className={styles.fetchError}>Reputation: {errors.reputation}</p>
+                )}
+                <button
+                  className={styles.retryButton}
+                  onClick={fetchData}
+                  disabled={loading}
+                >
+                  {loading ? "Retrying..." : "Retry"}
+                </button>
+              </div>
+            )}
 
             {/* ── Reputation + Staking ────────────────────────────────── */}
             {reputation && (
@@ -457,7 +482,7 @@ export default function DashboardPage() {
             {/* ── Tasks ──────────────────────────────────────────────── */}
             <h2 className={styles.pageTitle}>Your Tasks</h2>
 
-            {!loading && !error && tasks.length === 0 && (
+            {!loading && !errors.tasks && tasks.length === 0 && (
               <div className={styles.emptyState}>
                 <p>No tasks assigned yet.</p>
                 <p>

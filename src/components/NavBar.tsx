@@ -28,9 +28,9 @@ export default function NavBar() {
           onClick={() => setMenuOpen(!menuOpen)}
           aria-label="Toggle navigation"
         >
-          <span className={menuOpen ? styles.barOpen : styles.bar} />
-          <span className={menuOpen ? styles.barOpen : styles.bar} />
-          <span className={menuOpen ? styles.barOpen : styles.bar} />
+          <span className={`${styles.bar} ${menuOpen ? styles.barOpen : ""}`} />
+          <span className={`${styles.bar} ${menuOpen ? styles.barOpen : ""}`} />
+          <span className={`${styles.bar} ${menuOpen ? styles.barOpen : ""}`} />
         </button>
 
         <div className={`${styles.links} ${menuOpen ? styles.linksOpen : ""}`}>
