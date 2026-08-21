@@ -4,7 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from "wagmi";
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
+import { CATEGORIES, validateCategorySelection } from "@/lib/categories";
 import PageShell from "@/components/PageShell";
+import { isNewWorker } from "@/lib/reputation/compute";
 import styles from "./dashboard.module.css";
 
 // ── ABIs for write operations ───────────────────────────────────────────────
@@ -53,6 +55,11 @@ const DISPUTE_ABI = [
 
 const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
 const USDC_DECIMALS = 6;
+
+// ── Profile editing (CC-021) — mirrors the PATCH /api/profile validation ─────
+
+const AVAILABILITY_OPTIONS = ["available", "busy", "offline"] as const;
+const MAX_RATE_USDC = 10_000;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -182,6 +189,15 @@ export default function DashboardPage() {
   const [disputeOpen, setDisputeOpen] = useState<Record<string, boolean>>({});
   const [disputeLoading, setDisputeLoading] = useState<string | null>(null);
   const [stakeStep, setStakeStep] = useState<"idle" | "approving" | "staking" | "unstaking">("idle");
+  const [editOpen, setEditOpen] = useState(false);
+  const [rateInput, setRateInput] = useState("");
+  const [editCategories, setEditCategories] = useState<string[]>([]);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // CC-011: the staking panel starts collapsed for workers with no stake. The override
+  // is null until the user toggles, so the default tracks `hasStake` as it loads.
+  const [stakeOpenOverride, setStakeOpenOverride] = useState<boolean | null>(null);
 
   // ── Notification channels (CC-073) ────────────────────────────────────────
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -198,6 +214,17 @@ export default function DashboardPage() {
   const { isSuccess: txConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
   const stakeContractAddress = reputation?.stake?.contract as `0x${string}` | undefined;
+
+  // CC-010: 0 tasks + 0 stake means "new", not "score of zero".
+  const newWorker = reputation
+    ? isNewWorker({
+        totalTasks: reputation.tasks.total,
+        stakeAmountUsdc: reputation.stake.amount_usdc,
+      })
+    : false;
+
+  const hasStake = (reputation?.stake?.amount_usdc ?? 0) > 0;
+  const stakeOpen = stakeOpenOverride ?? hasStake;
 
   const fetchData = useCallback(() => {
     if (!isConnected || !address) {
@@ -217,7 +244,13 @@ export default function DashboardPage() {
       .then(([tasksData, repData, profileData]) => {
         if (tasksData.ok) setTasks(tasksData.tasks);
         if (repData.ok) setReputation(repData.reputation);
-        if (profileData.ok) setProfile(profileData.profile);
+        if (profileData.ok) {
+          setProfile(profileData.profile);
+          // Seed the edit form with the current values so saving an untouched
+          // form is a no-op update rather than a surprise rewrite.
+          setRateInput(String(profileData.profile.rate_usdc));
+          setEditCategories(profileData.profile.categories);
+        }
         if (!tasksData.ok && !repData.ok) {
           setError("Failed to fetch data");
         }
@@ -444,6 +477,76 @@ export default function DashboardPage() {
     setChannelsError("");
   }, [address]);
 
+  // ── Profile editing (CC-021) ───────────────────────────────────────────────
+  // Every change is wallet-signed and sent to PATCH /api/profile, which verifies
+  // the signature server-side before writing with the service role.
+
+  async function submitProfileUpdate(updates: {
+    availability?: string;
+    rate_usdc?: number;
+    categories?: string[];
+  }) {
+    if (!address) return;
+    setProfileSaving(true);
+    setProfileMsg(null);
+    try {
+      // The server rejects messages older than 5 minutes and requires the
+      // payload wallet to match the signer.
+      const message = JSON.stringify({
+        action: "profile-update",
+        wallet: address,
+        timestamp: Math.floor(Date.now() / 1000),
+        ...updates,
+      });
+      const signature = await signMessageAsync({ message });
+
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: address, message, signature }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setProfile(data.profile);
+        setProfileMsg({ ok: true, text: "Profile updated" });
+      } else {
+        setProfileMsg({ ok: false, text: data.error ?? "Update failed" });
+      }
+    } catch {
+      setProfileMsg({ ok: false, text: "Signing cancelled or request failed" });
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  function handleAvailabilityChange(next: string) {
+    if (profileSaving || next === profile?.availability) return;
+    void submitProfileUpdate({ availability: next });
+  }
+
+  function handleSaveProfile() {
+    const rate = parseFloat(rateInput);
+    if (!Number.isFinite(rate) || rate <= 0 || rate > MAX_RATE_USDC || Math.round(rate * 100) / 100 !== rate) {
+      setProfileMsg({
+        ok: false,
+        text: `Rate must be a positive number up to ${MAX_RATE_USDC} USDC with at most 2 decimal places`,
+      });
+      return;
+    }
+    const catResult = validateCategorySelection(editCategories);
+    if (!catResult.valid) {
+      setProfileMsg({ ok: false, text: catResult.error });
+      return;
+    }
+    void submitProfileUpdate({ rate_usdc: rate, categories: editCategories });
+  }
+
+  function toggleEditCategory(slug: string) {
+    setEditCategories((prev) =>
+      prev.includes(slug) ? prev.filter((c) => c !== slug) : [...prev, slug],
+    );
+  }
+
   return (
     <PageShell>
       <div className={styles.content}>
@@ -463,124 +566,167 @@ export default function DashboardPage() {
             {reputation && (
               <div className={styles.reputationRow}>
                 <div className={styles.reputationCard}>
-                  <div className={styles.scoreDisplay}>
-                    <span className={styles.scoreNumber}>
-                      {reputation.score}
-                    </span>
-                    <span className={styles.scoreLabel}>Reputation</span>
-                  </div>
-                  <div className={styles.breakdownGrid}>
-                    <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.completion}
-                      </span>
-                      <span className={styles.breakdownLabel}>Completion</span>
-                    </div>
-                    <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.volume}
-                      </span>
-                      <span className={styles.breakdownLabel}>Volume</span>
-                    </div>
-                    <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.recency}
-                      </span>
-                      <span className={styles.breakdownLabel}>Recency</span>
-                    </div>
-                    <div className={styles.breakdownItem}>
-                      <span className={styles.breakdownValue}>
-                        {reputation.breakdown.stake}
-                      </span>
-                      <span className={styles.breakdownLabel}>Stake</span>
-                    </div>
-                  </div>
-                  <div className={styles.reputationStats}>
-                    <span>{reputation.tasks.completed} completed</span>
-                    <span>{reputation.tasks.total_earned_usdc} USDC earned</span>
-                    {reputation.tasks.completion_rate !== null && (
-                      <span>{reputation.tasks.completion_rate}% rate</span>
-                    )}
-                  </div>
+                  {newWorker ? (
+                    // CC-010: a freshly registered worker has no history to score —
+                    // show that as a state, not as a big red zero.
+                    <>
+                      <div className={styles.scoreDisplay}>
+                        <span className={styles.scoreNew}>New</span>
+                        <span className={styles.scoreLabel}>Reputation</span>
+                      </div>
+                      <p className={styles.newWorkerNote}>
+                        No history yet — your score builds as you complete tasks.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className={styles.scoreDisplay}>
+                        <span className={styles.scoreNumber}>
+                          {reputation.score}
+                        </span>
+                        <span className={styles.scoreLabel}>Reputation</span>
+                      </div>
+                      <div className={styles.breakdownGrid}>
+                        <div className={styles.breakdownItem}>
+                          <span className={styles.breakdownValue}>
+                            {reputation.breakdown.completion}
+                          </span>
+                          <span className={styles.breakdownLabel}>Completion</span>
+                        </div>
+                        <div className={styles.breakdownItem}>
+                          <span className={styles.breakdownValue}>
+                            {reputation.breakdown.volume}
+                          </span>
+                          <span className={styles.breakdownLabel}>Volume</span>
+                        </div>
+                        <div className={styles.breakdownItem}>
+                          <span className={styles.breakdownValue}>
+                            {reputation.breakdown.recency}
+                          </span>
+                          <span className={styles.breakdownLabel}>Recency</span>
+                        </div>
+                        <div className={styles.breakdownItem}>
+                          <span className={styles.breakdownValue}>
+                            {reputation.breakdown.stake}
+                          </span>
+                          <span className={styles.breakdownLabel}>Stake</span>
+                        </div>
+                      </div>
+                      <div className={styles.reputationStats}>
+                        <span>{reputation.tasks.completed} completed</span>
+                        <span>{reputation.tasks.total_earned_usdc} USDC earned</span>
+                        {reputation.tasks.completion_rate !== null && (
+                          <span>{reputation.tasks.completion_rate}% rate</span>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {stakeContractAddress && (
                   <div className={styles.stakePanel}>
-                    <h3 className={styles.stakePanelTitle}>USDC Stake</h3>
-                    <div className={styles.stakeAmount}>
-                      {reputation.stake.amount_usdc} USDC
+                    <div className={styles.stakePanelHeader}>
+                      <h3 className={styles.stakePanelTitle}>
+                        USDC Stake
+                        {!hasStake && (
+                          <span className={styles.optionalTag}>optional</span>
+                        )}
+                      </h3>
+                      <button
+                        className={styles.stakeToggle}
+                        onClick={() => setStakeOpenOverride(!stakeOpen)}
+                      >
+                        {stakeOpen
+                          ? "Hide"
+                          : hasStake
+                            ? "Manage stake"
+                            : "Add a stake"}
+                      </button>
                     </div>
-                    {reputation.stake.slashed_total_usdc > 0 && (
-                      <div className={styles.slashedNote}>
-                        {reputation.stake.slashed_total_usdc} USDC slashed
-                      </div>
-                    )}
 
-                    <div className={styles.stakeActions}>
-                      <div className={styles.stakeInputGroup}>
-                        <input
-                          type="number"
-                          placeholder="Amount (min 20)"
-                          value={stakeInput}
-                          onChange={(e) => setStakeInput(e.target.value)}
-                          className={styles.stakeInput}
-                          min="20"
-                          step="1"
-                        />
-                        <button
-                          onClick={handleStake}
-                          disabled={
-                            stakeStep !== "idle" || !stakeInput || parseFloat(stakeInput) < 20
-                          }
-                          className={styles.stakeBtn}
-                        >
-                          {stakeStep === "approving"
-                            ? "Approving..."
-                            : stakeStep === "staking"
-                              ? "Staking..."
-                              : "Stake"}
-                        </button>
-                      </div>
+                    <p className={styles.stakeExplainer}>
+                      Optional: Boost search rank and credibility with a stake
+                      deposit. Staking is not required to receive jobs.
+                    </p>
 
-                      {reputation.stake.amount_usdc > 0 && (
-                        <div className={styles.stakeInputGroup}>
-                          <input
-                            type="number"
-                            placeholder="Amount to unstake"
-                            value={unstakeInput}
-                            onChange={(e) => setUnstakeInput(e.target.value)}
-                            className={styles.stakeInput}
-                            max={reputation.stake.amount_usdc}
-                            step="1"
-                          />
-                          <button
-                            onClick={handleUnstake}
-                            disabled={
-                              stakeStep !== "idle" ||
-                              !unstakeInput ||
-                              !cooldownReady
-                            }
-                            className={styles.unstakeBtn}
-                          >
-                            {stakeStep === "unstaking"
-                              ? "Unstaking..."
-                              : "Unstake"}
-                          </button>
+                    {stakeOpen && (
+                      <>
+                        <div className={styles.stakeAmount}>
+                          {reputation.stake.amount_usdc} USDC
                         </div>
-                      )}
+                        {reputation.stake.slashed_total_usdc > 0 && (
+                          <div className={styles.slashedNote}>
+                            {reputation.stake.slashed_total_usdc} USDC slashed
+                          </div>
+                        )}
 
-                      {!cooldownReady && cooldownDate && (
-                        <p className={styles.cooldownNote}>
-                          Cooldown until{" "}
-                          {cooldownDate.toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
-                      )}
-                    </div>
+                        <div className={styles.stakeActions}>
+                          <div className={styles.stakeInputGroup}>
+                            <input
+                              type="number"
+                              placeholder="Amount (min 20)"
+                              value={stakeInput}
+                              onChange={(e) => setStakeInput(e.target.value)}
+                              className={styles.stakeInput}
+                              min="20"
+                              step="1"
+                            />
+                            <button
+                              onClick={handleStake}
+                              disabled={
+                                stakeStep !== "idle" || !stakeInput || parseFloat(stakeInput) < 20
+                              }
+                              className={styles.stakeBtn}
+                            >
+                              {stakeStep === "approving"
+                                ? "Approving..."
+                                : stakeStep === "staking"
+                                  ? "Staking..."
+                                  : "Stake"}
+                            </button>
+                          </div>
+
+                          {reputation.stake.amount_usdc > 0 && (
+                            <div className={styles.stakeInputGroup}>
+                              <input
+                                type="number"
+                                placeholder="Amount to unstake"
+                                value={unstakeInput}
+                                onChange={(e) => setUnstakeInput(e.target.value)}
+                                className={styles.stakeInput}
+                                max={reputation.stake.amount_usdc}
+                                step="1"
+                              />
+                              <button
+                                onClick={handleUnstake}
+                                disabled={
+                                  stakeStep !== "idle" ||
+                                  !unstakeInput ||
+                                  !cooldownReady
+                                }
+                                className={styles.unstakeBtn}
+                              >
+                                {stakeStep === "unstaking"
+                                  ? "Unstaking..."
+                                  : "Unstake"}
+                              </button>
+                            </div>
+                          )}
+
+                          {!cooldownReady && cooldownDate && (
+                            <p className={styles.cooldownNote}>
+                              Cooldown until{" "}
+                              {cooldownDate.toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -600,6 +746,97 @@ export default function DashboardPage() {
                 <div className={styles.profileRate}>
                   {profile.rate_usdc} USDC/hr
                 </div>
+
+                {/* Availability — one click signs and PATCHes immediately (CC-021) */}
+                <div className={styles.availabilityRow}>
+                  <span className={styles.availabilityLabel}>Availability</span>
+                  <div className={styles.availabilityToggle}>
+                    {AVAILABILITY_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => handleAvailabilityChange(option)}
+                        disabled={profileSaving}
+                        className={`${styles.availabilityOption} ${
+                          profile.availability === option ? styles.availabilityActive : ""
+                        } ${option === "available" ? styles.availabilityAvailable : ""} ${
+                          option === "busy" ? styles.availabilityBusy : ""
+                        } ${option === "offline" ? styles.availabilityOffline : ""
+                        }`}
+                      >
+                        {option === "available"
+                          ? "Available"
+                          : option === "busy"
+                            ? "Busy"
+                            : "Offline"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className={styles.profileEditToggle}
+                  onClick={() => {
+                    setEditOpen((prev) => !prev);
+                    setProfileMsg(null);
+                  }}
+                >
+                  {editOpen ? "Cancel" : "Edit profile"}
+                </button>
+
+                {editOpen && (
+                  <div className={styles.profileEditForm}>
+                    <label className={styles.profileFieldLabel}>
+                      Rate (USDC/hr)
+                      <input
+                        type="number"
+                        min="0.01"
+                        max={MAX_RATE_USDC}
+                        step="0.01"
+                        value={rateInput}
+                        onChange={(e) => setRateInput(e.target.value)}
+                        className={styles.profileInput}
+                      />
+                    </label>
+                    <div className={styles.profileFieldLabel}>
+                      Categories (max 2)
+                      <div className={styles.categoryPicker}>
+                        {CATEGORIES.map((cat) => (
+                          <label key={cat.slug} className={styles.categoryOption}>
+                            <input
+                              type="checkbox"
+                              checked={editCategories.includes(cat.slug)}
+                              onChange={() => toggleEditCategory(cat.slug)}
+                              disabled={
+                                !editCategories.includes(cat.slug) && editCategories.length >= 2
+                              }
+                            />
+                            {cat.label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSaveProfile}
+                      disabled={profileSaving}
+                      className={styles.profileSaveBtn}
+                    >
+                      {profileSaving ? "Confirm in wallet..." : "Save changes"}
+                    </button>
+                    <p className={styles.profileEditNote}>
+                      Saving asks your wallet to sign the update — the server
+                      verifies the signature before applying it.
+                    </p>
+                  </div>
+                )}
+
+                {profileMsg && (
+                  <p className={profileMsg.ok ? styles.profileMsgOk : styles.profileMsgErr}>
+                    {profileMsg.text}
+                  </p>
+                )}
               </div>
             )}
 
@@ -741,12 +978,23 @@ export default function DashboardPage() {
 
             {!loading && !error && tasks.length === 0 && (
               <div className={styles.emptyState}>
-                <p>No tasks assigned yet.</p>
-                <p>
-                  Make sure you&apos;ve{" "}
-                  <Link href="/connect">registered your services</Link> so agents
-                  can find you.
-                </p>
+                {profile ? (
+                  // CC-010: this worker is already listed in the whitepages — never
+                  // send them back to /connect.
+                  <>
+                    <p>You&apos;re listed — agents can now find and hire you.</p>
+                    <p>No tasks yet.</p>
+                  </>
+                ) : (
+                  <>
+                    <p>No tasks assigned yet.</p>
+                    <p>
+                      Make sure you&apos;ve{" "}
+                      <Link href="/connect">registered your services</Link> so agents
+                      can find you.
+                    </p>
+                  </>
+                )}
               </div>
             )}
 

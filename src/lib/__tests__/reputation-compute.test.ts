@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { computeReputation, type ReputationInput } from "@/lib/reputation/compute";
+import {
+  computeReputation,
+  isNewWorker,
+  type ReputationInput,
+} from "@/lib/reputation/compute";
 
 function makeInput(overrides: Partial<ReputationInput> = {}): ReputationInput {
   return {
@@ -105,5 +109,38 @@ describe("computeReputation", () => {
       })
     );
     expect(result.total).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("isNewWorker (CC-010)", () => {
+  it("is new with no tasks and no stake — the dashboard shows a state, not a 0", () => {
+    expect(isNewWorker({ totalTasks: 0, stakeAmountUsdc: 0 })).toBe(true);
+  });
+
+  it("is not new once a task exists, whatever its outcome", () => {
+    expect(isNewWorker({ totalTasks: 1, stakeAmountUsdc: 0 })).toBe(false);
+  });
+
+  it("is not new once staked — a stake earns the floor score without tasks", () => {
+    expect(isNewWorker({ totalTasks: 0, stakeAmountUsdc: 20 })).toBe(false);
+  });
+
+  it("agrees with the compute path: for workers with only history worth scoring, new is exactly the zero-score case", () => {
+    // Note this does NOT hold in general — a worker whose tasks all expired or
+    // disputed has history and a genuine 0, which is a score, not a "new" state.
+    for (const [totalTasks, stakeAmountUsdc] of [
+      [0, 0],
+      [0, 20],
+      [1, 0],
+      [3, 50],
+    ] as const) {
+      const input = makeInput({
+        totalTasks,
+        stakeAmountUsdc,
+        completed: totalTasks,
+      });
+      const scored = computeReputation(input).total > 0;
+      expect(isNewWorker(input)).toBe(!scored);
+    }
   });
 });
