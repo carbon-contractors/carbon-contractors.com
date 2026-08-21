@@ -1,29 +1,88 @@
 /**
  * route.ts — /api/tasks (GET)
- * Returns tasks assigned to a wallet address.
- * Optionally enriches with on-chain escrow state.
+ *
+ * CC-093: task_description is only served to a caller who proves ownership of
+ * a party's wallet, via the same challenge-response signature as /api/dispute
+ * and the MCP transport (x-caller-wallet / x-caller-signature / x-caller-nonce
+ * headers, nonce from POST /api/basedhuman.mcp/challenge).
+ *
+ * - Signed caller W receives full task records where to_human_wallet == W or
+ *   from_agent_wallet == W. The verified wallet IS the query — ?wallet= is
+ *   ignored on this path so the two can never disagree.
+ * - Unsigned callers receive the tasks_public projection (migration 011), which
+ *   excludes task_description. Asking for ?wallet= without a signature is a
+ *   401: there is no legitimate wallet-scoped read without proving ownership.
  */
 
 import { NextRequest } from "next/server";
-import { getTasksByWallet } from "@/lib/db/tasks";
+import {
+  getTasksForParties,
+  getPublicTasks,
+  type TaskRecord,
+  type PublicTaskRecord,
+} from "@/lib/db/tasks";
 import { getOnChainTask, getEscrowConfig } from "@/lib/contracts/escrow";
+import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
+import { isValidWalletAddress } from "@/lib/validation";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
 
-const WALLET_RE = /^0x[0-9a-fA-F]{40}$/;
-
 export async function GET(req: NextRequest) {
-  const wallet = req.nextUrl.searchParams.get("wallet");
-
-  if (!wallet || !WALLET_RE.test(wallet)) {
-    return Response.json(
-      { error: "Missing or invalid wallet parameter (0x + 40 hex chars)" },
-      { status: 400 },
-    );
-  }
+  const rawWallet = req.headers.get("x-caller-wallet");
+  const signature = req.headers.get("x-caller-signature") as `0x${string}` | null;
+  const nonce = req.headers.get("x-caller-nonce");
+  const hasAuthHeaders = Boolean(rawWallet || signature || nonce);
 
   try {
-    const tasks = await getTasksByWallet(wallet);
+    let tasks: (TaskRecord | PublicTaskRecord)[];
+    let authenticated = false;
+    let callerWallet: string | null = null;
+
+    if (hasAuthHeaders) {
+      if (!rawWallet || !isValidWalletAddress(rawWallet) || !signature || !nonce) {
+        return Response.json(
+          {
+            ok: false,
+            error:
+              "Wallet signature required. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
+          },
+          { status: 401 },
+        );
+      }
+
+      try {
+        callerWallet = await verifyChallengeSignature(rawWallet, signature, nonce);
+      } catch (err) {
+        log("warn", "tasks_auth_failed", {
+          wallet: rawWallet,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json(
+          { ok: false, error: "Signature verification failed" },
+          { status: 401 },
+        );
+      }
+
+      tasks = await getTasksForParties(callerWallet);
+      authenticated = true;
+      log("info", "tasks_fetched", {
+        wallet: callerWallet,
+        count: tasks.length,
+        authenticated: true,
+      });
+    } else if (req.nextUrl.searchParams.get("wallet")) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            "Wallet-scoped task reads require a wallet signature. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
+        },
+        { status: 401 },
+      );
+    } else {
+      tasks = await getPublicTasks();
+      log("info", "tasks_fetched", { count: tasks.length, authenticated: false });
+    }
 
     // Enrich with on-chain state where possible
     const escrowConfig = getEscrowConfig();
@@ -46,10 +105,8 @@ export async function GET(req: NextRequest) {
       }),
     );
 
-    log("info", "tasks_fetched", { wallet, count: enriched.length });
-
-    return Response.json({ ok: true, tasks: enriched });
+    return Response.json({ ok: true, authenticated, tasks: enriched });
   } catch (err: unknown) {
-    return safeErrorResponse(err, "tasks_fetch_failed", { wallet });
+    return safeErrorResponse(err, "tasks_fetch_failed");
   }
 }
