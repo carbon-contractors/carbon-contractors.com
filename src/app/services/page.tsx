@@ -73,22 +73,24 @@ export default function ServicesPage() {
 
               <p className={styles.categoryTagline}>{cat.tagline}</p>
 
-              <table className={styles.exampleTable}>
-                <thead>
-                  <tr>
-                    <th>Example</th>
-                    <th>Description</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cat.examples.map((ex) => (
-                    <tr key={ex.task}>
-                      <td className={styles.exampleTask}>{ex.task}</td>
-                      <td>{ex.description}</td>
+              <div className={styles.tableScroll}>
+                <table className={styles.exampleTable}>
+                  <thead>
+                    <tr>
+                      <th>Example</th>
+                      <th>Description</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {cat.examples.map((ex) => (
+                      <tr key={ex.task}>
+                        <td className={styles.exampleTask}>{ex.task}</td>
+                        <td>{ex.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               <p className={styles.disrupts}>
                 <span className={styles.disruptsLabel}>Disrupts:</span>{" "}

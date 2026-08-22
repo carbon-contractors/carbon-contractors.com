@@ -36,6 +36,37 @@
   margin-top: 2rem;
 }
 
+/* CC-026: per-endpoint fetch failures, shown with a retry */
+.fetchErrorBanner {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #ff444466;
+  border-radius: 8px;
+  background: var(--cc-bg-surface);
+}
+
+.fetchError {
+  color: #ff6b6b;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  margin: 0 0 0.5rem;
+}
+
+.retryButton {
+  padding: 0.4rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--cc-border);
+  background: var(--cc-bg-elevated);
+  color: var(--cc-text);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.retryButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .emptyState {
   text-align: center;
   color: var(--cc-text-secondary);

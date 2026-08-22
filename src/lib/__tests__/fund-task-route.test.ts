@@ -8,15 +8,17 @@ import type { NextRequest } from "next/server";
  */
 
 const mockGetTaskByPaymentId = vi.fn();
-const mockUpdateTaskStatus = vi.fn();
+const mockMarkTaskFunded = vi.fn();
 vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: (...args: unknown[]) => mockGetTaskByPaymentId(...args),
-  updateTaskStatus: (...args: unknown[]) => mockUpdateTaskStatus(...args),
+  markTaskFunded: (...args: unknown[]) => mockMarkTaskFunded(...args),
 }));
 
 const mockGetOnChainTask = vi.fn();
+const mockGetCurrentBlockTimestamp = vi.fn();
 vi.mock("@/lib/contracts/escrow", () => ({
   getOnChainTask: (...args: unknown[]) => mockGetOnChainTask(...args),
+  getCurrentBlockTimestamp: () => mockGetCurrentBlockTimestamp(),
   getEscrowConfig: () => ({
     address: "0x1234567890123456789012345678901234567890",
     chainId: 84532,
@@ -68,7 +70,8 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
       amount_usdc: 25,
       status: "pending",
     });
-    mockUpdateTaskStatus.mockResolvedValue(undefined);
+    mockMarkTaskFunded.mockResolvedValue(undefined);
+    mockGetCurrentBlockTimestamp.mockResolvedValue(1_700_000_000);
   });
 
   it("activates a task only after reading Funded from the chain", async () => {
@@ -83,7 +86,7 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     expect(json.status).toBe("active");
     expect(json.on_chain_state).toBe("Funded");
     expect(mockGetOnChainTask).toHaveBeenCalledWith("pr_1");
-    expect(mockUpdateTaskStatus).toHaveBeenCalledWith("pr_1", "active");
+    expect(mockMarkTaskFunded).toHaveBeenCalledWith("pr_1", 1_700_000_000);
   });
 
   it("refuses to activate when the on-chain task does not exist yet", async () => {
@@ -96,7 +99,7 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     const json = await res.json();
     expect(json.ok).toBe(false);
     expect(json.error).toContain("No on-chain task");
-    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+    expect(mockMarkTaskFunded).not.toHaveBeenCalled();
   });
 
   it("refuses to activate when the chain read fails — never guesses", async () => {
@@ -106,7 +109,7 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(502);
-    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+    expect(mockMarkTaskFunded).not.toHaveBeenCalled();
   });
 
   it("refuses to activate when the on-chain worker does not match the row", async () => {
@@ -120,7 +123,7 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error).toContain("does not match");
-    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+    expect(mockMarkTaskFunded).not.toHaveBeenCalled();
   });
 
   it("refuses to activate when the on-chain amount does not match the row", async () => {
@@ -130,7 +133,7 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(409);
-    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+    expect(mockMarkTaskFunded).not.toHaveBeenCalled();
   });
 
   it("activates a task that has moved past Funded on-chain — the money is proven", async () => {
@@ -142,7 +145,18 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(200);
-    expect(mockUpdateTaskStatus).toHaveBeenCalledWith("pr_1", "active");
+    expect(mockMarkTaskFunded).toHaveBeenCalledWith("pr_1", 1_700_000_000);
+  });
+
+  it("records the current block timestamp as funded_at, not a client-supplied value", async () => {
+    mockGetOnChainTask.mockResolvedValue(fundedOnChainTask());
+    mockGetCurrentBlockTimestamp.mockResolvedValue(1_800_000_000);
+
+    const { POST } = await import("@/app/api/fund-task/route");
+    await POST(makeRequest());
+
+    expect(mockGetCurrentBlockTimestamp).toHaveBeenCalledTimes(1);
+    expect(mockMarkTaskFunded).toHaveBeenCalledWith("pr_1", 1_800_000_000);
   });
 
   it("rejects a task that is not pending", async () => {
@@ -158,7 +172,7 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
 
     expect(res.status).toBe(409);
     expect(mockGetOnChainTask).not.toHaveBeenCalled();
-    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+    expect(mockMarkTaskFunded).not.toHaveBeenCalled();
   });
 
   it("rejects a missing payment_request_id", async () => {

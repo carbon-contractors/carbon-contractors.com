@@ -60,6 +60,7 @@ import { baseSepolia } from "viem/chains";
 import { CARBON_ESCROW_ABI } from "@/lib/contracts/escrow-abi";
 import { toTaskId, getOnChainTask } from "@/lib/contracts/escrow";
 import { resolveDisputeOnChain, getPlatformAccount } from "@/lib/contracts/signer";
+import { signVerdict, verdictTuple, randomVerdictNonce, type Verdict } from "@/lib/contracts/verdict";
 import { getConfig } from "@/lib/config";
 
 const ERC20_ABI = [
@@ -146,67 +147,6 @@ function hash32(): Hex {
   // real evidenceHash from CC-083's checker; neither exists yet, and the contract does
   // not care what is behind a commitment — only that it does not change.
   return `0x${randomBytes(32).toString("hex")}` as Hex;
-}
-
-const VERDICT_TYPES = {
-  Verdict: [
-    { name: "taskId", type: "bytes32" },
-    { name: "specHash", type: "bytes32" },
-    { name: "evidenceHash", type: "bytes32" },
-    { name: "checkerHash", type: "bytes32" },
-    { name: "passed", type: "bool" },
-    { name: "breakdownHash", type: "bytes32" },
-    { name: "expiry", type: "uint256" },
-    { name: "nonce", type: "uint256" },
-  ],
-} as const;
-
-interface Verdict {
-  taskId: Hex;
-  specHash: Hex;
-  evidenceHash: Hex;
-  checkerHash: Hex;
-  passed: boolean;
-  breakdownHash: Hex;
-  expiry: bigint;
-  nonce: bigint;
-}
-
-/**
- * Signs a verdict with the REAL platform signer — KMS in production, via the same
- * getPlatformAccount() the app uses. This is the half of Amendment 1 A1.1 that cannot be
- * proven off-chain: that the HSM's ECDSA output is something CarbonEscrow's ECDSA.recover
- * accepts, low-s normalisation and all.
- */
-async function signVerdict(escrow: Address, verdict: Verdict): Promise<Hex> {
-  const account = await getPlatformAccount();
-  if (!account.signTypedData) {
-    throw new Error("platform account cannot signTypedData — check kms-signer.ts");
-  }
-  return account.signTypedData({
-    domain: {
-      name: "CarbonEscrow",
-      version: "2",
-      chainId: baseSepolia.id,
-      verifyingContract: escrow,
-    },
-    types: VERDICT_TYPES,
-    primaryType: "Verdict",
-    message: verdict,
-  });
-}
-
-function verdictTuple(v: Verdict) {
-  return {
-    taskId: v.taskId,
-    specHash: v.specHash,
-    evidenceHash: v.evidenceHash,
-    checkerHash: v.checkerHash,
-    passed: v.passed,
-    breakdownHash: v.breakdownHash,
-    expiry: v.expiry,
-    nonce: v.nonce,
-  };
 }
 
 async function main() {
@@ -384,7 +324,7 @@ async function main() {
     passed,
     breakdownHash: hash32(),
     expiry: BigInt(Math.floor(Date.now() / 1000) + 3600),
-    nonce: BigInt(`0x${randomBytes(8).toString("hex")}`),
+    nonce: randomVerdictNonce(),
   };
 
   console.log(`\n[4] signing a ${passed ? "PASSING" : "FAILING"} verdict with the REAL platform signer`);

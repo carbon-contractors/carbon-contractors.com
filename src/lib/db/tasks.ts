@@ -21,6 +21,8 @@ export interface TaskRecord {
   acceptance_spec: string | null;
   spec_hash: string | null;
   spec_schema_version: number | null;
+  /** On-chain block timestamp when Funded was confirmed. Settable once (CC-092). */
+  funded_at: string | null;
   created_at: string;
 }
 
@@ -133,6 +135,45 @@ export async function updateTaskStatus(
     }
     throw new Error(
       `Invalid state transition: ${current.status} → ${status} (allowed from: ${allowed.join(", ")})`,
+    );
+  }
+}
+
+/**
+ * Confirms funding: pending → active, recording the on-chain block timestamp in
+ * the same write (CC-092). A dedicated function rather than a parameter on
+ * `updateTaskStatus` because `funded_at` has its own once-only semantics
+ * (migration 018) that no other status transition shares.
+ */
+export async function markTaskFunded(
+  paymentRequestId: string,
+  fundedAtUnixSeconds: number,
+): Promise<void> {
+  const supabase = getSupabaseAdmin();
+
+  const fundedAt = new Date(fundedAtUnixSeconds * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({ status: "active", funded_at: fundedAt, updated_at: new Date().toISOString() })
+    .eq("payment_request_id", paymentRequestId)
+    .eq("status", "pending")
+    .select("payment_request_id");
+
+  if (error) throw new Error(`markTaskFunded failed: ${error.message}`);
+
+  if (!data || data.length === 0) {
+    const { data: current } = await supabase
+      .from("tasks")
+      .select("status")
+      .eq("payment_request_id", paymentRequestId)
+      .single();
+
+    if (!current) {
+      throw new Error(`Task not found: ${paymentRequestId}`);
+    }
+    throw new Error(
+      `Invalid state transition: ${current.status} → active (allowed from: pending)`,
     );
   }
 }

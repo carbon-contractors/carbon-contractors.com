@@ -326,3 +326,8 @@ everything passing. → `CC-085`, `ADR-0003` D3/D5
 - Do not edit `docs/backlog/INDEX.md` by hand; it is generated.
 - Do not assume a fix works because it works locally — the CSP, the coming-soon gate and the wallet connector all behave differently in production.
 - Do not trust inherited checkboxes in the archived MVP definition of done or the old go-live gate; several were stale when Linear was retired. Re-derive from the code.
+
+## Tracked work items
+- Do not create or edit files under docs/backlog/CC-*.md without explicit approval.
+- When you notice a problem outside the current task's scope, log it in a single line under "Observations" in your response instead — don't file it as a ticket.
+- I'll decide what gets promoted to a CC-### issue.

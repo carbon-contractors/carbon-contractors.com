@@ -16,7 +16,7 @@ vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
 vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
-import { getTaskByPaymentId, updateTaskStatus, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks } from "@/lib/db/tasks";
+import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks } from "@/lib/db/tasks";
 
 function chainable(result: { data: unknown; error: unknown }) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -97,6 +97,42 @@ describe("tasks", () => {
 
     await expect(updateTaskStatus("abc", "active")).rejects.toThrow(
       "Invalid state transition: completed → active (allowed from: pending)"
+    );
+  });
+
+  it("markTaskFunded sets status active and funded_at from a unix timestamp, gated on pending", async () => {
+    const updateChain = chainable({ data: [{ payment_request_id: "abc" }], error: null });
+    mockFrom.mockReturnValueOnce(updateChain);
+
+    await markTaskFunded("abc", 1_700_000_000);
+
+    expect(mockFrom).toHaveBeenCalledWith("tasks");
+    expect(updateChain.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "active",
+        funded_at: new Date(1_700_000_000 * 1000).toISOString(),
+      }),
+    );
+    expect(updateChain.eq).toHaveBeenCalledWith("status", "pending");
+  });
+
+  it("markTaskFunded throws when the task is not pending", async () => {
+    const updateChain = chainable({ data: [], error: null });
+    const lookupChain = chainable({ data: { status: "completed" }, error: null });
+    mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
+
+    await expect(markTaskFunded("abc", 1_700_000_000)).rejects.toThrow(
+      "Invalid state transition: completed → active (allowed from: pending)",
+    );
+  });
+
+  it("markTaskFunded throws when the task does not exist", async () => {
+    const updateChain = chainable({ data: [], error: null });
+    const lookupChain = chainable({ data: null, error: null });
+    mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
+
+    await expect(markTaskFunded("nonexistent", 1_700_000_000)).rejects.toThrow(
+      "Task not found: nonexistent",
     );
   });
 
