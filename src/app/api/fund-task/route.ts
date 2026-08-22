@@ -28,8 +28,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getTaskByPaymentId, updateTaskStatus } from "@/lib/db/tasks";
-import { getOnChainTask, getEscrowConfig } from "@/lib/contracts/escrow";
+import { getTaskByPaymentId, markTaskFunded } from "@/lib/db/tasks";
+import { getOnChainTask, getEscrowConfig, getCurrentBlockTimestamp } from "@/lib/contracts/escrow";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
 
@@ -137,7 +137,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    await updateTaskStatus(payment_request_id, "active");
+    // CC-092: the funding timestamp the eventual verdict service needs for
+    // captured_after: "task_funding_block_timestamp" — captured here, where the
+    // chain is already being read, rather than scanned for later via TaskCreated.
+    const fundedAt = await getCurrentBlockTimestamp();
+    await markTaskFunded(payment_request_id, fundedAt);
 
     log("info", "task_funded_on_chain_confirmed", {
       payment_request_id,
@@ -145,6 +149,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       amount_usdc: task.amount_usdc,
       from_agent: task.from_agent_wallet,
       to_worker: task.to_human_wallet,
+      funded_at: fundedAt,
     });
 
     return NextResponse.json({
