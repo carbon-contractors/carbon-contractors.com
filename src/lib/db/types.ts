@@ -78,6 +78,10 @@ export interface Database {
           spec_schema_version: number | null;
           /** ISO timestamp of the on-chain block when Funded was confirmed (CC-092). Settable once. */
           funded_at: string | null;
+          /** When this row's content was pruned by the retention engine (CC-087). Settable once. */
+          content_purged_at: string | null;
+          /** RETENTION_RULE_VERSION in force at the prune (CC-087). */
+          content_purge_rule: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -119,6 +123,10 @@ export interface Database {
           // legitimately set once by /api/fund-task's confirmation write (CC-092);
           // migration 018's trigger guards the second write, not the first.
           funded_at?: string | null;
+          // The purge markers are writable only by the prune_task_content RPC
+          // (CC-087) — migration 019's trigger rejects any direct write, so they
+          // stay out of the app layer's reach here, same reasoning as the spec
+          // columns above.
           created_at?: string;
           updated_at?: string;
         };
@@ -218,7 +226,26 @@ export interface Database {
         Relationships: [];
       };
     };
-    Functions: Record<string, never>;
+    Functions: {
+      /**
+       * Prunes one task's content in place, atomically (CC-087, migration 019).
+       * Returned by `pruneExpiredTaskContent` in ./retention.ts — never call
+       * directly from a route; the TS engine owns the window and the logging.
+       */
+      prune_task_content: {
+        Args: {
+          p_task_id: string;
+          p_rule_version: string;
+          p_window_seconds: number;
+        };
+        Returns: {
+          pruned: boolean;
+          reason?: string;
+          payment_request_id?: string;
+          deleted_at?: string;
+        };
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
