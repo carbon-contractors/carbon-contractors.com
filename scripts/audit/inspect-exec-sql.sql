@@ -68,7 +68,7 @@ ORDER BY anon_can_execute DESC, p.proname;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4. BONUS, and worth the 10 seconds — did the AUD-001/009 RLS fixes hold?
---    Confirms what the anon role can still reach at table level. `waitlist` and
+--    Confirms what the anon role can still reach at table level.
 --    `notification_channels` must NOT be anon-readable (migrations 003 and 010).
 --    `humans` anon-readable is intentional — the public whitepages — see CC-030.
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ ORDER BY tablename, policyname;
 -- 6. The decisive companion to block 5 — is RLS actually switched on?
 --    Any table with rls_enabled = false and anon_select = true is readable by
 --    anyone holding the anon key, policies or not.
---    Expect: waitlist and notification_channels NOT anon-readable;
+--    Expect: notification_channels NOT anon-readable;
 --            humans anon-readable by design (CC-030);
 --            tasks NOT directly readable (anon reads tasks_public instead).
 -- ─────────────────────────────────────────────────────────────────────────────

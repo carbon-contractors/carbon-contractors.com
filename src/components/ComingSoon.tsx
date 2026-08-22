@@ -1,38 +1,9 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
 import styles from './ComingSoon.module.css'
 
 export default function ComingSoon() {
-  const [email, setEmail] = useState('')
-  const [submitted, setSubmitted] = useState(false)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const handleSubmit = async () => {
-    if (!email || !email.includes('@')) return
-    setLoading(true)
-    setError('')
-    try {
-      const res = await fetch('/api/waitlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error ?? 'Something went wrong')
-      } else {
-        setSubmitted(true)
-      }
-    } catch {
-      setError('Network error — try again')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
     <div className={styles.wrap}>
       <div className={styles.grid} />
@@ -63,35 +34,6 @@ export default function ComingSoon() {
             Human work on crypto rails.<br />
             <b>USDC payments</b> · <b>Base</b> · <b>x402 protocol</b>
           </p>
-
-          {submitted ? (
-            <p className={styles.success}>✓ you&apos;re on the list</p>
-          ) : (
-            <>
-              <div className={styles.form}>
-                <input
-                  className={styles.input}
-                  type="email"
-                  placeholder="your@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-                  disabled={loading}
-                />
-                <button className={styles.btn} onClick={handleSubmit} disabled={loading}>
-                  {loading ? '...' : 'GET ACCESS'}
-                </button>
-              </div>
-              {error && <p className={styles.error}>{error}</p>}
-              <p className={styles.consent}>
-                Just your email, nothing else. See our{' '}
-                <Link href="/privacy" className={styles.consentLink}>privacy policy</Link>
-                {' '}or{' '}
-                <Link href="/unsubscribe" className={styles.consentLink}>unsubscribe</Link>
-                {' '}any time.
-              </p>
-            </>
-          )}
         </main>
 
         <div className={styles.meta}>
@@ -123,8 +65,6 @@ export default function ComingSoon() {
           <Link href="/privacy" className={styles.legalLink}>PRIVACY</Link>
           &nbsp;&middot;&nbsp;
           <Link href="/terms" className={styles.legalLink}>TERMS</Link>
-          &nbsp;&middot;&nbsp;
-          <Link href="/unsubscribe" className={styles.legalLink}>UNSUBSCRIBE</Link>
         </footer>
       </div>
     </div>

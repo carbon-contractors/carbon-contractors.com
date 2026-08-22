@@ -40,9 +40,9 @@ attempt the one-way migration", not "go public".
 escrow, through a signed verdict, with no platform transaction anywhere in the path (`CC-082`).
 Still broken, and all app-layer rather than contract: **`/api/fund-task` strands USDC** because
 x402 pays the contract directly instead of calling `createTask` (`CC-081` Defect 1); the platform's
-own `completeTaskOnChain` and `expireTaskOnChain` can never succeed (`CC-080`); and `resolve_dispute`
-is still agent-only in the app layer, though the v2 contract no longer permits a bare-assertion
-dispute (`CC-081` Defect 2). Nothing is lost, because the funding path has still never been run.
+own `expireTaskOnChain` can never succeed (`CC-080` — `completeTaskOnChain` was removed there); and
+`resolve_dispute` is still agent-only in the app layer, though the v2 contract no longer permits a
+bare-assertion dispute (`CC-081` Defect 2). Nothing is lost, because the funding path has still never been run.
 
 ## Start here every session
 
@@ -82,7 +82,8 @@ it is unflattering.
 This repo is public **on purpose**, defects included (`CC-056`, `Lessons-Learned.md` §8). Defects are
 published as found, with two carve-outs that are fixed *before* being described in a pushed commit:
 
-1. anything exposing third-party data (the `waitlist` table holds real email addresses until `CC-089`)
+1. anything exposing third-party data (`notification_channels` holds workers' contact addresses; the
+   `waitlist` table is gone — dropped 2026-08-21, `CC-089`)
 2. anything trivially exploitable against real funds
 
 ## Public claims — see ADR-0004
@@ -116,11 +117,12 @@ exists rather than reasoning from this file.**
   `Completed` moved 2 → 3 and everything above `Funded` shifted, so any hard-coded state integer
   predating 2026-08-15 is wrong. → `CC-082`
   · `node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs`
-- **`completeTaskOnChain` can never succeed, and `expireTaskOnChain` no longer can either.**
-  `completeTask` is agent-only and the platform signer is structurally the wrong sender (`CC-080`).
-  v2 made `expireTask` agent-only too — refunds are a pull-payment the agent claims (`A1.2`) — so
-  that function reverts `NotAgent()` from the platform as well. Both fail safely. Removal belongs
-  with `CC-081` Defect 1. → `CC-080`, `ADR-0001` D2/A1.2
+- **`completeTaskOnChain` is gone (CC-080, done); `expireTaskOnChain` still cannot succeed.**
+  `completeTask` is agent-only and the platform signer was structurally the wrong sender, so the
+  function was removed outright — `confirm_task_completion` now records the confirmation and hands
+  settlement back to the agent. `expireTask` is agent-only too (refunds are a pull-payment the
+  agent claims, `A1.2`), so the remaining function reverts `NotAgent()` from the platform; it
+  fails safely and its removal belongs with `CC-081` Defect 1. → `CC-080`, `ADR-0001` D2/A1.2
 - **Dispute authority is decided; do not re-guess it.** `dispute_task` and `resolve_dispute` are both
   agent-only in the *app layer* today, which lets an agent refund itself after delivery. v2's
   contract already fixes the on-chain half: either party may dispute, but **only by presenting a
@@ -150,8 +152,9 @@ exists rather than reasoning from this file.**
   `qual: true`, deliberately — it is the whitepages. Never put anything there that should not be
   public. → `CC-030`
 - **"Anon denied" and "anon reads zero rows" are different, and it differs per table.** After
-  migration `015`, `waitlist`/`tasks`/`notification_channels`/`used_nonces`/`mcp_challenges` hard-deny
-  with `401` + `42501`; `humans` and `tasks_public` keep anon `SELECT` by design. Anything written
+  migration `015`, `tasks`/`notification_channels`/`used_nonces`/`mcp_challenges` hard-deny
+  with `401` + `42501` (`waitlist` was on this list until `CC-089` dropped it); `humans` and
+  `tasks_public` keep anon `SELECT` by design. Anything written
   before 2026-08-11 describes the pre-revoke posture. **A newly added table inherits Supabase's
   default `GRANT ALL` — revoke it in the same migration.** → `CC-062`
   · `scripts/audit/inspect-live-schema.sql` block 4
@@ -277,7 +280,7 @@ src/lib/categories.ts  The 10 service categories, max 2 per worker
 contracts/             CarbonEscrow.sol (v2, CC-082), ReputationStake.sol
                        mocks/ is test-only — never deployed to a live network
 test/                  Hardhat/mocha contract tests. `npm run test:contracts`
-supabase/migrations/   001-015, applied by hand in order. Add new ones, never edit an applied one.
+supabase/migrations/   001-017, applied by hand in order. Add new ones, never edit an applied one.
                        No migration runner — check the directory for the next number (CC-057).
 scripts/audit/         Read-only verification scripts. Run these instead of trusting this file.
 ```
@@ -296,7 +299,7 @@ npm run compile          # Hardhat compile
 npm run gen:abi          # Regenerate src/lib/contracts/*-abi.ts from artifacts (CC-082)
 npm run monitors         # Run every invariant monitor against the LIVE chain (CC-085)
 npm run monitors:list    # Offline — validates the monitor registry. Runs in CI
-npm run seed             # BROKEN — still writes the pre-migration-008 `skills` column (CC-017)
+npm run seed             # Seeds demo workers into Supabase (fixed in CC-017; needs real env)
 ```
 
 CI runs `npm ci`, `npm audit --audit-level=high`, lint, typecheck, compile, `typecheck:contracts`,
@@ -323,3 +326,8 @@ everything passing. → `CC-085`, `ADR-0003` D3/D5
 - Do not edit `docs/backlog/INDEX.md` by hand; it is generated.
 - Do not assume a fix works because it works locally — the CSP, the coming-soon gate and the wallet connector all behave differently in production.
 - Do not trust inherited checkboxes in the archived MVP definition of done or the old go-live gate; several were stale when Linear was retired. Re-derive from the code.
+
+## Tracked work items
+- Do not create or edit files under docs/backlog/CC-*.md without explicit approval.
+- When you notice a problem outside the current task's scope, log it in a single line under "Observations" in your response instead — don't file it as a ticket.
+- I'll decide what gets promoted to a CC-### issue.

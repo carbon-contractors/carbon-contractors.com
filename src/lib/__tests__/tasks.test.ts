@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock Supabase client (reads use anon, writes use admin — both share mockFrom)
+// Mock Supabase client (reads use anon, writes use admin — both share mockFrom;
+// mockFromAnon distinguishes which client a CC-093 read goes through)
 const mockFrom = vi.fn();
+const mockFromAnon = vi.fn();
 vi.mock("@/lib/db/client", () => ({
-  getSupabase: () => ({ from: mockFrom }),
+  getSupabase: () => ({ from: mockFromAnon }),
   getSupabaseAdmin: () => ({ from: mockFrom }),
 }));
 
@@ -14,7 +16,7 @@ vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
 vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
-import { getTaskByPaymentId, updateTaskStatus, getReputationSummary, createTask, getTasksByWallet } from "@/lib/db/tasks";
+import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks } from "@/lib/db/tasks";
 
 function chainable(result: { data: unknown; error: unknown }) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -98,6 +100,42 @@ describe("tasks", () => {
     );
   });
 
+  it("markTaskFunded sets status active and funded_at from a unix timestamp, gated on pending", async () => {
+    const updateChain = chainable({ data: [{ payment_request_id: "abc" }], error: null });
+    mockFrom.mockReturnValueOnce(updateChain);
+
+    await markTaskFunded("abc", 1_700_000_000);
+
+    expect(mockFrom).toHaveBeenCalledWith("tasks");
+    expect(updateChain.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "active",
+        funded_at: new Date(1_700_000_000 * 1000).toISOString(),
+      }),
+    );
+    expect(updateChain.eq).toHaveBeenCalledWith("status", "pending");
+  });
+
+  it("markTaskFunded throws when the task is not pending", async () => {
+    const updateChain = chainable({ data: [], error: null });
+    const lookupChain = chainable({ data: { status: "completed" }, error: null });
+    mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
+
+    await expect(markTaskFunded("abc", 1_700_000_000)).rejects.toThrow(
+      "Invalid state transition: completed → active (allowed from: pending)",
+    );
+  });
+
+  it("markTaskFunded throws when the task does not exist", async () => {
+    const updateChain = chainable({ data: [], error: null });
+    const lookupChain = chainable({ data: null, error: null });
+    mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
+
+    await expect(markTaskFunded("nonexistent", 1_700_000_000)).rejects.toThrow(
+      "Task not found: nonexistent",
+    );
+  });
+
   it("getReputationSummary computes counts correctly", async () => {
     const now = new Date().toISOString();
     const tasks = [
@@ -162,5 +200,61 @@ describe("tasks", () => {
       "to_human_wallet",
       "0xcccc111122223333444455556666777788889999",
     );
+  });
+
+  it("getTasksForParties queries both party columns and dedupes self-hired tasks (CC-093)", async () => {
+    const shared = { id: "1", created_at: "2026-08-01T00:00:00Z" };
+    const workerOnly = { id: "2", created_at: "2026-08-02T00:00:00Z" };
+    const agentOnly = { id: "3", created_at: "2026-07-31T00:00:00Z" };
+    // First call is the worker side, second the agent side (CC-093)
+    let call = 0;
+    mockFrom.mockImplementation(() => {
+      const data = call++ === 0 ? [shared, workerOnly] : [shared, agentOnly];
+      return chainable({ data, error: null });
+    });
+
+    const result = await getTasksForParties("0xCCCC111122223333444455556666777788889999");
+
+    expect(result.map((t) => t.id).sort()).toEqual(["1", "2", "3"]);
+    // Latest first
+    expect(result[0].id).toBe("2");
+  });
+
+  it("getTasksForParties queries with a lowercased wallet on both sides (CC-002)", async () => {
+    const workerChain = chainable({ data: [], error: null });
+    const agentChain = chainable({ data: [], error: null });
+    mockFrom.mockReturnValueOnce(workerChain).mockReturnValueOnce(agentChain);
+
+    await getTasksForParties("0xCCCC111122223333444455556666777788889999");
+
+    expect(workerChain.eq).toHaveBeenCalledWith(
+      "to_human_wallet",
+      "0xcccc111122223333444455556666777788889999",
+    );
+    expect(agentChain.eq).toHaveBeenCalledWith(
+      "from_agent_wallet",
+      "0xcccc111122223333444455556666777788889999",
+    );
+  });
+
+  it("getPublicTasks reads the tasks_public view through the anon client (CC-093)", async () => {
+    const publicRow = { id: "1", payment_request_id: "pr_1" };
+    const chain = chainable({ data: [publicRow], error: null });
+    mockFromAnon.mockReturnValue(chain);
+
+    const result = await getPublicTasks();
+
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockFromAnon).toHaveBeenCalledWith("tasks_public");
+    expect(chain.limit).toHaveBeenCalled();
+    expect(result).toEqual([publicRow]);
+  });
+
+  it("getPublicTasks throws on real errors", async () => {
+    mockFromAnon.mockReturnValue(
+      chainable({ data: null, error: { message: "connection failed" } }),
+    );
+
+    await expect(getPublicTasks()).rejects.toThrow("getPublicTasks failed");
   });
 });

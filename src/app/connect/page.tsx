@@ -7,7 +7,15 @@ import { useAccount, useSignMessage } from "wagmi";
 import PageShell from "@/components/PageShell";
 import WalletConnectButton from "@/components/WalletConnectButton";
 import { CATEGORIES, MAX_CATEGORIES } from "@/lib/categories";
+import { MAX_RATE_USDC, rateUsdcError } from "@/lib/validation";
 import styles from "./connect.module.css";
+
+/**
+ * CC-024: indicative only, never a quoted rate — USDC redeems 1:1 for USD, and
+ * the AUD figure is a rounded indication so Australian workers thinking in AUD
+ * don't mis-price themselves by ~1.5x. The word "indicative" must stay.
+ */
+const INDICATIVE_AUD_PER_USDC = 1.55;
 
 export default function ConnectPage() {
   const router = useRouter();
@@ -39,6 +47,15 @@ export default function ConnectPage() {
 
   async function handleRegister() {
     if (!address || selectedCategories.length === 0 || !rateUsdc) return;
+
+    // Validate before signing — a bad rate caught here costs a form fix,
+    // caught server-side it costs a wallet signature (CC-022).
+    const rateError = rateUsdcError(Number(rateUsdc));
+    if (rateError) {
+      setStatus("error");
+      setErrorMsg(rateError);
+      return;
+    }
 
     setStatus("signing");
     setErrorMsg("");
@@ -138,15 +155,33 @@ export default function ConnectPage() {
             </p>
 
             <h2>Hourly Rate (USDC)</h2>
+            <p className={styles.subtle}>
+              1 USDC = $1.00 USD ≈ ${INDICATIVE_AUD_PER_USDC.toFixed(2)} AUD
+              indicative. Enter your rate in USDC.
+            </p>
             <input
               type="number"
               min="1"
-              step="1"
+              max={MAX_RATE_USDC}
+              step="0.01"
               placeholder="e.g. 150"
               value={rateUsdc}
               onChange={(e) => setRateUsdc(e.target.value)}
               className={styles.input}
             />
+            {rateUsdc !== "" && (
+              <p className={styles.selectionHint}>
+                {rateUsdcError(Number(rateUsdc)) ? (
+                  rateUsdcError(Number(rateUsdc))
+                ) : (
+                  <>
+                    ≈ $
+                    {(Number(rateUsdc) * INDICATIVE_AUD_PER_USDC).toFixed(2)}{" "}
+                    AUD/hr indicative
+                  </>
+                )}
+              </p>
+            )}
 
             <h2>Contact Email (optional)</h2>
             <p>

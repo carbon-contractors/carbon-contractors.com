@@ -231,6 +231,20 @@
   letter-spacing: 0.05em;
 }
 
+/* CC-010: brand-new worker — "New" instead of a bare 0 */
+.scoreNew {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--cc-blue-bright);
+  line-height: 1.2;
+}
+
+.newWorkerNote {
+  font-size: 0.8rem;
+  color: var(--cc-text-muted);
+  line-height: 1.5;
+}
+
 .breakdownGrid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -283,6 +297,46 @@
   color: var(--cc-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+/* CC-011: collapsed-by-default optional staking */
+.stakePanelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.optionalTag {
+  margin-left: 0.5rem;
+  font-size: 0.65rem;
+  color: var(--cc-text-faint);
+  border: 1px solid var(--cc-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  letter-spacing: 0.05em;
+}
+
+.stakeToggle {
+  background: transparent;
+  color: var(--cc-blue-bright);
+  border: none;
+  padding: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.stakeToggle:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.stakeExplainer {
+  font-size: 0.78rem;
+  color: var(--cc-text-muted);
+  line-height: 1.5;
 }
 
 .stakeAmount {
@@ -433,6 +487,228 @@
   cursor: not-allowed;
 }
 
+/* ── Notification Channels (CC-073) ───────────────────────────────────── */
+
+.channelsCard {
+  border: 1px solid var(--cc-border-subtle);
+  border-radius: 8px;
+  padding: 1.25rem;
+  background: var(--cc-bg-surface);
+  width: 100%;
+  margin-bottom: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.channelsIntro {
+  font-size: 0.8rem;
+  color: var(--cc-text-secondary);
+  line-height: 1.5;
+}
+
+.channelsError {
+  font-size: 0.75rem;
+  color: var(--cc-red);
+}
+
+.channelsEmpty {
+  font-size: 0.8rem;
+  color: var(--cc-text-muted);
+}
+
+.channelsLoadBtn {
+  background: transparent;
+  color: var(--cc-blue-bright);
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.channelsLoadBtn:hover:not(:disabled) {
+  border-color: var(--cc-blue-bright);
+}
+
+.channelsLoadBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.channelList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.channelRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.channelBadge {
+  font-family: var(--cc-font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.channel_email {
+  background: rgba(0, 210, 122, 0.12);
+  color: var(--cc-green);
+}
+
+.channel_webhook {
+  background: rgba(0, 0, 255, 0.12);
+  color: var(--cc-blue-bright);
+}
+
+.channel_telegram {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--cc-yellow);
+}
+
+.channel_discord {
+  background: rgba(255, 68, 68, 0.12);
+  color: var(--cc-red);
+}
+
+.channelAddress {
+  flex: 1;
+  font-family: var(--cc-font-mono);
+  font-size: 0.8rem;
+  color: var(--cc-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.channelRemoveBtn {
+  background: none;
+  border: none;
+  color: var(--cc-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+.channelRemoveBtn:hover:not(:disabled) {
+  color: var(--cc-red);
+}
+
+.channelRemoveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.channelForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--cc-border-subtle);
+}
+
+.channelFieldLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--cc-text-muted);
+}
+
+.channelSelect,
+.channelInput {
+  background: var(--cc-bg-elevated);
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: var(--cc-text);
+  font-family: var(--cc-font-mono);
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.channelSelect:focus,
+.channelInput:focus {
+  border-color: var(--cc-green);
+}
+
+.channelSelect option {
+  background: var(--cc-bg-elevated);
+}
+
+.channelExplainer {
+  font-size: 0.72rem;
+  color: var(--cc-text-faint);
+  line-height: 1.5;
+}
+
+.channelFormActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.channelAddBtn {
+  background: var(--cc-green);
+  color: #0a0b0d;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.channelAddBtn:hover:not(:disabled) {
+  background: var(--cc-green-hover);
+}
+
+.channelAddBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.channelCancelBtn {
+  background: transparent;
+  color: var(--cc-text-muted);
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.channelCancelBtn:hover:not(:disabled) {
+  color: var(--cc-text);
+  border-color: var(--cc-text-muted);
+}
+
+.channelCancelBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.channelUpdateNote {
+  font-size: 0.7rem;
+  color: var(--cc-text-faint);
+}
+
 /* ── Profile ──────────────────────────────────────────────────────────── */
 
 .profileCard {
@@ -475,4 +751,175 @@
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--cc-green);
+  margin-bottom: 0.75rem;
+}
+
+/* ── Profile editing (CC-021) ─────────────────────────────────────────── */
+
+.availabilityRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.availabilityLabel {
+  font-size: 0.78rem;
+  color: var(--cc-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.availabilityToggle {
+  display: inline-flex;
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.availabilityOption {
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--cc-border);
+  color: var(--cc-text-muted);
+  padding: 0.35rem 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.availabilityOption:last-child {
+  border-right: none;
+}
+
+.availabilityOption:hover:not(:disabled):not(.availabilityActive) {
+  color: var(--cc-text);
+}
+
+.availabilityOption:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.availabilityActive {
+  font-weight: 600;
+}
+
+.availabilityAvailable.availabilityActive {
+  background: rgba(0, 210, 122, 0.15);
+  color: var(--cc-green);
+}
+
+.availabilityBusy.availabilityActive {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--cc-yellow);
+}
+
+.availabilityOffline.availabilityActive {
+  background: var(--cc-bg-elevated);
+  color: var(--cc-text-secondary);
+}
+
+.profileEditToggle {
+  background: none;
+  border: none;
+  color: var(--cc-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  align-self: flex-start;
+}
+
+.profileEditToggle:hover {
+  color: var(--cc-blue-bright);
+}
+
+.profileEditForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--cc-border-subtle);
+}
+
+.profileFieldLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--cc-text-muted);
+}
+
+.profileInput {
+  background: var(--cc-bg-elevated);
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: var(--cc-text);
+  font-family: var(--cc-font-mono);
+  font-size: 0.85rem;
+  outline: none;
+  max-width: 12rem;
+}
+
+.profileInput:focus {
+  border-color: var(--cc-green);
+}
+
+.categoryPicker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.35rem 1rem;
+}
+
+.categoryOption {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--cc-text-secondary);
+  cursor: pointer;
+}
+
+.profileSaveBtn {
+  background: var(--cc-green);
+  color: #0A0B0D;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.profileSaveBtn:hover:not(:disabled) {
+  background: var(--cc-green-hover);
+}
+
+.profileSaveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.profileEditNote {
+  font-size: 0.72rem;
+  color: var(--cc-text-faint);
+  line-height: 1.4;
+}
+
+.profileMsgOk {
+  font-size: 0.78rem;
+  color: var(--cc-green);
+  margin-top: 0.5rem;
+}
+
+.profileMsgErr {
+  font-size: 0.78rem;
+  color: var(--cc-red);
+  margin-top: 0.5rem;
 }
