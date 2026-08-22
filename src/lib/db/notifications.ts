@@ -115,6 +115,30 @@ export async function removeNotificationChannel(
 }
 
 /**
+ * Update the accepts_auto_booking flag on one channel (CC-074).
+ * The dashboard toggle calls this; PATCH /api/channels checks ownership first.
+ * Returns the updated channel, or null if the row does not exist.
+ */
+export async function setChannelAutoBooking(
+  channelId: string,
+  acceptsAutoBooking: boolean
+): Promise<NotificationChannel | null> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("notification_channels")
+    .update({ accepts_auto_booking: acceptsAutoBooking })
+    .eq("id", channelId)
+    .select()
+    .single();
+
+  if (error && error.code !== "PGRST116") {
+    throw new Error(`setChannelAutoBooking failed: ${error.message}`);
+  }
+  return (data as NotificationChannel) ?? null;
+}
+
+/**
  * Find all contractors who accept auto-booking.
  * Used by orchestrator agents to find workers they can hire directly.
  */

@@ -709,6 +709,64 @@
   color: var(--cc-text-faint);
 }
 
+/* ── Auto-booking toggle (CC-074) ──────────────────────────────────────── */
+
+.autoBookingNote {
+  font-size: 0.78rem;
+  color: var(--cc-text-secondary);
+  line-height: 1.55;
+  padding: 0.75rem;
+  border: 1px solid var(--cc-border-subtle);
+  border-radius: 6px;
+  background: var(--cc-bg-elevated);
+}
+
+.autoBookingNote strong {
+  color: var(--cc-text);
+}
+
+.autoBookToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: var(--cc-bg-elevated);
+  border: 1px solid var(--cc-border);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem 0.25rem 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--cc-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.autoBookToggle:hover:not(:disabled) {
+  border-color: var(--cc-green);
+}
+
+.autoBookToggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.autoBookKnob {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: var(--cc-text-muted);
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.autoBookToggleOn {
+  border-color: var(--cc-green);
+  color: var(--cc-green);
+}
+
+.autoBookToggleOn .autoBookKnob {
+  background: var(--cc-green);
+}
+
 /* ── Profile ──────────────────────────────────────────────────────────── */
 
 .profileCard {
