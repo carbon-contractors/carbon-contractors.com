@@ -34,7 +34,7 @@ Open by priority: **P0** 6 · **P1** 17 · **P2** 13 · **P3** 1
 | [CC-084](CC-084.md) | P0 | In progress | backend | Machine-checkable acceptance spec, versioned and committed before work is accepted |
 | [CC-092](CC-092.md) | P0 | In progress | backend | The app layer has no v2 write path — no submitWork, no verdict service, no worker claim |
 | [CC-094](CC-094.md) | P0 | Blocked | backend | Offer and accept lifecycle — the worker consents before any money is locked |
-| [CC-095](CC-095.md) | P0 | To do | backend | Notification delivery does not exist — channels are registered and never written to |
+| [CC-095](CC-095.md) | P0 | In progress | backend | Notification delivery does not exist — channels are registered and never written to |
 | [CC-009](CC-009.md) | P1 | To do | security | Waitlist emails written to Vercel logs in cleartext |
 | [CC-032](CC-032.md) | P1 | To do | testing | Sepolia end-to-end lifecycle test |
 | [CC-033](CC-033.md) | P1 | To do | contracts | Requester gas stake |
