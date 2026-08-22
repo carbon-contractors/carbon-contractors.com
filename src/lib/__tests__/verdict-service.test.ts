@@ -52,6 +52,8 @@ function baseTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     funded_at: "2026-08-20T00:00:00.000Z",
     content_purged_at: null,
     content_purge_rule: null,
+    idempotency_key: null,
+    review_window_seconds: 48 * 3600,
     created_at: "2026-08-20T00:00:00.000Z",
     ...overrides,
   };

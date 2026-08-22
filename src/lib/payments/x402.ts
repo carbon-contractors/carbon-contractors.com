@@ -13,7 +13,7 @@
  */
 
 import { randomBytes } from "crypto";
-import { createTask } from "@/lib/db/tasks";
+import { createTask, type TaskRecord } from "@/lib/db/tasks";
 import { log } from "@/lib/logging";
 import { toTaskId, getEscrowConfig } from "@/lib/contracts/escrow";
 import { getConfig } from "@/lib/config";
@@ -49,6 +49,12 @@ export interface X402PaymentRequest {
    * auto_accept — validated against the 15-minute to 7-day bounds below.
    */
   offer_expiry_seconds?: number;
+  /**
+   * CC-046: caller-scoped dedup key. Stored verbatim; unique per agent by
+   * migration 020, so a concurrent duplicate insert fails (23505) and the
+   * caller replays the surviving row instead of double-creating.
+   */
+  idempotency_key?: string;
 }
 
 export interface X402PaymentResponse {
@@ -150,11 +156,6 @@ export async function initiateX402Payment(
   const taskIdBytes32 = toTaskId(payment_request_id);
   const escrowConfig = getEscrowConfig();
 
-  // Convert USDC to wei (6 decimals)
-  const amountWei = BigInt(
-    Math.round(req.amount_usdc * 10 ** USDC_DECIMALS)
-  ).toString();
-
   // Persist with the offer-stage status (CC-094): 'accepted' when the worker
   // pre-authorised auto-booking, otherwise 'pending' — an offer that waits for
   // them. The row only moves to "active" once the worker has accepted AND the
@@ -173,6 +174,10 @@ export async function initiateX402Payment(
     spec_schema_version: req.spec.version,
     status: initialStatus,
     offer_expiry_unix: offerExpiryUnix,
+    ...(req.idempotency_key !== undefined
+      ? { idempotency_key: req.idempotency_key }
+      : {}),
+    review_window_seconds: req.review_window_seconds,
   });
 
   // CC-009 / ADR-0002 D9: never log the spec itself. It carries GPS coordinates and
@@ -188,50 +193,118 @@ export async function initiateX402Payment(
     offer_expiry_unix: offerExpiryUnix,
   });
 
+  return buildFundingResponse({
+    payment_request_id,
+    worker: req.to_human_wallet,
+    amount_usdc: req.amount_usdc,
+    deadline_unix: req.deadline_unix,
+    review_window_seconds: req.review_window_seconds,
+    spec: req.spec,
+    worker_status: initialStatus,
+    offer_expiry_unix: offerExpiryUnix,
+  });
+}
+
+/** What buildFundingResponse needs — everything the createTask ABI takes, in row form. */
+interface FundingResponseParams {
+  payment_request_id: string;
+  worker: string;
+  amount_usdc: number;
+  deadline_unix: number;
+  review_window_seconds: number;
+  spec: { preimage: string; hash: string; version: number; hasNoCriteria?: boolean };
+  worker_status: "accepted" | "pending";
+  offer_expiry_unix: number | null;
+}
+
+/**
+ * Builds the funding response from parameters already validated and persisted.
+ * Shared by the initial request and the CC-046 replay path so the two can never
+ * drift — an agent retrying with an idempotency key must see the same shape.
+ */
+function buildFundingResponse(p: FundingResponseParams): X402PaymentResponse {
+  const escrowConfig = getEscrowConfig();
+  const taskIdBytes32 = toTaskId(p.payment_request_id);
+  const amountWei = BigInt(
+    Math.round(p.amount_usdc * 10 ** USDC_DECIMALS),
+  ).toString();
   const baseUrl = getConfig().NEXT_PUBLIC_BASE_URL;
 
   // A spec that commits to no criteria is well-formed and allowed, but there is
   // nothing to check, so the task can only resolve in the worker's favour. That is
   // a legitimate choice for a category that does not check — it should never be an
   // accident, so say so rather than swallowing it.
-  const specWarning = req.spec.hasNoCriteria
+  const specWarning = p.spec.hasNoCriteria
     ? "acceptance_spec declares no criteria. There is nothing to check, so this task can only resolve in the worker's favour (ADR-0001 D6)."
     : undefined;
 
   return {
     status: "awaiting_funding",
-    payment_request_id,
+    payment_request_id: p.payment_request_id,
     task_id_bytes32: taskIdBytes32,
-    worker: req.to_human_wallet,
-    amount_usdc: req.amount_usdc,
+    worker: p.worker,
+    amount_usdc: p.amount_usdc,
     amount_wei: amountWei,
-    deadline_unix: req.deadline_unix,
-    review_window_seconds: req.review_window_seconds,
-    spec_hash: req.spec.hash,
+    deadline_unix: p.deadline_unix,
+    review_window_seconds: p.review_window_seconds,
+    spec_hash: p.spec.hash,
     escrow_contract: escrowConfig.address,
     chain_id: escrowConfig.chainId,
     base_network: escrowConfig.chainName,
     fund_url: `${baseUrl}/api/fund-task`,
-    worker_status: initialStatus,
-    offer_expiry_unix: offerExpiryUnix,
-    acceptance_spec: req.spec.preimage,
-    spec_schema_version: req.spec.version,
+    worker_status: p.worker_status,
+    offer_expiry_unix: p.offer_expiry_unix,
+    acceptance_spec: p.spec.preimage,
+    spec_schema_version: p.spec.version,
     ...(specWarning ? { spec_warning: specWarning } : {}),
     instructions: [
       `Fund the escrow from your own wallet on ${escrowConfig.chainName} (chain id ${escrowConfig.chainId}):`,
-      ...(autoAccept
-        ? []
-        : [
-            `0. Wait for the worker to accept the offer — the task is '${initialStatus}' until they do`,
-            `   (they have until unix ${offerExpiryUnix}). /api/fund-task refuses a task that is not 'accepted'.`,
-          ]),
+      ...(p.worker_status === "pending"
+        ? [
+            `0. Wait for the worker to accept the offer — the task is '${p.worker_status}' until they do`,
+            `   (they have until unix ${p.offer_expiry_unix}). /api/fund-task refuses a task that is not 'accepted'.`,
+          ]
+        : []),
       `1. Approve the escrow to spend your USDC: usdc.approve("${escrowConfig.address}", ${amountWei}).`,
-      `2. Create the task: escrow.createTask("${taskIdBytes32}", "${req.to_human_wallet}", ${amountWei}, ${req.deadline_unix}, ${req.review_window_seconds}, "${req.spec.hash}").`,
+      `2. Create the task: escrow.createTask("${taskIdBytes32}", "${p.worker}", ${amountWei}, ${p.deadline_unix}, ${p.review_window_seconds}, "${p.spec.hash}").`,
       `   Verify spec_hash yourself: keccak256 of the UTF-8 bytes of acceptance_spec below.`,
-      `3. Confirm: POST { "payment_request_id": "${payment_request_id}" } to /api/fund-task.`,
+      `3. Confirm: POST { "payment_request_id": "${p.payment_request_id}" } to /api/fund-task.`,
       `   That endpoint is not a payment endpoint — it reads the chain, checks the task is Funded,`,
       `   and only then moves the task to "active". Until you fund it, nothing is owed.`,
     ].join("\n"),
     timestamp_unix: Math.floor(Date.now() / 1000),
+  };
+}
+
+/**
+ * A replayed funding response (CC-046): reconstructs every createTask parameter
+ * from a stored task row, via the same builder as the original response. The
+ * chain parameters are re-derived from server config, never from the caller.
+ */
+export type X402ReplayResponse = Omit<X402PaymentResponse, "status"> & {
+  status: "awaiting_funding" | "already_initiated";
+  /** The task row's live status — a replay can land after funding or settlement. */
+  task_status: TaskRecord["status"];
+};
+
+export function replayX402Payment(task: TaskRecord): X402ReplayResponse {
+  const inOfferStage = task.status === "pending" || task.status === "accepted";
+  return {
+    ...buildFundingResponse({
+      payment_request_id: task.payment_request_id,
+      worker: task.to_human_wallet,
+      amount_usdc: task.amount_usdc,
+      deadline_unix: task.deadline_unix,
+      review_window_seconds: task.review_window_seconds ?? 0,
+      spec: {
+        preimage: task.acceptance_spec ?? "",
+        hash: task.spec_hash ?? "",
+        version: task.spec_schema_version ?? 1,
+      },
+      worker_status: task.status === "pending" ? "pending" : "accepted",
+      offer_expiry_unix: task.offer_expiry_unix,
+    }),
+    status: inOfferStage ? "awaiting_funding" : "already_initiated",
+    task_status: task.status,
   };
 }

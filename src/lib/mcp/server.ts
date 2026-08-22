@@ -14,11 +14,12 @@ import {
   getHumanById,
   getDistinctCategories,
 } from "@/lib/db/whitepages";
-import { initiateX402Payment } from "@/lib/payments/x402";
+import { initiateX402Payment, replayX402Payment } from "@/lib/payments/x402";
 import {
   getTaskByPaymentId,
   updateTaskStatus,
   countCommittedTasks,
+  findTaskByIdempotencyKey,
   WORKER_CONCURRENCY_CAP,
 } from "@/lib/db/tasks";
 import { getFullReputation } from "@/lib/reputation";
@@ -27,6 +28,7 @@ import {
   getChannelsForContractor,
 } from "@/lib/db/notifications";
 import { notifyContractor } from "@/lib/notifications/dispatch";
+import { toolError } from "@/lib/mcp/errors";
 import {
   getOnChainTask,
   getEscrowConfig,
@@ -177,6 +179,14 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         .describe(
           'Machine-checkable acceptance criteria, as a JSON STRING (not an object) — e.g. \'{"schema_version":1,"criteria":{"min_artefacts":8}}\'. Sent as a string because the exact bytes you send are the hash preimage: the returned spec_hash is keccak256 of them, and re-serialising would change it. Pass it verbatim as specHash to createTask. Required — without a spec there is nothing to check, so a task can only resolve in the worker\'s favour, and that must be a commitment you made, not an omission.'
         ),
+      idempotency_key: z
+        .string()
+        .min(1)
+        .max(128)
+        .optional()
+        .describe(
+          "Optional caller-chosen dedup key. If a task already exists with this key for YOUR wallet, its details are returned unchanged instead of creating a second task — send the same key when retrying after a timeout or network failure, never a fresh one. Scoped to your wallet; keys bind for at least 24h. Chain parameters (chain id, escrow and USDC addresses, RPC URL) are never arguments to any tool — they are server-config constants."
+        ),
     },
     async ({
       to_human_wallet,
@@ -186,6 +196,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       review_window_hours,
       offer_expiry_minutes,
       acceptance_spec,
+      idempotency_key,
     }) => {
       const deadline_unix =
         Math.floor(Date.now() / 1000) + deadline_hours * 3600;
@@ -201,41 +212,54 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             caller: context?.callerWallet ?? "unauthenticated",
             notice: pauseStatus.notice,
           });
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error: `Task creation is temporarily paused: ${pauseStatus.notice}`,
-                  intake_paused: true,
-                  claims_active: true,
-                  retry_after_s: 300,
-                }),
-              },
-            ],
-          };
+          return toolError(
+            `Task creation is temporarily paused: ${pauseStatus.notice}`,
+            "INTAKE_PAUSED",
+            { extra: { intake_paused: true, claims_active: true, retry_after_s: 300 } },
+          );
         }
 
         // Authorization: the *** agent must be an authenticated wallet, and the
         // task is attributed to it. Same shape as the three mutating tools below.
         if (!context?.callerWallet) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error:
-                    "Authentication required. POST { walletAddress } to /api/basedhuman.mcp/challenge, sign the returned message with your wallet, and re-initialize the session with the x-caller-wallet, x-caller-signature and x-caller-nonce headers.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Authentication required. POST { walletAddress } to /api/basedhuman.mcp/challenge, sign the returned message with your wallet, and re-initialize the session with the x-caller-wallet, x-caller-signature and x-caller-nonce headers.",
+            "UNAUTHENTICATED",
+          );
         }
         const from_agent_wallet = context.callerWallet;
+
+        // CC-046 idempotency: a retry after a network failure must return the
+        // original task, not a second row the agent might also fund. Checked
+        // before the rate limiter — a replay is not a new task creation and must
+        // not burn a token. Caller-scoped: the lookup includes the authenticated
+        // wallet, so one agent's key never shadows another's. A concurrent
+        // double-send that slips past this lookup fails the insert on
+        // migration 020's unique index (23505) and replays from the catch below.
+        if (idempotency_key !== undefined) {
+          const existing = await findTaskByIdempotencyKey(
+            from_agent_wallet,
+            idempotency_key,
+          );
+          if (existing) {
+            log("info", "request_human_work_idempotent_replay", {
+              caller: from_agent_wallet,
+              payment_request_id: existing.payment_request_id,
+            });
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    ok: true,
+                    idempotent_replay: true,
+                    ...replayX402Payment(existing),
+                  }),
+                },
+              ],
+            };
+          }
+        }
 
         // Bound how fast one authenticated agent can create tasks. The
         // authentication above is the real control; see CC-020 on this limiter
@@ -247,19 +271,11 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           log("warn", "request_human_work_rate_limited", {
             caller: from_agent_wallet,
           });
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Task creation rate limit exceeded for this wallet.",
-                  retry_after_s: retryAfterS,
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Task creation rate limit exceeded for this wallet.",
+            "RATE_LIMITED",
+            { extra: { retry_after_s: retryAfterS } },
+          );
         }
 
         // `to_human_wallet` was previously format-checked only, despite the
@@ -273,19 +289,10 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           log("warn", "request_human_work_unregistered_worker", {
             caller: from_agent_wallet,
           });
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error:
-                    "to_human_wallet does not belong to a registered worker. Use search_whitepages to find one.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "to_human_wallet does not belong to a registered worker. Use search_whitepages to find one.",
+            "UNREGISTERED_WORKER",
+          );
         }
 
         // CC-094 / ADR-0005 D3: accepts_auto_booking is a gate, not metadata.
@@ -306,18 +313,10 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
               worker: worker.wallet,
               committed,
             });
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify({
-                    ok: false,
-                    error: `This worker is at their concurrency cap (${WORKER_CONCURRENCY_CAP} accepted+active tasks) and cannot be auto-booked. Use search_whitepages to find another worker.`,
-                  }),
-                },
-              ],
-            };
+            return toolError(
+              `This worker is at their concurrency cap (${WORKER_CONCURRENCY_CAP} accepted+active tasks) and cannot be auto-booked. Use search_whitepages to find another worker.`,
+              "WORKER_AT_CAPACITY",
+            );
           }
         }
 
@@ -329,19 +328,10 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // omission. The schema makes it required for real callers; the guard below
         // covers direct handler invocation (tests, internal use) that bypasses it.
         if (acceptance_spec === undefined) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error:
-                    "acceptance_spec is required. Without it there is nothing to check, so the task could only resolve in the worker's favour — see ADR-0001 D6.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "acceptance_spec is required. Without it there is nothing to check, so the task could only resolve in the worker's favour — see ADR-0001 D6.",
+            "ACCEPTANCE_SPEC_REQUIRED",
+          );
         }
         let spec;
         try {
@@ -349,12 +339,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         } catch (err) {
           const message =
             err instanceof SpecValidationError ? err.message : String(err);
-          return {
-            isError: true,
-            content: [
-              { type: "text", text: JSON.stringify({ ok: false, error: message }) },
-            ],
-          };
+          return toolError(message, "INVALID_SPEC");
         }
 
         // CC-075 / ADR-0005 D6 + ADR-0001 D1: inline AWOL check at auto-booking
@@ -395,6 +380,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           spec,
           auto_accept: autoAccept,
           offer_expiry_seconds,
+          ...(idempotency_key !== undefined ? { idempotency_key } : {}),
         });
 
         // ADR-0005 D7: the worker must be told about the offer. notifyContractor
@@ -437,15 +423,39 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        // Migration 020's unique index lost the concurrent-retry race: another
+        // request with the same (agent, key) inserted first. Fetch theirs and
+        // replay it — the agent must not see an error it would instinctively
+        // retry with a fresh key.
+        if (idempotency_key !== undefined && message.includes("(23505)")) {
+          const winner = context?.callerWallet
+            ? await findTaskByIdempotencyKey(context.callerWallet, idempotency_key)
+            : null;
+          if (winner) {
+            log("info", "request_human_work_idempotent_race_replay", {
+              caller: context?.callerWallet,
+              payment_request_id: winner.payment_request_id,
+            });
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    ok: true,
+                    idempotent_replay: true,
+                    replayed_after_conflict: true,
+                    ...replayX402Payment(winner),
+                  }),
+                },
+              ],
+            };
+          }
+        }
+        log("error", "request_human_work_failed", {
+          caller: context?.callerWallet ?? "unauthenticated",
+          error: message,
+        });
+        return toolError(message, "INTERNAL", { reason: "unexpected_fault" });
       }
     }
   );
@@ -464,18 +474,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       try {
         const dbTask = await getTaskByPaymentId(payment_request_id);
         if (!dbTask) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Task not found",
-                }),
-              },
-            ],
-          };
+          return toolError("Task not found", "TASK_NOT_FOUND");
         }
 
         // Try to read on-chain state (may fail if contract not deployed)
@@ -532,15 +531,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );
@@ -566,34 +557,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       try {
         // Authorization: only the originating agent may confirm completion
         if (!context?.callerWallet) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Authentication required. Provide a verified wallet to confirm task completion.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Authentication required. Provide a verified wallet to confirm task completion.",
+            "UNAUTHENTICATED",
+          );
         }
 
         const task = await getTaskByPaymentId(payment_request_id);
         if (!task) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Task not found",
-                }),
-              },
-            ],
-          };
+          return toolError("Task not found", "TASK_NOT_FOUND");
         }
 
         if (task.from_agent_wallet.toLowerCase() !== context.callerWallet.toLowerCase()) {
@@ -602,34 +574,18 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             caller: context.callerWallet,
             task_agent: task.from_agent_wallet,
           });
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Not authorized. Only the originating agent may confirm task completion.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Not authorized. Only the originating agent may confirm task completion.",
+            "FORBIDDEN",
+          );
         }
 
         if (task.status !== "active" && task.status !== "pending") {
           if (task.status !== "completed") {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify({
-                    ok: false,
-                    error: `Task is ${task.status}, cannot confirm completion`,
-                  }),
-                },
-              ],
-            };
+            return toolError(
+              `Task is ${task.status}, cannot confirm completion`,
+              "INVALID_TASK_STATE",
+            );
           }
           // Already completed — the settlement this tool points at has happened.
           return {
@@ -699,15 +655,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );
@@ -768,15 +716,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );
@@ -799,18 +739,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
     async ({ wallet, id }) => {
       try {
         if (!wallet && !id) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Provide either wallet or id",
-                }),
-              },
-            ],
-          };
+          return toolError("Provide either wallet or id", "INVALID_ARGUMENT");
         }
 
         const human = wallet
@@ -818,18 +747,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           : await getHumanById(id!);
 
         if (!human) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Contractor not found",
-                }),
-              },
-            ],
-          };
+          return toolError("Contractor not found", "CONTRACTOR_NOT_FOUND");
         }
 
         const channels = await getChannelsForContractor(human.id);
@@ -857,15 +775,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );
@@ -892,15 +802,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );
@@ -932,15 +834,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );
@@ -981,34 +875,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       try {
         // Authorization: either party may dispute (ADR-0001 D2)
         if (!context?.callerWallet) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Authentication required. Provide a verified wallet to dispute tasks.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Authentication required. Provide a verified wallet to dispute tasks.",
+            "UNAUTHENTICATED",
+          );
         }
 
         const task = await getTaskByPaymentId(payment_request_id);
         if (!task) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Task not found",
-                }),
-              },
-            ],
-          };
+          return toolError("Task not found", "TASK_NOT_FOUND");
         }
 
         const caller = context.callerWallet.toLowerCase();
@@ -1021,33 +896,17 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             worker: task.to_human_wallet,
             agent: task.from_agent_wallet,
           });
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Not authorized. Only a party to this task (worker or hiring agent) may dispute it.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Not authorized. Only a party to this task (worker or hiring agent) may dispute it.",
+            "FORBIDDEN",
+          );
         }
 
         if (task.status !== "active" && task.status !== "pending" && task.status !== "disputed") {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: `Task is ${task.status}, cannot dispute`,
-                }),
-              },
-            ],
-          };
+          return toolError(
+            `Task is ${task.status}, cannot dispute`,
+            "INVALID_TASK_STATE",
+          );
         }
 
         const taskIdBytes32 = toTaskId(payment_request_id);
@@ -1065,30 +924,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                 : err instanceof Error
                   ? `Verdict computation failed: ${err.message}`
                   : String(err);
-            return {
-              isError: true,
-              content: [
-                { type: "text" as const, text: JSON.stringify({ ok: false, error: message }) },
-              ],
-            };
+            return toolError(message, err instanceof VerdictInputError ? "VERDICT_INPUT_INVALID" : "VERDICT_COMPUTATION_FAILED");
           }
 
           if (computed.verdict.passed) {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify({
-                    ok: false,
-                    error:
-                      "Cannot dispute: verdict passed. The evidence satisfies the committed acceptance spec.",
-                    verdict: serializeVerdict(computed.verdict),
-                    checks: computed.checks,
-                  }),
-                },
-              ],
-            };
+            return toolError(
+              "Cannot dispute: verdict passed. The evidence satisfies the committed acceptance spec.",
+              "VERDICT_PASSED",
+              { extra: { verdict: serializeVerdict(computed.verdict), checks: computed.checks } },
+            );
           }
 
           if (task.status !== "disputed") {
@@ -1166,32 +1010,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: false,
-                error:
-                  "A dispute requires a signed failing verdict — pass the task's evidence bundle as evidence_bundle (a JSON string) so one can be computed. On-chain state is " +
-                  (onChainState ?? "unreadable") +
-                  ", so there is no existing dispute to record.",
-              }),
-            },
-          ],
-        };
+        return toolError(
+          "A dispute requires a signed failing verdict — pass the task's evidence bundle as evidence_bundle (a JSON string) so one can be computed. On-chain state is " +
+            (onChainState ?? "unreadable") +
+            ", so there is no existing dispute to record.",
+          "DISPUTE_REQUIRES_VERDICT",
+        );
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );
@@ -1221,35 +1048,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
     async ({ payment_request_id, evidence_bundle }) => {
       try {
         if (!context?.callerWallet) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error:
-                    "Authentication required. POST { walletAddress } to /api/basedhuman.mcp/challenge, sign the returned message with your wallet, and re-initialize the session with the x-caller-wallet, x-caller-signature and x-caller-nonce headers.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Authentication required. POST { walletAddress } to /api/basedhuman.mcp/challenge, sign the returned message with your wallet, and re-initialize the session with the x-caller-wallet, x-caller-signature and x-caller-nonce headers.",
+            "UNAUTHENTICATED",
+          );
         }
 
         const task = await getTaskByPaymentId(payment_request_id);
         if (!task) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Task not found",
-                }),
-              },
-            ],
-          };
+          return toolError("Task not found", "TASK_NOT_FOUND");
         }
 
         // Same posture as disputeTask/claimWithVerdict on-chain: NotParty.
@@ -1262,18 +1069,10 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             payment_request_id,
             caller: context.callerWallet,
           });
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Not authorized. Only a party to this task (worker or hiring agent) may request its verdict.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Not authorized. Only a party to this task (worker or hiring agent) may request its verdict.",
+            "FORBIDDEN",
+          );
         }
 
         let computed;
@@ -1286,12 +1085,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
               : err instanceof Error
                 ? `Verdict computation failed: ${err.message}`
                 : String(err);
-          return {
-            isError: true,
-            content: [
-              { type: "text" as const, text: JSON.stringify({ ok: false, error: message }) },
-            ],
-          };
+          return toolError(message, err instanceof VerdictInputError ? "VERDICT_INPUT_INVALID" : "VERDICT_COMPUTATION_FAILED");
         }
 
         log("info", "verdict_computed", {
@@ -1320,15 +1114,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );
@@ -1355,34 +1141,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       try {
         // Authorization: only the originating agent may resolve a dispute
         if (!context?.callerWallet) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Authentication required. Provide a verified wallet to resolve disputes.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Authentication required. Provide a verified wallet to resolve disputes.",
+            "UNAUTHENTICATED",
+          );
         }
 
         const task = await getTaskByPaymentId(payment_request_id);
         if (!task) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Task not found",
-                }),
-              },
-            ],
-          };
+          return toolError("Task not found", "TASK_NOT_FOUND");
         }
 
         if (task.from_agent_wallet.toLowerCase() !== context.callerWallet.toLowerCase()) {
@@ -1391,33 +1158,17 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             caller: context.callerWallet,
             task_agent: task.from_agent_wallet,
           });
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: "Not authorized. Only the originating agent may resolve this dispute.",
-                }),
-              },
-            ],
-          };
+          return toolError(
+            "Not authorized. Only the originating agent may resolve this dispute.",
+            "FORBIDDEN",
+          );
         }
 
         if (task.status !== "disputed") {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: false,
-                  error: `Task is ${task.status}, can only resolve disputed tasks`,
-                }),
-              },
-            ],
-          };
+          return toolError(
+            `Task is ${task.status}, can only resolve disputed tasks`,
+            "INVALID_TASK_STATE",
+          );
         }
 
         const taskIdBytes32 = toTaskId(payment_request_id);
@@ -1445,18 +1196,11 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             } else if (onChainTask.state !== "Disputed") {
               // DB says disputed but chain disagrees and it isn't already Resolved either —
               // don't guess, surface it.
-              return {
-                isError: true,
-                content: [
-                  {
-                    type: "text" as const,
-                    text: JSON.stringify({
-                      ok: false,
-                      error: `DB/chain state mismatch: DB says disputed, on-chain state is ${onChainTask.state}`,
-                    }),
-                  },
-                ],
-              };
+              return toolError(
+                `DB/chain state mismatch: DB says disputed, on-chain state is ${onChainTask.state}`,
+                "CHAIN_STATE_MISMATCH",
+                { reason: "db_chain_divergence" },
+              );
             }
           } catch {
             // Contract may not be deployed yet — proceed with the on-chain call attempt below.
@@ -1472,18 +1216,11 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
               payment_request_id,
               error: chainMsg,
             });
-            return {
-              isError: true,
-              content: [
-                {
-                  type: "text" as const,
-                  text: JSON.stringify({
-                    ok: false,
-                    error: `On-chain resolveDispute failed: ${chainMsg}`,
-                  }),
-                },
-              ],
-            };
+            return toolError(
+              `On-chain resolveDispute failed: ${chainMsg}`,
+              "CHAIN_WRITE_FAILED",
+              { reason: "resolve_dispute_tx_failed" },
+            );
           }
         }
 
@@ -1516,15 +1253,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok: false, error: message }),
-            },
-          ],
-        };
+        return toolError(message, "INTERNAL");
       }
     }
   );

@@ -44,6 +44,7 @@ vi.mock("@/lib/db/whitepages", () => ({
 const mockInitiateX402Payment = vi.fn();
 vi.mock("@/lib/payments/x402", () => ({
   initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
+  replayX402Payment: vi.fn(),
 }));
 
 const mockLimit = vi.fn();
