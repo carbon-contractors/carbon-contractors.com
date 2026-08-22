@@ -16,7 +16,7 @@ vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
 vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
-import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks, lapseExpiredOffers, countCommittedTasks, WORKER_CONCURRENCY_CAP } from "@/lib/db/tasks";
+import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks, lapseExpiredOffers, countCommittedTasks, findTaskByIdempotencyKey, WORKER_CONCURRENCY_CAP } from "@/lib/db/tasks";
 
 function chainable(result: { data: unknown; error: unknown; count?: number }) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -32,7 +32,9 @@ function chainable(result: { data: unknown; error: unknown; count?: number }) {
   chain.lte = vi.fn(self);
   chain.order = vi.fn(self);
   chain.limit = vi.fn(self);
+  chain.gte = vi.fn(self);
   chain.single = vi.fn().mockResolvedValue(result);
+  chain.maybeSingle = vi.fn().mockResolvedValue(result);
   chain.then = vi.fn((resolve: (v: unknown) => unknown) => Promise.resolve(resolve(result)));
   return chain;
 }
@@ -214,6 +216,102 @@ describe("tasks", () => {
     expect(chain.insert).toHaveBeenCalledWith(
       expect.objectContaining({ status: "pending", offer_expiry_unix: null }),
     );
+  });
+
+  it("createTask persists the idempotency key and review window (CC-046)", async () => {
+    const chain = chainable({ data: { id: "1" }, error: null });
+    mockFrom.mockReturnValue(chain);
+
+    await createTask({
+      payment_request_id: "pr_3",
+      from_agent_wallet: "0xAAAA111122223333444455556666777788889999",
+      to_human_wallet: "0xBBBB111122223333444455556666777788889999",
+      task_description: "test",
+      amount_usdc: 10,
+      deadline_unix: 0,
+      tx_hash: "0xtx",
+      escrow_contract: "0xescrow",
+      idempotency_key: "retry-1",
+      review_window_seconds: 48 * 3600,
+    });
+
+    expect(chain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotency_key: "retry-1",
+        review_window_seconds: 48 * 3600,
+      }),
+    );
+  });
+
+  it("createTask surfaces the PostgREST code so callers can branch on 23505 (CC-046)", async () => {
+    const chain = chainable({
+      data: null,
+      error: { message: "duplicate key value violates unique constraint", code: "23505" },
+    });
+    mockFrom.mockReturnValue(chain);
+
+    await expect(
+      createTask({
+        payment_request_id: "pr_4",
+        from_agent_wallet: "0xAAAA111122223333444455556666777788889999",
+        to_human_wallet: "0xBBBB111122223333444455556666777788889999",
+        task_description: "test",
+        amount_usdc: 10,
+        deadline_unix: 0,
+        tx_hash: "0xtx",
+        escrow_contract: "0xescrow",
+      }),
+    ).rejects.toThrow("createTask failed (23505)");
+  });
+
+  describe("findTaskByIdempotencyKey (CC-046)", () => {
+    it("scopes the query to the caller's wallet, key, and the TTL cutoff", async () => {
+      const task = { id: "1", payment_request_id: "pr_existing", idempotency_key: "retry-1" };
+      const chain = chainable({ data: task, error: null });
+      mockFrom.mockReturnValue(chain);
+
+      const result = await findTaskByIdempotencyKey(
+        "0xAAAA111122223333444455556666777788889999",
+        "retry-1",
+      );
+
+      expect(result).toEqual(task);
+      expect(mockFrom).toHaveBeenCalledWith("tasks");
+      expect(chain.eq).toHaveBeenCalledWith(
+        "from_agent_wallet",
+        "0xaaaa111122223333444455556666777788889999", // lowercased (migration 014)
+      );
+      expect(chain.eq).toHaveBeenCalledWith("idempotency_key", "retry-1");
+      // TTL cutoff: created_at within the last 24h.
+      expect(chain.gte).toHaveBeenCalledWith(
+        "created_at",
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      );
+    });
+
+    it("returns null when no task matches", async () => {
+      const chain = chainable({ data: null, error: null });
+      mockFrom.mockReturnValue(chain);
+
+      const result = await findTaskByIdempotencyKey(
+        "0xAAAA111122223333444455556666777788889999",
+        "unknown-key",
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it("throws on a real query error", async () => {
+      const chain = chainable({ data: null, error: { message: "connection failed" } });
+      mockFrom.mockReturnValue(chain);
+
+      await expect(
+        findTaskByIdempotencyKey(
+          "0xAAAA111122223333444455556666777788889999",
+          "retry-1",
+        ),
+      ).rejects.toThrow("findTaskByIdempotencyKey failed");
+    });
   });
 
   it("lapseExpiredOffers targets exactly the live, expired offers (CC-094 inline sweep)", async () => {

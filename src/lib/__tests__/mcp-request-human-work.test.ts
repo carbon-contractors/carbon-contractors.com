@@ -17,6 +17,7 @@ const mockInitiateX402Payment = vi.fn();
 const mockCountCommittedTasks = vi.fn();
 vi.mock("@/lib/payments/x402", () => ({
   initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
+  replayX402Payment: vi.fn(),
 }));
 
 const mockLimit = vi.fn();
@@ -28,6 +29,7 @@ vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: vi.fn(),
   updateTaskStatus: vi.fn(),
   countCommittedTasks: (...args: unknown[]) => mockCountCommittedTasks(...args),
+  findTaskByIdempotencyKey: vi.fn().mockResolvedValue(null),
   WORKER_CONCURRENCY_CAP: 3,
 }));
 
@@ -201,6 +203,21 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     await callRequestHumanWork(VALID_ARGS, null);
 
     expect(mockLimit).not.toHaveBeenCalled();
+  });
+
+  it("creates a new task when no task matches the idempotency key (CC-046)", async () => {
+    const { findTaskByIdempotencyKey } = await import("@/lib/db/tasks");
+    (findTaskByIdempotencyKey as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    await callRequestHumanWork({ ...VALID_ARGS, idempotency_key: "retry-1" });
+
+    expect(findTaskByIdempotencyKey).toHaveBeenCalledWith(
+      AGENT_WALLET,
+      "retry-1",
+    );
+    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotency_key: "retry-1" }),
+    );
   });
 });
 

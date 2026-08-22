@@ -82,6 +82,10 @@ export interface Database {
           content_purged_at: string | null;
           /** RETENTION_RULE_VERSION in force at the prune (CC-087). */
           content_purge_rule: string | null;
+          /** Caller-scoped dedup key from request_human_work (CC-046). Never updated. */
+          idempotency_key: string | null;
+          /** v2's review window in seconds (ADR-0001 D1), stored for replay (CC-046). */
+          review_window_seconds: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -101,6 +105,8 @@ export interface Database {
           spec_hash?: string | null;
           spec_schema_version?: number | null;
           funded_at?: string | null;
+          idempotency_key?: string | null;
+          review_window_seconds?: number | null;
           created_at?: string;
           updated_at?: string;
         };

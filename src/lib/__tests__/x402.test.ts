@@ -181,3 +181,90 @@ describe("x402 payment", () => {
     expect(accepted.instructions).not.toContain("Wait for the worker to accept");
   });
 });
+
+describe("x402 idempotency passthrough and replay (CC-046)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("persists the idempotency key and review window on the task row", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+
+    await initiateX402Payment({ ...BASE_REQUEST, idempotency_key: "retry-1" });
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotency_key: "retry-1",
+        review_window_seconds: 24 * 60 * 60,
+      }),
+    );
+  });
+
+  it("omits the idempotency key entirely when none was supplied", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+
+    await initiateX402Payment(BASE_REQUEST);
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.not.objectContaining({ idempotency_key: expect.anything() }),
+    );
+  });
+
+  const STORED_ROW = {
+    id: "row-uuid",
+    payment_request_id: "storedprid",
+    from_agent_wallet: BASE_REQUEST.from_agent_wallet,
+    to_human_wallet: BASE_REQUEST.to_human_wallet,
+    task_description: BASE_REQUEST.task_description,
+    amount_usdc: 250,
+    deadline_unix: 1850000000,
+    status: "pending" as const,
+    offer_expiry_unix: 1840000000,
+    tx_hash: "",
+    escrow_contract: "0x1234567890123456789012345678901234567890",
+    acceptance_spec: VALID_SPEC,
+    spec_hash: parseAndHashSpec(VALID_SPEC).hash,
+    spec_schema_version: 1,
+    funded_at: null,
+    content_purged_at: null,
+    content_purge_rule: null,
+    idempotency_key: "retry-1",
+    review_window_seconds: 48 * 3600,
+    created_at: "2026-08-20T00:00:00.000Z",
+  };
+
+  it("reconstructs every createTask parameter from a stored row, without writing", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+    const { replayX402Payment } = await import("@/lib/payments/x402");
+
+    const replay = replayX402Payment(STORED_ROW);
+
+    expect(createTask).not.toHaveBeenCalled();
+    expect(replay.payment_request_id).toBe("storedprid");
+    expect(replay.task_id_bytes32).toBe("0x" + "ab".repeat(32)); // toTaskId(payment_request_id)
+    expect(replay.worker).toBe(BASE_REQUEST.to_human_wallet);
+    expect(replay.amount_usdc).toBe(250);
+    expect(replay.amount_wei).toBe("250000000"); // 250 * 10^6, recomputed
+    expect(replay.deadline_unix).toBe(1850000000);
+    expect(replay.review_window_seconds).toBe(48 * 3600);
+    expect(replay.spec_hash).toBe(parseAndHashSpec(VALID_SPEC).hash);
+    expect(replay.acceptance_spec).toBe(VALID_SPEC);
+    // Chain parameters re-derived from server config, never from any caller input.
+    expect(replay.escrow_contract).toBe("0x1234567890123456789012345678901234567890");
+    expect(replay.chain_id).toBe(84532);
+    expect(replay.worker_status).toBe("pending");
+    expect(replay.status).toBe("awaiting_funding");
+    expect(replay.task_status).toBe("pending");
+    expect(replay.instructions).toContain("createTask");
+  });
+
+  it("reports a replay past the offer stage as already initiated", async () => {
+    const { replayX402Payment } = await import("@/lib/payments/x402");
+
+    const replay = replayX402Payment({ ...STORED_ROW, status: "active" });
+
+    expect(replay.status).toBe("already_initiated");
+    expect(replay.task_status).toBe("active");
+    expect(replay.worker_status).toBe("accepted"); // the offer stage is behind it
+  });
+});

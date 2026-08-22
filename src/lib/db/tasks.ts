@@ -25,6 +25,14 @@ export interface TaskRecord {
   spec_schema_version: number | null;
   /** On-chain block timestamp when Funded was confirmed. Settable once (CC-092). */
   funded_at: string | null;
+  /**
+   * Caller-scoped dedup key from request_human_work (CC-046). Unique per
+   * from_agent_wallet by migration 020's partial index; the app-layer TTL
+   * lookup is findTaskByIdempotencyKey.
+   */
+  idempotency_key: string | null;
+  /** v2's second clock (ADR-0001 D1) — stored so a replay can rebuild the funding params. */
+  review_window_seconds: number | null;
   /** Set by the retention engine only (CC-087) — see src/lib/db/retention.ts. */
   content_purged_at: string | null;
   content_purge_rule: string | null;
@@ -51,6 +59,9 @@ export interface CreateTaskInput {
   status?: TaskStatus;
   /** Required with status 'pending' — when the offer lapses (ADR-0005 D4). */
   offer_expiry_unix?: number | null;
+  /** CC-046: stored verbatim; unique per agent (migration 020). */
+  idempotency_key?: string | null;
+  review_window_seconds?: number | null;
 }
 
 export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
@@ -72,12 +83,57 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
       spec_schema_version: input.spec_schema_version ?? null,
       status: input.status ?? "pending",
       offer_expiry_unix: input.offer_expiry_unix ?? null,
+      idempotency_key: input.idempotency_key ?? null,
+      review_window_seconds: input.review_window_seconds ?? null,
     })
     .select()
     .single();
 
-  if (error) throw new Error(`createTask failed: ${error.message}`);
+  // The PostgREST code is kept in the message (CC-046): callers branch on a
+  // 23505 unique violation from the idempotency index to replay instead of error.
+  if (error) {
+    throw new Error(
+      `createTask failed${error.code ? ` (${error.code})` : ""}: ${error.message}`,
+    );
+  }
   return data as TaskRecord;
+}
+
+/**
+ * How long an idempotency_key binds its caller (CC-046): a retry after a network
+ * failure within this window gets the original task back instead of a new one.
+ * The unique index from migration 020 outlives it — see its comment.
+ */
+export const IDEMPOTENCY_KEY_TTL_SECONDS = 24 * 60 * 60;
+
+/**
+ * Find a caller's most recent task created with this idempotency_key inside the
+ * TTL window (CC-046). Caller-scoped by construction: the wallet is part of the
+ * query, so one agent's key never shadows another's.
+ */
+export async function findTaskByIdempotencyKey(
+  fromAgentWallet: string,
+  idempotencyKey: string,
+): Promise<TaskRecord | null> {
+  const cutoff = new Date(
+    Date.now() - IDEMPOTENCY_KEY_TTL_SECONDS * 1000,
+  ).toISOString();
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select()
+    .eq("from_agent_wallet", fromAgentWallet.toLowerCase())
+    .eq("idempotency_key", idempotencyKey)
+    .gte("created_at", cutoff)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`findTaskByIdempotencyKey failed: ${error.message}`);
+  }
+  return (data as TaskRecord) ?? null;
 }
 
 export async function getTaskByPaymentId(
