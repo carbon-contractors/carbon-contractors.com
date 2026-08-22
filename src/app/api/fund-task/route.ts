@@ -13,12 +13,17 @@
  * Flow now:
  *   1. Agent calls request_human_work MCP tool → gets payment_request_id plus every
  *      parameter `escrow.createTask` needs (v2 ABI: taskId, worker, amount, deadline,
- *      reviewWindow, specHash)
- *   2. Agent funds the escrow itself, from its own wallet, via
+ *      reviewWindow, specHash). The row is born 'pending' (an offer) unless the
+ *      worker enabled auto-booking, in which case it is 'accepted' immediately
+ *      (CC-094 / ADR-0005 D3)
+ *   2. The worker accepts the offer (or pre-authorised auto-booking) → 'accepted'.
+ *      This endpoint refuses anything else: money must not lock until the worker
+ *      has agreed (ADR-0005 D2)
+ *   3. Agent funds the escrow itself, from its own wallet, via
  *      `USDC.approve` + `escrow.createTask` — `createTask` records `msg.sender` as the
  *      agent, which is what the contract requires
- *   3. Agent POSTs here with { payment_request_id }
- *   4. This endpoint reads `getTask(taskId)` from the chain and only moves the DB to
+ *   4. Agent POSTs here with { payment_request_id }
+ *   5. This endpoint reads `getTask(taskId)` from the chain and only moves the DB to
  *      "active" once the on-chain task is `Funded` and matches the row (worker,
  *      amount). The chain is the authority on money; the DB is a projection (Defect 3).
  *
@@ -57,11 +62,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    if (task.status !== "pending") {
+    // CC-094 / ADR-0005 D2: money must not lock until the worker has consented.
+    // Only 'accepted' may activate. A 'pending' row is still an open offer; a
+    // 'lapsed' or 'declined' one is dead and the agent must re-target.
+    // getTaskByPaymentId lapses expired offers inline, so this check cannot act
+    // on a stale 'pending'.
+    if (task.status !== "accepted") {
       return NextResponse.json(
         {
           ok: false,
-          error: `Task is already ${task.status}`,
+          status: task.status,
+          error:
+            task.status === "pending"
+              ? "The worker has not accepted this offer yet. Wait for their decision (or re-target once it lapses) before funding."
+              : `Task is ${task.status}, cannot activate`,
         },
         { status: 409 }
       );

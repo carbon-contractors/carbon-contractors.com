@@ -15,6 +15,8 @@ export interface TaskRecord {
   amount_usdc: number;
   deadline_unix: number;
   status: TaskStatus;
+  /** When the pending offer lapses; null once accepted or auto-booked (CC-094). */
+  offer_expiry_unix: number | null;
   tx_hash: string | null;
   escrow_contract: string | null;
   /** Verbatim spec string — the specHash preimage. Never reserialise it (CC-084). */
@@ -39,6 +41,13 @@ export interface CreateTaskInput {
   acceptance_spec?: string | null;
   spec_hash?: string | null;
   spec_schema_version?: number | null;
+  /**
+   * CC-094 / ADR-0005 D3: 'accepted' when the worker pre-authorised auto-booking,
+   * otherwise the row is born 'pending' — an offer awaiting their decision.
+   */
+  status?: TaskStatus;
+  /** Required with status 'pending' — when the offer lapses (ADR-0005 D4). */
+  offer_expiry_unix?: number | null;
 }
 
 export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
@@ -58,7 +67,8 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
       acceptance_spec: input.acceptance_spec ?? null,
       spec_hash: input.spec_hash ?? null,
       spec_schema_version: input.spec_schema_version ?? null,
-      status: "pending",
+      status: input.status ?? "pending",
+      offer_expiry_unix: input.offer_expiry_unix ?? null,
     })
     .select()
     .single();
@@ -70,6 +80,11 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
 export async function getTaskByPaymentId(
   paymentRequestId: string,
 ): Promise<TaskRecord | null> {
+  // Lapse evaluation is inline on inspection (CC-094, the CC-075 precedent):
+  // every reader of a single task sees an expired offer as 'lapsed', so the
+  // accept/decline and funding gates can never act on a stale offer.
+  await lapseExpiredOffers();
+
   const supabase = getSupabaseAdmin();
 
   const { data, error } = await supabase
@@ -85,15 +100,75 @@ export async function getTaskByPaymentId(
 }
 
 /**
+ * Lapse offers whose expiry has passed (CC-094 / ADR-0005 D4). Evaluates both
+ * `pending` offers and `accepted` tasks the agent never funded — the latter
+ * frees a worker who consented from an agent that walked away, and is safe
+ * because no money was ever locked. Called inline on inspection, not from a
+ * cron: a flag only read at booking time is pure overhead (CC-075 precedent).
+ *
+ * Best-effort by design — a failure here must not take down the read that
+ * triggered it; the offer simply lapses on the next inspection.
+ */
+export async function lapseExpiredOffers(): Promise<number> {
+  const supabase = getSupabaseAdmin();
+
+  try {
+    const { data, error } = await supabase
+      .from("tasks")
+      .update({ status: "lapsed", updated_at: new Date().toISOString() })
+      .in("status", ["pending", "accepted"])
+      .not("offer_expiry_unix", "is", null)
+      .lte("offer_expiry_unix", Math.floor(Date.now() / 1000))
+      .select("payment_request_id");
+
+    if (error) throw new Error(`lapseExpiredOffers failed: ${error.message}`);
+    return (data ?? []).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * ADR-0005 D5: the concurrency cap on accepted+active tasks a single worker
+ * may hold. Structural, not advisory — a worker who has accepted eight jobs
+ * for the same afternoon will fail most of them, and under ADR-0001 D1 each
+ * failure is a delivery deadline that passes and refunds the agent.
+ */
+export const WORKER_CONCURRENCY_CAP = 3;
+
+/** Count a worker's committed (accepted + active) tasks, for the D5 cap. */
+export async function countCommittedTasks(wallet: string): Promise<number> {
+  const supabase = getSupabaseAdmin();
+
+  const { count, error } = await supabase
+    .from("tasks")
+    .select("payment_request_id", { count: "exact", head: true })
+    .eq("to_human_wallet", wallet.toLowerCase())
+    .in("status", ["accepted", "active"]);
+
+  if (error) throw new Error(`countCommittedTasks failed: ${error.message}`);
+  return count ?? 0;
+}
+
+/**
  * Valid state transitions. Prevents illegal jumps like completed→active.
  * Each key is the target status; its value lists allowed source statuses.
+ *
+ * CC-094 / ADR-0005 D2: the offer stage sits between `pending` and `active` —
+ * a task may only become `active` (funds locked) from `accepted`, i.e. after
+ * the worker consented (or pre-authorised auto-booking, D3). `declined` and
+ * `lapsed` are terminal: offers that never became tasks, and no money was
+ * ever involved.
  */
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  pending: [],                         // initial state only (via createTask)
-  active: ["pending"],                 // funded
-  completed: ["active", "disputed"],   // work done or dispute resolved in worker's favor
-  disputed: ["active", "pending"],     // either party flags
-  expired: ["disputed", "pending"],    // dispute resolved in agent's favor, or timeout
+  pending: [],                                    // initial state only (via createTask)
+  accepted: ["pending"],                          // worker accepted the offer (ADR-0005 D2)
+  declined: ["pending"],                          // worker declined — terminal (D6)
+  lapsed: ["pending", "accepted"],                // offer expired, or accepted but never funded (D4)
+  active: ["accepted"],                           // funded — and only from consent (D2)
+  completed: ["active", "disputed"],              // work done or dispute resolved in worker's favor
+  disputed: ["active", "pending"],                // either party flags
+  expired: ["disputed", "pending", "accepted"],   // dispute resolved in agent's favor, or timeout
 };
 
 export async function updateTaskStatus(
@@ -157,7 +232,7 @@ export async function markTaskFunded(
     .from("tasks")
     .update({ status: "active", funded_at: fundedAt, updated_at: new Date().toISOString() })
     .eq("payment_request_id", paymentRequestId)
-    .eq("status", "pending")
+    .eq("status", "accepted")
     .select("payment_request_id");
 
   if (error) throw new Error(`markTaskFunded failed: ${error.message}`);
@@ -173,7 +248,7 @@ export async function markTaskFunded(
       throw new Error(`Task not found: ${paymentRequestId}`);
     }
     throw new Error(
-      `Invalid state transition: ${current.status} → active (allowed from: pending)`,
+      `Invalid state transition: ${current.status} → active (allowed from: accepted)`,
     );
   }
 }

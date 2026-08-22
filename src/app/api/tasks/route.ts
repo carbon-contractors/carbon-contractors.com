@@ -18,6 +18,7 @@ import { NextRequest } from "next/server";
 import {
   getTasksForParties,
   getPublicTasks,
+  lapseExpiredOffers,
   type TaskRecord,
   type PublicTaskRecord,
 } from "@/lib/db/tasks";
@@ -34,6 +35,10 @@ export async function GET(req: NextRequest) {
   const hasAuthHeaders = Boolean(rawWallet || signature || nonce);
 
   try {
+    // CC-094: lapse expired offers inline on fetch, so no list ever shows a
+    // dead offer as live. Best-effort — a failure here must not fail the read.
+    await lapseExpiredOffers();
+
     let tasks: (TaskRecord | PublicTaskRecord)[];
     let authenticated = false;
     let callerWallet: string | null = null;

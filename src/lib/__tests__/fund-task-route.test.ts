@@ -5,13 +5,19 @@ import type { NextRequest } from "next/server";
  * CC-081 Defects 1 and 3 — /api/fund-task is no longer an x402 payment recipient.
  * It is a confirmation endpoint: the DB row only moves to `active` once the chain
  * says the task is Funded and matches the row. These tests pin that gate.
+ *
+ * CC-094 / ADR-0005 D2 additionally requires the worker's consent first: the row
+ * must be 'accepted' before anything can activate. A 'pending' row is still an
+ * open offer; 'lapsed' and 'declined' are dead.
  */
 
 const mockGetTaskByPaymentId = vi.fn();
 const mockMarkTaskFunded = vi.fn();
+const mockUpdateTaskStatus = vi.fn();
 vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: (...args: unknown[]) => mockGetTaskByPaymentId(...args),
   markTaskFunded: (...args: unknown[]) => mockMarkTaskFunded(...args),
+  updateTaskStatus: (...args: unknown[]) => mockUpdateTaskStatus(...args),
 }));
 
 const mockGetOnChainTask = vi.fn();
@@ -68,7 +74,7 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
       from_agent_wallet: AGENT,
       to_human_wallet: WORKER,
       amount_usdc: 25,
-      status: "pending",
+      status: "accepted",
     });
     mockMarkTaskFunded.mockResolvedValue(undefined);
     mockGetCurrentBlockTimestamp.mockResolvedValue(1_700_000_000);
@@ -159,7 +165,7 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     expect(mockMarkTaskFunded).toHaveBeenCalledWith("pr_1", 1_800_000_000);
   });
 
-  it("rejects a task that is not pending", async () => {
+  it("rejects a task that is not accepted", async () => {
     mockGetTaskByPaymentId.mockResolvedValue({
       payment_request_id: "pr_1",
       status: "active",
@@ -173,6 +179,40 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     expect(res.status).toBe(409);
     expect(mockGetOnChainTask).not.toHaveBeenCalled();
     expect(mockMarkTaskFunded).not.toHaveBeenCalled();
+  });
+
+  it("refuses a still-pending offer — money must not lock before consent (CC-094 / ADR-0005 D2)", async () => {
+    mockGetTaskByPaymentId.mockResolvedValue({
+      payment_request_id: "pr_1",
+      status: "pending",
+      to_human_wallet: WORKER,
+      amount_usdc: 25,
+    });
+
+    const { POST } = await import("@/app/api/fund-task/route");
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain("has not accepted");
+    expect(mockGetOnChainTask).not.toHaveBeenCalled();
+    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it("refuses a lapsed offer the same way — the agent must re-target (CC-094)", async () => {
+    mockGetTaskByPaymentId.mockResolvedValue({
+      payment_request_id: "pr_1",
+      status: "lapsed",
+      to_human_wallet: WORKER,
+      amount_usdc: 25,
+    });
+
+    const { POST } = await import("@/app/api/fund-task/route");
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(409);
+    expect(mockGetOnChainTask).not.toHaveBeenCalled();
+    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
   });
 
   it("rejects a missing payment_request_id", async () => {

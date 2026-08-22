@@ -18,12 +18,15 @@ import { initiateX402Payment } from "@/lib/payments/x402";
 import {
   getTaskByPaymentId,
   updateTaskStatus,
+  countCommittedTasks,
+  WORKER_CONCURRENCY_CAP,
 } from "@/lib/db/tasks";
 import { getFullReputation } from "@/lib/reputation";
 import {
   registerNotificationChannel,
   getChannelsForContractor,
 } from "@/lib/db/notifications";
+import { notifyContractor } from "@/lib/notifications/dispatch";
 import {
   getOnChainTask,
   getEscrowConfig,
@@ -152,6 +155,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         .describe(
           "Review window in hours (12–336): how long you have to review after the worker submits before funds release to them automatically. Bounded by the contract."
         ),
+      offer_expiry_minutes: z
+        .number()
+        .int()
+        .min(15)
+        .max(10080)
+        .optional()
+        .describe(
+          "How long the worker has to answer this offer, in minutes (15–10080, default 1440 = 24h). Only applies when the worker has not enabled auto-booking — otherwise the offer auto-accepts. An unanswered offer lapses at expiry and you are free to re-target."
+        ),
       acceptance_spec: z
         .string()
         .max(MAX_SPEC_BYTES)
@@ -165,11 +177,13 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       amount_usdc,
       deadline_hours,
       review_window_hours,
+      offer_expiry_minutes,
       acceptance_spec,
     }) => {
       const deadline_unix =
         Math.floor(Date.now() / 1000) + deadline_hours * 3600;
       const review_window_seconds = review_window_hours * 3600;
+      const offer_expiry_seconds = (offer_expiry_minutes ?? 1440) * 60;
 
       try {
         // Emergency Intake Kill Switch (ADR-0003 D4 / CC-086):
@@ -267,6 +281,39 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
+        // CC-094 / ADR-0005 D3: accepts_auto_booking is a gate, not metadata.
+        // A worker with the flag true on any channel has pre-authorised being
+        // booked against their own stated categories and rate — the offer
+        // auto-accepts. Otherwise it waits for them and lapses at expiry (D4).
+        const channels = await getChannelsForContractor(worker.id);
+        const autoAccept = channels.some((c) => c.accepts_auto_booking);
+
+        // D5: the concurrency cap applies at auto-accept time too. A worker at
+        // the cap of accepted+active tasks cannot take another; booking them
+        // anyway would only manufacture an ADR-0001 D1 expiry.
+        if (autoAccept) {
+          const committed = await countCommittedTasks(worker.wallet);
+          if (committed >= WORKER_CONCURRENCY_CAP) {
+            log("warn", "request_human_work_worker_at_cap", {
+              caller: from_agent_wallet,
+              worker: worker.wallet,
+              committed,
+            });
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    ok: false,
+                    error: `This worker is at their concurrency cap (${WORKER_CONCURRENCY_CAP} accepted+active tasks) and cannot be auto-booked. Use search_whitepages to find another worker.`,
+                  }),
+                },
+              ],
+            };
+          }
+        }
+
         // Validate and hash before any row is written, so a malformed spec fails
         // the whole call rather than creating a task the agent cannot commit.
         // CC-081 Defect 1: required. The hash is the specHash argument to
@@ -311,7 +358,26 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           deadline_unix,
           review_window_seconds,
           spec,
+          auto_accept: autoAccept,
+          offer_expiry_seconds,
         });
+
+        // ADR-0005 D7: the worker must be told about the offer. notifyContractor
+        // is the CC-095 seam — structured logging until real delivery ships — and
+        // never throws, so a notification fault cannot fail the hire.
+        await notifyContractor(worker.id, {
+          type: "offer_received",
+          payment_request_id: response.payment_request_id,
+          amount_usdc,
+          offer_expiry_unix: response.offer_expiry_unix,
+        });
+        if (autoAccept) {
+          await notifyContractor(worker.id, {
+            type: "task_funded",
+            payment_request_id: response.payment_request_id,
+            amount_usdc,
+          });
+        }
 
         return {
           content: [
@@ -400,6 +466,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                     ? { task_description: dbTask.task_description }
                     : {}),
                   deadline_unix: dbTask.deadline_unix,
+                  offer_expiry_unix: dbTask.offer_expiry_unix,
                   created_at: dbTask.created_at,
                 },
                 on_chain: onChain,

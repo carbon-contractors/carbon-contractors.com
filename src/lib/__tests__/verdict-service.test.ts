@@ -48,6 +48,7 @@ function baseTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     acceptance_spec: SPEC,
     spec_hash: SPEC_HASH,
     spec_schema_version: 1,
+    offer_expiry_unix: null,
     funded_at: "2026-08-20T00:00:00.000Z",
     created_at: "2026-08-20T00:00:00.000Z",
     ...overrides,
