@@ -19,6 +19,7 @@ import { getTaskByPaymentId } from "@/lib/db/tasks";
 import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
 import { isValidWalletAddress } from "@/lib/validation";
 import { computeAndSignVerdict, VerdictInputError } from "@/lib/contracts/verdict-service";
+import { serializeVerdict } from "@/lib/contracts/verdict-json";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
 
@@ -96,16 +97,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({
       ok: true,
-      verdict: {
-        taskId: verdict.taskId,
-        specHash: verdict.specHash,
-        evidenceHash: verdict.evidenceHash,
-        checkerHash: verdict.checkerHash,
-        passed: verdict.passed,
-        breakdownHash: verdict.breakdownHash,
-        expiry: verdict.expiry.toString(),
-        nonce: verdict.nonce.toString(),
-      },
+      verdict: serializeVerdict(verdict),
       signature: verdictSignature,
       checks,
     });

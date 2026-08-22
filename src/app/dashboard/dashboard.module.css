@@ -487,6 +487,119 @@
   cursor: not-allowed;
 }
 
+/* ── Worker task actions (CC-092): submit, claim, dispute ────────────── */
+
+.workerActionSection {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--cc-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.actionToggle {
+  background: none;
+  border: none;
+  color: var(--cc-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.actionToggle:hover {
+  color: var(--cc-text);
+}
+
+.actionForm {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.actionNote {
+  font-size: 0.75rem;
+  color: var(--cc-text-muted);
+  line-height: 1.4;
+}
+
+.evidenceTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--cc-bg-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--cc-text);
+  resize: vertical;
+}
+
+.evidenceTextarea:focus {
+  outline: none;
+  border-color: var(--cc-text-muted);
+}
+
+.actionBtn {
+  background: var(--cc-green);
+  color: #0a0b0d;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.actionBtn:hover:not(:disabled) {
+  background: var(--cc-green-hover);
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.actionMsgOk,
+.actionMsgErr {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.actionMsgOk {
+  color: var(--cc-green);
+}
+
+.actionMsgErr {
+  color: var(--cc-red);
+}
+
+.checkList {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.7rem;
+}
+
+.checkPass {
+  color: var(--cc-green);
+}
+
+.checkFail {
+  color: var(--cc-red);
+}
+
 /* ── Notification Channels (CC-073) ───────────────────────────────────── */
 
 .channelsCard {
