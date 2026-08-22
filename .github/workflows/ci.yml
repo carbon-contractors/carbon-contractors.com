@@ -64,9 +64,6 @@ jobs:
         run: npm audit --audit-level=high
 
       # Offline, no dependencies — the script runs before `npm install` by design.
-      # INDEX.md is generated, so a PR that edits an issue without regenerating leaves
-      # master with a board that silently disagrees with the issue files. Two PRs adding
-      # issues in parallel is the common way this happens.
       # 248 lines across CLAUDE.md, Lessons-Learned.md and CC-025.md were double-encoded
       # by a PowerShell conflict resolution on 2026-08-16 and merged to master unnoticed.
       # The result is still VALID UTF-8, so nothing objected — .gitattributes pins line
@@ -74,9 +71,6 @@ jobs:
       # Offline and dependency-free.
       - name: No double-encoded UTF-8
         run: node scripts/audit/check-encoding.mjs
-
-      - name: Backlog index is current
-        run: node scripts/backlog.mjs --check
 
       # Two open PRs can each add CC-096.md and both look clean until one merges — git
       # only sees the collision as an add/add conflict afterwards, when the id is already

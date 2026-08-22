@@ -60,3 +60,7 @@ next-env.d.ts
 .vercel
 .env*
 .escrow-lifecycle-state.json
+
+# Backlog generated index (managed locally via node scripts/backlog.mjs)
+docs/backlog/INDEX.md
+
