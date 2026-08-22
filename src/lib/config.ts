@@ -141,6 +141,17 @@ const envSchema = z.object({
       )
   ),
 
+  // ── Notification delivery (CC-095) ─────────────────────────────────────────
+  // All optional, and all "unconfigured is a visible permanent failure, not a
+  // silent skip". envOptional so a blanked Vercel field reads as unset rather
+  // than as a configured value of "" (CC-097). The email gateway is deliberately
+  // a URL we POST to rather than a provider credential — choosing a mail provider
+  // is the first third-party data processor in the stack and needs an ADR-0002
+  // read first (CC-095 open item).
+  NOTIFICATION_WEBHOOK_SECRET: envOptional(z.string().optional()),
+  NOTIFICATION_EMAIL_WEBHOOK_URL: envOptional(z.string().optional()),
+  TELEGRAM_BOT_TOKEN: envOptional(z.string().optional()),
+
   // ── Rate limiting ─────────────────────────────────────────────────────────
   // Shape shared with getRateLimitConfig() — see rateLimitShape above.
   ...rateLimitShape,
