@@ -183,7 +183,12 @@ export default function DashboardPage() {
   const [reputation, setReputation] = useState<Reputation | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  // CC-026: each endpoint reports its own failure, so a single broken one is
+  // visible instead of presenting as "no work available".
+  const [errors, setErrors] = useState<{ tasks: string | null; reputation: string | null }>({
+    tasks: null,
+    reputation: null,
+  });
   const [stakeInput, setStakeInput] = useState("");
   const [unstakeInput, setUnstakeInput] = useState("");
   const [disputeOpen, setDisputeOpen] = useState<Record<string, boolean>>({});
@@ -255,13 +260,13 @@ export default function DashboardPage() {
         setTasks(data.tasks);
       } else {
         setTasks([]);
-        setError("Failed to fetch tasks");
+        setErrors((prev) => ({ ...prev, tasks: "Failed to fetch tasks" }));
       }
     } catch {
       // Signature declined or the round trip failed — without it the server
       // will not release task content, by design.
       setTasks([]);
-      setError("Sign the verification message to view your tasks");
+      setErrors((prev) => ({ ...prev, tasks: "Sign the verification message to view your tasks" }));
     }
   }, [isConnected, address, signMessageAsync]);
 
@@ -274,7 +279,7 @@ export default function DashboardPage() {
     }
 
     setLoading(true);
-    setError("");
+    setErrors({ tasks: null, reputation: null });
 
     fetchTasks();
     Promise.all([
@@ -282,7 +287,17 @@ export default function DashboardPage() {
       fetch(`/api/profile?wallet=${address}`).then((r) => r.json()),
     ])
       .then(([repData, profileData]) => {
-        if (repData.ok) setReputation(repData.reputation);
+        // fetchTasks() above owns errors.tasks on its own signed round trip —
+        // this Promise.all only ever touches errors.reputation, and does so
+        // with the updater form since the two requests resolve independently.
+        if (repData.ok) {
+          setReputation(repData.reputation);
+        } else {
+          setErrors((prev) => ({
+            ...prev,
+            reputation: repData.error ?? "Failed to fetch reputation",
+          }));
+        }
         if (profileData.ok) {
           setProfile(profileData.profile);
           // Seed the edit form with the current values so saving an untouched
@@ -290,11 +305,8 @@ export default function DashboardPage() {
           setRateInput(String(profileData.profile.rate_usdc));
           setEditCategories(profileData.profile.categories);
         }
-        if (!repData.ok) {
-          setError("Failed to fetch data");
-        }
       })
-      .catch(() => setError("Network error"))
+      .catch(() => setErrors((prev) => ({ ...prev, reputation: "Network error" })))
       .finally(() => setLoading(false));
   }, [isConnected, address, fetchTasks]);
 
@@ -599,7 +611,23 @@ export default function DashboardPage() {
         ) : (
           <>
             {loading && <p className={styles.loading}>Loading...</p>}
-            {error && <p style={{ color: "#ff4444" }}>{error}</p>}
+            {(errors.tasks || errors.reputation) && (
+              <div className={styles.fetchErrorBanner}>
+                {errors.tasks && (
+                  <p className={styles.fetchError}>Tasks: {errors.tasks}</p>
+                )}
+                {errors.reputation && (
+                  <p className={styles.fetchError}>Reputation: {errors.reputation}</p>
+                )}
+                <button
+                  className={styles.retryButton}
+                  onClick={fetchData}
+                  disabled={loading}
+                >
+                  {loading ? "Retrying..." : "Retry"}
+                </button>
+              </div>
+            )}
 
             {/* ── Reputation + Staking ────────────────────────────────── */}
             {reputation && (
@@ -1015,7 +1043,7 @@ export default function DashboardPage() {
             {/* ── Tasks ──────────────────────────────────────────────── */}
             <h2 className={styles.pageTitle}>Your Tasks</h2>
 
-            {!loading && !error && tasks.length === 0 && (
+            {!loading && !errors.tasks && tasks.length === 0 && (
               <div className={styles.emptyState}>
                 {profile ? (
                   // CC-010: this worker is already listed in the whitepages — never

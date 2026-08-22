@@ -123,11 +123,20 @@
 
 /* ── Example table ────────────────────────────────────────────────────── */
 
+/* CC-025: horizontal scroll for tables on narrow screens. `.exampleTask`
+   uses white-space: nowrap and body clips overflow-x, so without this a
+   wide table would be silently cut off. */
+.tableScroll {
+  overflow-x: auto;
+  /* keep the scroll gutter inside the card on iOS */
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 0.75rem;
+}
+
 .exampleTable {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.8rem;
-  margin-bottom: 0.75rem;
 }
 
 .exampleTable th {
