@@ -42,6 +42,23 @@ export function __resetEscrowClientForTests() {
   _publicClient = null;
 }
 
+/**
+ * The latest block's timestamp, in Unix seconds.
+ *
+ * CC-092: `/api/fund-task` uses this to record `tasks.funded_at` at the moment it
+ * confirms `Funded` on-chain — the checker's `captured_after:
+ * "task_funding_block_timestamp"` criterion needs a funding time, and the `Task`
+ * struct has no field for it. The alternative, scanning for the `TaskCreated` event,
+ * is exactly the `eth_getLogs` cost `CC-070` exists to bound; reading it here costs
+ * one more read at a call the route already makes, instead of a historical scan.
+ * Approximate by design: confirmation happens moments after funding, and this is an
+ * anti-fraud threshold, not a fund-safety one.
+ */
+export async function getCurrentBlockTimestamp(): Promise<number> {
+  const block = await getPublicClient().getBlock();
+  return Number(block.timestamp);
+}
+
 // ── Block-range bounds (CC-070) ─────────────────────────────────────────────
 
 /**
