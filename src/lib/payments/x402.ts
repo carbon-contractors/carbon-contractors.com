@@ -37,6 +37,18 @@ export interface X402PaymentRequest {
    * commit to nothing, so it could only ever resolve in the worker's favour.
    */
   spec: ParsedSpec;
+  /**
+   * CC-094 / ADR-0005 D3: true when the worker holds a notification channel
+   * with accepts_auto_booking — the offer auto-accepts and the row is born
+   * 'accepted'. False (the default) leaves the row 'pending': an offer that
+   * waits for the worker and lapses at expiry if they do not answer.
+   */
+  auto_accept?: boolean;
+  /**
+   * When the offer lapses, in seconds from now (ADR-0005 D4). Required unless
+   * auto_accept — validated against the 15-minute to 7-day bounds below.
+   */
+  offer_expiry_seconds?: number;
 }
 
 export interface X402PaymentResponse {
@@ -55,6 +67,10 @@ export interface X402PaymentResponse {
   base_network: string;
   /** Not a payment URL — the confirmation endpoint the agent POSTs to after funding. */
   fund_url: string;
+  /** CC-094: 'accepted' when auto-booked, 'pending' while the worker decides (ADR-0005 D3). */
+  worker_status: "accepted" | "pending";
+  /** When the pending offer lapses; null when already accepted (ADR-0005 D4). */
+  offer_expiry_unix: number | null;
   /** The exact preimage the hash was taken over — echoed so the agent need not trust us. */
   acceptance_spec: string;
   spec_schema_version: number;
@@ -70,6 +86,18 @@ const USDC_DECIMALS = 6;
 export const MIN_REVIEW_WINDOW_SECONDS = 12 * 60 * 60;
 /** Mirrors `CarbonEscrow.MAX_REVIEW_WINDOW`. */
 export const MAX_REVIEW_WINDOW_SECONDS = 14 * 24 * 60 * 60;
+
+/**
+ * ADR-0005 D4: the app-enforced bounds on an agent-set offer expiry. The lower
+ * bound stops an offer that is unanswerable in practice being used to claim the
+ * worker was unresponsive; the upper bound stops an agent parking a worker's
+ * availability indefinitely at no cost — the offer is free, so without a
+ * ceiling it is a free option on someone else's time.
+ */
+export const MIN_OFFER_EXPIRY_SECONDS = 15 * 60;
+export const MAX_OFFER_EXPIRY_SECONDS = 7 * 24 * 60 * 60;
+/** Conservative default within the bounds — the distribution of real worker response times does not exist yet. */
+export const DEFAULT_OFFER_EXPIRY_SECONDS = 24 * 60 * 60;
 
 /**
  * prepareFunding
@@ -99,6 +127,25 @@ export async function initiateX402Payment(
     );
   }
 
+  // CC-094 / ADR-0005 D3+D4: resolve the offer shape before any row is written,
+  // so an out-of-bounds expiry fails the whole call rather than creating an
+  // offer that can never be honoured.
+  const autoAccept = req.auto_accept ?? false;
+  const offerExpirySeconds = req.offer_expiry_seconds ?? DEFAULT_OFFER_EXPIRY_SECONDS;
+  if (!autoAccept) {
+    if (
+      offerExpirySeconds < MIN_OFFER_EXPIRY_SECONDS ||
+      offerExpirySeconds > MAX_OFFER_EXPIRY_SECONDS
+    ) {
+      throw new Error(
+        `offer_expiry_seconds must be between ${MIN_OFFER_EXPIRY_SECONDS} (15m) and ${MAX_OFFER_EXPIRY_SECONDS} (7d)`,
+      );
+    }
+  }
+  const nowUnix = Math.floor(Date.now() / 1000);
+  const offerExpiryUnix = autoAccept ? null : nowUnix + offerExpirySeconds;
+  const initialStatus: "accepted" | "pending" = autoAccept ? "accepted" : "pending";
+
   const payment_request_id = randomBytes(16).toString("hex");
   const taskIdBytes32 = toTaskId(payment_request_id);
   const escrowConfig = getEscrowConfig();
@@ -108,8 +155,10 @@ export async function initiateX402Payment(
     Math.round(req.amount_usdc * 10 ** USDC_DECIMALS)
   ).toString();
 
-  // Persist to database with "pending" status — will move to "active"
-  // once the on-chain task is confirmed Funded (see /api/fund-task).
+  // Persist with the offer-stage status (CC-094): 'accepted' when the worker
+  // pre-authorised auto-booking, otherwise 'pending' — an offer that waits for
+  // them. The row only moves to "active" once the worker has accepted AND the
+  // on-chain task is confirmed Funded (see /api/fund-task).
   await createTask({
     payment_request_id,
     from_agent_wallet: req.from_agent_wallet,
@@ -122,6 +171,8 @@ export async function initiateX402Payment(
     acceptance_spec: req.spec.preimage,
     spec_hash: req.spec.hash,
     spec_schema_version: req.spec.version,
+    status: initialStatus,
+    offer_expiry_unix: offerExpiryUnix,
   });
 
   // CC-009 / ADR-0002 D9: never log the spec itself. It carries GPS coordinates and
@@ -133,6 +184,8 @@ export async function initiateX402Payment(
     to_human_wallet: req.to_human_wallet,
     spec_hash: req.spec.hash,
     spec_schema_version: req.spec.version,
+    worker_status: initialStatus,
+    offer_expiry_unix: offerExpiryUnix,
   });
 
   const baseUrl = getConfig().NEXT_PUBLIC_BASE_URL;
@@ -159,11 +212,19 @@ export async function initiateX402Payment(
     chain_id: escrowConfig.chainId,
     base_network: escrowConfig.chainName,
     fund_url: `${baseUrl}/api/fund-task`,
+    worker_status: initialStatus,
+    offer_expiry_unix: offerExpiryUnix,
     acceptance_spec: req.spec.preimage,
     spec_schema_version: req.spec.version,
     ...(specWarning ? { spec_warning: specWarning } : {}),
     instructions: [
       `Fund the escrow from your own wallet on ${escrowConfig.chainName} (chain id ${escrowConfig.chainId}):`,
+      ...(autoAccept
+        ? []
+        : [
+            `0. Wait for the worker to accept the offer — the task is '${initialStatus}' until they do`,
+            `   (they have until unix ${offerExpiryUnix}). /api/fund-task refuses a task that is not 'accepted'.`,
+          ]),
       `1. Approve the escrow to spend your USDC: usdc.approve("${escrowConfig.address}", ${amountWei}).`,
       `2. Create the task: escrow.createTask("${taskIdBytes32}", "${req.to_human_wallet}", ${amountWei}, ${req.deadline_unix}, ${req.review_window_seconds}, "${req.spec.hash}").`,
       `   Verify spec_hash yourself: keccak256 of the UTF-8 bytes of acceptance_spec below.`,

@@ -4,8 +4,16 @@
  */
 
 export type Availability = "available" | "busy" | "offline";
+/**
+ * CC-094 / ADR-0005: `pending` is an *offer* awaiting the worker's decision,
+ * `accepted` is a consented task awaiting funding, and `declined`/`lapsed` are
+ * terminal states for offers that never became tasks (no money was involved).
+ */
 export type TaskStatus =
   | "pending"
+  | "accepted"
+  | "declined"
+  | "lapsed"
   | "active"
   | "completed"
   | "disputed"
@@ -58,6 +66,11 @@ export interface Database {
           amount_usdc: number;
           deadline_unix: number;
           status: TaskStatus;
+          /**
+           * When the pending offer lapses (CC-094 / ADR-0005 D4). Null on
+           * auto-accepted tasks and on anything past the offer stage.
+           */
+          offer_expiry_unix: number | null;
           tx_hash: string | null;
           escrow_contract: string | null;
           acceptance_spec: string | null;
@@ -77,6 +90,7 @@ export interface Database {
           amount_usdc: number;
           deadline_unix: number;
           status?: TaskStatus;
+          offer_expiry_unix?: number | null;
           tx_hash?: string | null;
           escrow_contract?: string | null;
           acceptance_spec?: string | null;
@@ -95,6 +109,7 @@ export interface Database {
           amount_usdc?: number;
           deadline_unix?: number;
           status?: TaskStatus;
+          offer_expiry_unix?: number | null;
           tx_hash?: string | null;
           escrow_contract?: string | null;
           // acceptance_spec / spec_hash / spec_schema_version are deliberately absent:

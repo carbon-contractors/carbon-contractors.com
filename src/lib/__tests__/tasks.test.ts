@@ -16,9 +16,9 @@ vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
 vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
-import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks } from "@/lib/db/tasks";
+import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks, lapseExpiredOffers, countCommittedTasks, WORKER_CONCURRENCY_CAP } from "@/lib/db/tasks";
 
-function chainable(result: { data: unknown; error: unknown }) {
+function chainable(result: { data: unknown; error: unknown; count?: number }) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   const self = () => chain;
   // Every method returns the chain itself, and the chain is thenable
@@ -28,6 +28,8 @@ function chainable(result: { data: unknown; error: unknown }) {
   chain.update = vi.fn(self);
   chain.eq = vi.fn(self);
   chain.in = vi.fn(self);
+  chain.not = vi.fn(self);
+  chain.lte = vi.fn(self);
   chain.order = vi.fn(self);
   chain.limit = vi.fn(self);
   chain.single = vi.fn().mockResolvedValue(result);
@@ -96,11 +98,11 @@ describe("tasks", () => {
       .mockReturnValueOnce(lookupChain);
 
     await expect(updateTaskStatus("abc", "active")).rejects.toThrow(
-      "Invalid state transition: completed → active (allowed from: pending)"
+      "Invalid state transition: completed → active (allowed from: accepted)"
     );
   });
 
-  it("markTaskFunded sets status active and funded_at from a unix timestamp, gated on pending", async () => {
+  it("markTaskFunded sets status active and funded_at from a unix timestamp, gated on accepted", async () => {
     const updateChain = chainable({ data: [{ payment_request_id: "abc" }], error: null });
     mockFrom.mockReturnValueOnce(updateChain);
 
@@ -113,16 +115,16 @@ describe("tasks", () => {
         funded_at: new Date(1_700_000_000 * 1000).toISOString(),
       }),
     );
-    expect(updateChain.eq).toHaveBeenCalledWith("status", "pending");
+    expect(updateChain.eq).toHaveBeenCalledWith("status", "accepted");
   });
 
-  it("markTaskFunded throws when the task is not pending", async () => {
+  it("markTaskFunded throws when the task is not accepted", async () => {
     const updateChain = chainable({ data: [], error: null });
-    const lookupChain = chainable({ data: { status: "completed" }, error: null });
+    const lookupChain = chainable({ data: { status: "pending" }, error: null });
     mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
 
     await expect(markTaskFunded("abc", 1_700_000_000)).rejects.toThrow(
-      "Invalid state transition: completed → active (allowed from: pending)",
+      "Invalid state transition: pending → active (allowed from: accepted)",
     );
   });
 
@@ -134,6 +136,128 @@ describe("tasks", () => {
     await expect(markTaskFunded("nonexistent", 1_700_000_000)).rejects.toThrow(
       "Task not found: nonexistent",
     );
+  });
+
+  // ─── CC-094 / ADR-0005: the offer lifecycle ──────────────────────────────
+
+  it("moves a task to active only from accepted — never straight from pending (ADR-0005 D2)", async () => {
+    const updateChain = chainable({ data: [{ payment_request_id: "abc" }], error: null });
+    mockFrom.mockReturnValueOnce(updateChain);
+
+    await updateTaskStatus("abc", "active");
+
+    expect(updateChain.in).toHaveBeenCalledWith("status", ["accepted"]);
+  });
+
+  it("allows pending → accepted / declined / lapsed (ADR-0005 D2/D4/D6)", async () => {
+    for (const target of ["accepted", "declined", "lapsed"] as const) {
+      const updateChain = chainable({ data: [{ payment_request_id: "abc" }], error: null });
+      mockFrom.mockReturnValueOnce(updateChain);
+      await updateTaskStatus("abc", target);
+      // 'lapsed' may also come from 'accepted' (agent never funded); every
+      // offer decision starts from 'pending'.
+      expect(updateChain.in).toHaveBeenCalledWith("status", expect.arrayContaining(["pending"]));
+    }
+  });
+
+  it("treats declined and lapsed as terminal — nothing may transition from them", async () => {
+    // No target state lists 'declined' or 'lapsed' as an allowed source.
+    const updateChain = chainable({ data: [], error: null });
+    const lookupChain = chainable({ data: { status: "declined" }, error: null });
+    mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
+
+    await expect(updateTaskStatus("abc", "accepted")).rejects.toThrow(
+      "Invalid state transition: declined → accepted (allowed from: pending)",
+    );
+  });
+
+  it("createTask persists the offer-stage status and expiry (CC-094)", async () => {
+    const chain = chainable({ data: { id: "1", payment_request_id: "pr_1" }, error: null });
+    mockFrom.mockReturnValue(chain);
+
+    await createTask({
+      payment_request_id: "pr_1",
+      from_agent_wallet: "0xAAAA111122223333444455556666777788889999",
+      to_human_wallet: "0xBBBB111122223333444455556666777788889999",
+      task_description: "test",
+      amount_usdc: 10,
+      deadline_unix: 0,
+      tx_hash: "0xtx",
+      escrow_contract: "0xescrow",
+      status: "accepted",
+      offer_expiry_unix: 1234567890,
+    });
+
+    expect(chain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "accepted",
+        offer_expiry_unix: 1234567890,
+      }),
+    );
+  });
+
+  it("createTask defaults to a pending offer with no expiry", async () => {
+    const chain = chainable({ data: { id: "1" }, error: null });
+    mockFrom.mockReturnValue(chain);
+
+    await createTask({
+      payment_request_id: "pr_2",
+      from_agent_wallet: "0xAAAA111122223333444455556666777788889999",
+      to_human_wallet: "0xBBBB111122223333444455556666777788889999",
+      task_description: "test",
+      amount_usdc: 10,
+      deadline_unix: 0,
+      tx_hash: "0xtx",
+      escrow_contract: "0xescrow",
+    });
+
+    expect(chain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "pending", offer_expiry_unix: null }),
+    );
+  });
+
+  it("lapseExpiredOffers targets exactly the live, expired offers (CC-094 inline sweep)", async () => {
+    const chain = chainable({ data: [{ payment_request_id: "a" }, { payment_request_id: "b" }], error: null });
+    mockFrom.mockReturnValue(chain);
+
+    const lapsed = await lapseExpiredOffers();
+
+    expect(lapsed).toBe(2);
+    expect(chain.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "lapsed" }),
+    );
+    expect(chain.in).toHaveBeenCalledWith("status", ["pending", "accepted"]);
+    expect(chain.not).toHaveBeenCalledWith("offer_expiry_unix", "is", null);
+    expect(chain.lte).toHaveBeenCalledWith("offer_expiry_unix", expect.any(Number));
+  });
+
+  it("lapseExpiredOffers swallows its failures — a lapse fault must not fail the read", async () => {
+    // A chain whose .not call explodes, as the pre-extension mock would have.
+    const chain = chainable({ data: null, error: null });
+    chain.not = vi.fn(() => {
+      throw new TypeError("chain.not is not a function");
+    });
+    mockFrom.mockReturnValue(chain);
+
+    await expect(lapseExpiredOffers()).resolves.toBe(0);
+  });
+
+  it("countCommittedTasks counts accepted+active rows for the D5 cap", async () => {
+    const chain = chainable({ data: null, error: null, count: 3 });
+    mockFrom.mockReturnValue(chain);
+
+    const committed = await countCommittedTasks("0xCCCC111122223333444455556666777788889999");
+
+    expect(committed).toBe(3);
+    expect(chain.eq).toHaveBeenCalledWith(
+      "to_human_wallet",
+      "0xcccc111122223333444455556666777788889999",
+    );
+    expect(chain.in).toHaveBeenCalledWith("status", ["accepted", "active"]);
+  });
+
+  it("exposes the ADR-0005 D5 concurrency cap", () => {
+    expect(WORKER_CONCURRENCY_CAP).toBe(3);
   });
 
   it("getReputationSummary computes counts correctly", async () => {

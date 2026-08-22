@@ -3,9 +3,11 @@ import { NextRequest } from "next/server";
 
 const mockGetTasksForParties = vi.fn();
 const mockGetPublicTasks = vi.fn();
+const mockLapseExpiredOffers = vi.fn();
 vi.mock("@/lib/db/tasks", () => ({
   getTasksForParties: (...args: unknown[]) => mockGetTasksForParties(...args),
   getPublicTasks: (...args: unknown[]) => mockGetPublicTasks(...args),
+  lapseExpiredOffers: (...args: unknown[]) => mockLapseExpiredOffers(...args),
 }));
 
 const mockVerifyChallengeSignature = vi.fn();
@@ -70,6 +72,7 @@ function authHeaders(wallet: string) {
 describe("GET /api/tasks (CC-093 auth)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLapseExpiredOffers.mockResolvedValue(0);
   });
 
   it("serves the public projection (no task_description) to an unsigned caller", async () => {
