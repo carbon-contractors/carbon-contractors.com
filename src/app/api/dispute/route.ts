@@ -1,19 +1,35 @@
 /**
  * route.ts — /api/dispute
  *
- * REST endpoint for workers to initiate task disputes from the dashboard.
- * Updates database status only — the worker must also call
- * escrow.disputeTask() on-chain via their connected wallet.
+ * CC-092 / ADR-0001 D2: rewritten for CarbonEscrow v2. Two changes from the
+ * pre-v2 route, and they go together:
  *
- * Requires the same wallet challenge-response signature as the MCP transport
- * (CC-004): the caller must prove ownership of the wallet assigned to the
- * task as `to_human_wallet`. Get a nonce from
- * POST /api/basedhuman.mcp/challenge, sign the returned message, and send
- * the result as x-caller-wallet / x-caller-signature / x-caller-nonce headers.
+ * 1. **Either party may dispute** (`to_human_wallet` or `from_agent_wallet`),
+ *    matching the contract's on-chain `NotParty` grant — the app-layer half of
+ *    CC-081 Defect 2.
+ * 2. **A dispute requires a signed failing verdict.** v2's `disputeTask`
+ *    accepts nothing else — there is no bare-assertion dispute, because one
+ *    would hand the agent both outcomes. So this route either computes a
+ *    verdict from a caller-supplied evidence bundle (via the same
+ *    `computeAndSignVerdict` /api/verdict uses) or accepts that the task is
+ *    already `Disputed` on-chain; anything else is refused before it reaches
+ *    the chain.
+ *
+ * Like every other write here, the platform transacts nowhere: the caller
+ * receives the signed verdict tuple and presents `disputeTask(taskId, verdict,
+ * signature)` from their own wallet (ADR-0001 Amendment 1 A1.1).
+ *
+ * Auth is the same wallet challenge-response signature as the MCP transport
+ * (CC-004): prove ownership of a party wallet via
+ * POST /api/basedhuman.mcp/challenge, then send the result as
+ * x-caller-wallet / x-caller-signature / x-caller-nonce headers.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getTaskByPaymentId, updateTaskStatus } from "@/lib/db/tasks";
+import { getOnChainTask, getEscrowConfig, toTaskId } from "@/lib/contracts/escrow";
+import { computeAndSignVerdict, VerdictInputError } from "@/lib/contracts/verdict-service";
+import { serializeVerdict } from "@/lib/contracts/verdict-json";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
 import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
@@ -51,11 +67,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const body = await request.json();
-    const { payment_request_id } = body as { payment_request_id: string };
+    const { payment_request_id, evidence_bundle } = body as {
+      payment_request_id?: string;
+      evidence_bundle?: string;
+    };
 
     if (!payment_request_id) {
       return NextResponse.json(
         { ok: false, error: "payment_request_id required" },
+        { status: 400 }
+      );
+    }
+    if (evidence_bundle !== undefined && typeof evidence_bundle !== "string") {
+      return NextResponse.json(
+        { ok: false, error: "evidence_bundle, when supplied, must be a JSON string" },
         { status: 400 }
       );
     }
@@ -68,38 +93,126 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    if (task.to_human_wallet.toLowerCase() !== callerWallet.toLowerCase()) {
+    // ADR-0001 D2: either party may dispute — control over release (the agent's
+    // completeTask) is not authority over adjudication.
+    const callerIsWorker = task.to_human_wallet.toLowerCase() === callerWallet.toLowerCase();
+    const callerIsAgent = task.from_agent_wallet.toLowerCase() === callerWallet.toLowerCase();
+    if (!callerIsWorker && !callerIsAgent) {
       log("warn", "dispute_unauthorized", {
         payment_request_id,
         caller: callerWallet,
-        assigned_worker: task.to_human_wallet,
+        worker: task.to_human_wallet,
+        agent: task.from_agent_wallet,
       });
       return NextResponse.json(
-        { ok: false, error: "Not authorized. Only the assigned worker may dispute this task." },
+        { ok: false, error: "Not authorized. Only a party to this task (worker or hiring agent) may dispute it." },
         { status: 403 }
       );
     }
 
-    if (task.status !== "active" && task.status !== "pending") {
+    if (task.status !== "active" && task.status !== "pending" && task.status !== "disputed") {
       return NextResponse.json(
         { ok: false, error: `Task is ${task.status}, cannot dispute` },
         { status: 409 }
       );
     }
 
-    await updateTaskStatus(payment_request_id, "disputed");
+    const taskIdBytes32 = toTaskId(payment_request_id);
+    const escrowConfig = getEscrowConfig();
 
-    log("info", "task_disputed_dashboard", {
-      payment_request_id,
-      amount_usdc: task.amount_usdc,
-      worker: task.to_human_wallet,
-    });
+    // Path A — the caller supplies the evidence bundle, so this route can obtain
+    // the signed failing verdict the contract requires. A passing verdict is a
+    // reason NOT to dispute, not a stronger dispute.
+    if (evidence_bundle !== undefined) {
+      let computed;
+      try {
+        computed = await computeAndSignVerdict(task, evidence_bundle);
+      } catch (err) {
+        if (err instanceof VerdictInputError) {
+          return NextResponse.json({ ok: false, error: err.message }, { status: 409 });
+        }
+        return safeErrorResponse(err, "dispute_verdict_failed");
+      }
 
-    return NextResponse.json({
-      ok: true,
-      payment_request_id,
-      status: "disputed",
-    });
+      if (computed.verdict.passed) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Cannot dispute: verdict passed. The evidence satisfies the committed acceptance spec.",
+            verdict: serializeVerdict(computed.verdict),
+            checks: computed.checks,
+          },
+          { status: 400 }
+        );
+      }
+
+      if (task.status !== "disputed") {
+        await updateTaskStatus(payment_request_id, "disputed");
+      }
+
+      log("info", "task_disputed_with_verdict", {
+        payment_request_id,
+        amount_usdc: task.amount_usdc,
+        caller: callerWallet,
+        caller_role: callerIsWorker ? "worker" : "agent",
+      });
+
+      return NextResponse.json({
+        ok: true,
+        payment_request_id,
+        status: "disputed",
+        task_id_bytes32: taskIdBytes32,
+        escrow_contract: escrowConfig.address,
+        verdict: serializeVerdict(computed.verdict),
+        signature: computed.signature,
+        checks: computed.checks,
+        on_chain_submitted: false,
+        note: "Present the verdict on-chain from your own wallet: escrow.disputeTask(taskId, verdict, signature). This must land before the review window closes.",
+      });
+    }
+
+    // Path B — no evidence bundle. The only dispute this route can record
+    // without one is one that already happened on-chain.
+    let onChainState: string | null = null;
+    if (escrowConfig.address) {
+      try {
+        onChainState = (await getOnChainTask(payment_request_id)).state;
+      } catch {
+        onChainState = null;
+      }
+    }
+
+    if (onChainState === "Disputed" || onChainState === "Arbitrating" || onChainState === "Resolved") {
+      if (task.status !== "disputed") {
+        await updateTaskStatus(payment_request_id, "disputed");
+      }
+      log("info", "task_dispute_recorded_from_chain", {
+        payment_request_id,
+        onChainState,
+        caller: callerWallet,
+      });
+      return NextResponse.json({
+        ok: true,
+        payment_request_id,
+        status: "disputed",
+        task_id_bytes32: taskIdBytes32,
+        escrow_contract: escrowConfig.address,
+        on_chain_state: onChainState,
+        on_chain_submitted: true,
+        note: "The dispute is already on-chain; the database now reflects it.",
+      });
+    }
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "A dispute requires a signed failing verdict — supply the task's evidence bundle as evidence_bundle (a JSON string) so one can be computed. On-chain state is " +
+          (onChainState ?? "unreadable") +
+          ", so there is no existing dispute to record.",
+      },
+      { status: 400 }
+    );
   } catch (err: unknown) {
     return safeErrorResponse(err, "dispute_failed");
   }

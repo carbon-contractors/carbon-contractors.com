@@ -34,6 +34,11 @@ import {
   getTaskResolvedOutcome,
 } from "@/lib/contracts/escrow";
 import { resolveDisputeOnChain } from "@/lib/contracts/signer";
+import {
+  computeAndSignVerdict,
+  VerdictInputError,
+} from "@/lib/contracts/verdict-service";
+import { serializeVerdict } from "@/lib/contracts/verdict-json";
 import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
@@ -55,8 +60,9 @@ export interface McpSessionContext {
  *
  * @param context Optional session context with caller identity.
  *   `request_human_work` requires `callerWallet` and attributes the task to it.
- *   Tools that mutate task state (resolve_dispute, confirm_task_completion,
- *   dispute_task) require `callerWallet` to match the task's `from_agent_wallet`.
+ *   `confirm_task_completion` and `resolve_dispute` require `callerWallet` to
+ *   match the task's `from_agent_wallet`. `dispute_task` and `get_signed_verdict`
+ *   accept either party (ADR-0001 D2).
  */
 export function createMcpServer(context?: McpSessionContext): McpServer {
   const server = new McpServer({
@@ -478,12 +484,20 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         if (escrowConfig.address) {
           try {
             const onChainTask = await getOnChainTask(payment_request_id);
+            // CC-092: full v2 projection, same shape as /api/tasks.
             onChain = {
               state: onChainTask.state,
               amount_wei: onChainTask.amount.toString(),
               deadline: Number(onChainTask.deadline),
-              agent: onChainTask.agent,
+              reviewWindow: onChainTask.reviewWindow,
+              submittedAt: Number(onChainTask.submittedAt),
+              reviewDeadline: Number(onChainTask.reviewDeadline),
+              specHash: onChainTask.specHash,
+              evidenceHash: onChainTask.evidenceHash,
+              verdictHash: onChainTask.verdictHash,
+              verdictPassed: onChainTask.verdictPassed,
               worker: onChainTask.worker,
+              agent: onChainTask.agent,
             };
           } catch {
             onChain = { error: "Could not read on-chain state" };
@@ -932,23 +946,40 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   );
 
   // ─── Tool: dispute_task ──────────────────────────────────────────────────
+  // CC-092 / ADR-0001 D2, rewritten for CarbonEscrow v2. Two corrections from
+  // the pre-v2 tool: either party may dispute (matching the contract's on-chain
+  // NotParty grant — the app-layer half of CC-081 Defect 2), and a dispute
+  // requires a signed failing verdict, because v2 has no bare-assertion
+  // dispute. Supply the task's evidence bundle and this tool obtains the
+  // verdict from the verdict service and returns it for the caller to present
+  // on-chain from their own wallet — the platform transacts nowhere.
   server.tool(
     "dispute_task",
-    "Flag a task as disputed in the database. The caller (agent or worker) should also call escrow.disputeTask(taskId) on-chain to freeze escrowed funds. Requires task status 'active' or 'pending'.",
+    "Dispute a delivered task. Either party (hiring agent or assigned worker) may call this. v2 requires a signed FAILING verdict — there is no bare-assertion dispute — so pass the task's evidence bundle as evidence_bundle (a JSON string, the exact bytes the worker committed at submitWork) and this tool computes and returns the signed verdict tuple plus signature for you to submit on-chain: escrow.disputeTask(taskId, verdict, signature) from your own wallet, before the review window closes. If the verdict passes, the dispute is refused. If the task is already Disputed on-chain, the database is updated to match without needing a bundle.",
     {
       payment_request_id: z
         .string()
         .min(1)
         .describe("The payment_request_id of the task to dispute"),
+      evidence_bundle: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "The task's evidence bundle as a JSON STRING (not an object) — the exact bytes whose keccak256 the worker committed as evidenceHash at submitWork. Required to open a new dispute; omit only to record a dispute that already happened on-chain."
+        ),
       reason: z
         .string()
         .min(10)
         .max(500)
-        .describe("Reason for the dispute"),
+        .optional()
+        .describe(
+          "Optional human-readable context for the dispute. Metadata only — the signed verdict is what binds, not this."
+        ),
     },
-    async ({ payment_request_id, reason }) => {
+    async ({ payment_request_id, evidence_bundle, reason }) => {
       try {
-        // Authorization: only the originating agent may dispute a task
+        // Authorization: either party may dispute (ADR-0001 D2)
         if (!context?.callerWallet) {
           return {
             isError: true,
@@ -980,11 +1011,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
-        if (task.from_agent_wallet.toLowerCase() !== context.callerWallet.toLowerCase()) {
+        const caller = context.callerWallet.toLowerCase();
+        const callerIsWorker = task.to_human_wallet.toLowerCase() === caller;
+        const callerIsAgent = task.from_agent_wallet.toLowerCase() === caller;
+        if (!callerIsWorker && !callerIsAgent) {
           log("warn", "dispute_task_unauthorized", {
             payment_request_id,
             caller: context.callerWallet,
-            task_agent: task.from_agent_wallet,
+            worker: task.to_human_wallet,
+            agent: task.from_agent_wallet,
           });
           return {
             isError: true,
@@ -993,14 +1028,14 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                 type: "text" as const,
                 text: JSON.stringify({
                   ok: false,
-                  error: "Not authorized. Only the originating agent may dispute this task.",
+                  error: "Not authorized. Only a party to this task (worker or hiring agent) may dispute it.",
                 }),
               },
             ],
           };
         }
 
-        if (task.status !== "active" && task.status !== "pending") {
+        if (task.status !== "active" && task.status !== "pending" && task.status !== "disputed") {
           return {
             isError: true,
             content: [
@@ -1015,15 +1050,255 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
-        await updateTaskStatus(payment_request_id, "disputed");
-
         const taskIdBytes32 = toTaskId(payment_request_id);
         const escrowConfig = getEscrowConfig();
 
-        log("info", "task_disputed", {
+        // With a bundle: obtain the signed failing verdict the contract requires.
+        if (evidence_bundle !== undefined) {
+          let computed;
+          try {
+            computed = await computeAndSignVerdict(task, evidence_bundle);
+          } catch (err) {
+            const message =
+              err instanceof VerdictInputError
+                ? err.message
+                : err instanceof Error
+                  ? `Verdict computation failed: ${err.message}`
+                  : String(err);
+            return {
+              isError: true,
+              content: [
+                { type: "text" as const, text: JSON.stringify({ ok: false, error: message }) },
+              ],
+            };
+          }
+
+          if (computed.verdict.passed) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({
+                    ok: false,
+                    error:
+                      "Cannot dispute: verdict passed. The evidence satisfies the committed acceptance spec.",
+                    verdict: serializeVerdict(computed.verdict),
+                    checks: computed.checks,
+                  }),
+                },
+              ],
+            };
+          }
+
+          if (task.status !== "disputed") {
+            await updateTaskStatus(payment_request_id, "disputed");
+          }
+
+          log("info", "task_disputed", {
+            payment_request_id,
+            reason: reason ?? null,
+            amount_usdc: task.amount_usdc,
+            caller_role: callerIsWorker ? "worker" : "agent",
+          });
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: true,
+                  payment_request_id,
+                  status: "disputed",
+                  task_id_bytes32: taskIdBytes32,
+                  escrow_contract: escrowConfig.address,
+                  verdict: serializeVerdict(computed.verdict),
+                  signature: computed.signature,
+                  checks: computed.checks,
+                  on_chain_submitted: false,
+                  note: "Database updated. Present the verdict on-chain from your own wallet — escrow.disputeTask(taskId, verdict, signature) — before the review window closes.",
+                }),
+              },
+            ],
+          };
+        }
+
+        // Without a bundle: the only disputable state is one that already
+        // happened on-chain.
+        let onChainState: string | null = null;
+        if (escrowConfig.address) {
+          try {
+            onChainState = (await getOnChainTask(payment_request_id)).state;
+          } catch {
+            onChainState = null;
+          }
+        }
+
+        if (
+          onChainState === "Disputed" ||
+          onChainState === "Arbitrating" ||
+          onChainState === "Resolved"
+        ) {
+          if (task.status !== "disputed") {
+            await updateTaskStatus(payment_request_id, "disputed");
+          }
+          log("info", "task_dispute_recorded_from_chain", {
+            payment_request_id,
+            onChainState,
+            caller: context.callerWallet,
+          });
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: true,
+                  payment_request_id,
+                  status: "disputed",
+                  task_id_bytes32: taskIdBytes32,
+                  escrow_contract: escrowConfig.address,
+                  on_chain_state: onChainState,
+                  on_chain_submitted: true,
+                  note: "The dispute is already on-chain; the database now reflects it.",
+                }),
+              },
+            ],
+          };
+        }
+
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                error:
+                  "A dispute requires a signed failing verdict — pass the task's evidence bundle as evidence_bundle (a JSON string) so one can be computed. On-chain state is " +
+                  (onChainState ?? "unreadable") +
+                  ", so there is no existing dispute to record.",
+              }),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ ok: false, error: message }),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ─── Tool: get_signed_verdict ─────────────────────────────────────────────
+  // CC-092: the MCP half of the verdict service. /api/verdict serves the
+  // human on the dashboard; this serves the agent over MCP. Same
+  // computeAndSignVerdict, same either-party authentication — a worker
+  // presents a passing verdict to claimWithVerdict, either party a failing
+  // one to disputeTask. Stateless by design: the bundle is an argument and is
+  // never stored (this issue's design note 1).
+  server.tool(
+    "get_signed_verdict",
+    "Compute and sign a verdict for a delivered task, against the evidence bundle the worker committed at submitWork. Either party (hiring agent or assigned worker) may call. Pass the bundle as a JSON STRING — the exact bytes whose keccak256 is the task's on-chain evidenceHash; anything else is refused. Returns the signed EIP-712 verdict tuple, the signature, and the per-check breakdown. A worker presents a PASSING verdict on-chain via escrow.claimWithVerdict(taskId, verdict, signature) to claim early; either party presents a FAILING one via escrow.disputeTask(taskId, verdict, signature). The platform signs what the deterministic checker found and never transacts.",
+    {
+      payment_request_id: z
+        .string()
+        .min(1)
+        .describe("The payment_request_id of the delivered task"),
+      evidence_bundle: z
+        .string()
+        .min(1)
+        .describe(
+          "The task's evidence bundle as a JSON STRING (not an object) — the exact bytes the worker committed at submitWork. The exact bytes you send are the hash preimage; re-serialising changes the hash."
+        ),
+    },
+    async ({ payment_request_id, evidence_bundle }) => {
+      try {
+        if (!context?.callerWallet) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error:
+                    "Authentication required. POST { walletAddress } to /api/basedhuman.mcp/challenge, sign the returned message with your wallet, and re-initialize the session with the x-caller-wallet, x-caller-signature and x-caller-nonce headers.",
+                }),
+              },
+            ],
+          };
+        }
+
+        const task = await getTaskByPaymentId(payment_request_id);
+        if (!task) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Task not found",
+                }),
+              },
+            ],
+          };
+        }
+
+        // Same posture as disputeTask/claimWithVerdict on-chain: NotParty.
+        const caller = context.callerWallet.toLowerCase();
+        const isParty =
+          task.to_human_wallet.toLowerCase() === caller ||
+          task.from_agent_wallet.toLowerCase() === caller;
+        if (!isParty) {
+          log("warn", "get_signed_verdict_unauthorized", {
+            payment_request_id,
+            caller: context.callerWallet,
+          });
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: false,
+                  error: "Not authorized. Only a party to this task (worker or hiring agent) may request its verdict.",
+                }),
+              },
+            ],
+          };
+        }
+
+        let computed;
+        try {
+          computed = await computeAndSignVerdict(task, evidence_bundle);
+        } catch (err) {
+          const message =
+            err instanceof VerdictInputError
+              ? err.message
+              : err instanceof Error
+                ? `Verdict computation failed: ${err.message}`
+                : String(err);
+          return {
+            isError: true,
+            content: [
+              { type: "text" as const, text: JSON.stringify({ ok: false, error: message }) },
+            ],
+          };
+        }
+
+        log("info", "verdict_computed", {
           payment_request_id,
-          reason,
-          amount_usdc: task.amount_usdc,
+          caller: context.callerWallet,
+          passed: computed.verdict.passed,
+          surface: "mcp",
         });
 
         return {
@@ -1033,10 +1308,12 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
               text: JSON.stringify({
                 ok: true,
                 payment_request_id,
-                status: "disputed",
-                task_id_bytes32: taskIdBytes32,
-                escrow_contract: escrowConfig.address,
-                note: "Database updated. Call escrow.disputeTask(taskId) on-chain to freeze funds.",
+                verdict: serializeVerdict(computed.verdict),
+                signature: computed.signature,
+                checks: computed.checks,
+                next_step: computed.verdict.passed
+                  ? "Worker: claim early with escrow.claimWithVerdict(taskId, verdict, signature) from the worker's own wallet."
+                  : "Either party: dispute with escrow.disputeTask(taskId, verdict, signature) from your own wallet, before the review window closes.",
               }),
             },
           ],

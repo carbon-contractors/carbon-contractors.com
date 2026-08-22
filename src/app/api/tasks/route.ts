@@ -97,10 +97,25 @@ export async function GET(req: NextRequest) {
         if (escrowConfig.address && task.payment_request_id) {
           try {
             const onChainTask = await getOnChainTask(task.payment_request_id);
+            // CC-092: the full v2 projection, so the dashboard can drive the
+            // write paths without another read — specHash is the specVersionAck
+            // submitWork echoes, reviewDeadline gates releaseAfterReview, and
+            // verdictHash/verdictPassed say whether a verdict was already
+            // presented. BigInts become strings (amount_wei) or numbers
+            // (timestamps, uint64/uint32 — safe as JS numbers).
             onChain = {
               state: onChainTask.state,
               amount_wei: onChainTask.amount.toString(),
               deadline: Number(onChainTask.deadline),
+              reviewWindow: onChainTask.reviewWindow,
+              submittedAt: Number(onChainTask.submittedAt),
+              reviewDeadline: Number(onChainTask.reviewDeadline),
+              specHash: onChainTask.specHash,
+              evidenceHash: onChainTask.evidenceHash,
+              verdictHash: onChainTask.verdictHash,
+              verdictPassed: onChainTask.verdictPassed,
+              worker: onChainTask.worker,
+              agent: onChainTask.agent,
             };
           } catch {
             onChain = null;

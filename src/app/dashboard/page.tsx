@@ -5,6 +5,15 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSignMess
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
 import { CATEGORIES, validateCategorySelection } from "@/lib/categories";
+import {
+  parseAndHashEvidenceBundle,
+  EvidenceBundleValidationError,
+} from "@/lib/checker/evidence-hash";
+import {
+  parseVerdictPayload,
+  verdictTupleForContract,
+} from "@/lib/contracts/verdict-json";
+import type { CheckResult } from "@/lib/checker/types";
 import PageShell from "@/components/PageShell";
 import { isNewWorker } from "@/lib/reputation/compute";
 import styles from "./dashboard.module.css";
@@ -41,15 +50,75 @@ const STAKE_ABI = [
   },
 ] as const;
 
-const DISPUTE_ABI = [
+// CC-092: the v2 write paths. submitWork echoes the task's committed specHash
+// as specVersionAck — that is what makes goalpost-moving impossible. The
+// verdict-carrying calls take the tuple + signature from /api/verdict.
+const VERDICT_TUPLE_COMPONENTS = [
+  { name: "taskId", type: "bytes32" },
+  { name: "specHash", type: "bytes32" },
+  { name: "evidenceHash", type: "bytes32" },
+  { name: "checkerHash", type: "bytes32" },
+  { name: "passed", type: "bool" },
+  { name: "breakdownHash", type: "bytes32" },
+  { name: "expiry", type: "uint256" },
+  { name: "nonce", type: "uint256" },
+] as const;
+
+const SUBMIT_WORK_ABI = [
   {
     type: "function",
-    name: "disputeTask",
+    name: "submitWork",
+    inputs: [
+      { name: "taskId", type: "bytes32" },
+      { name: "evidenceHash", type: "bytes32" },
+      { name: "specVersionAck", type: "bytes32" },
+      { name: "attestationUid", type: "bytes32" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+] as const;
+
+const RELEASE_AFTER_REVIEW_ABI = [
+  {
+    type: "function",
+    name: "releaseAfterReview",
     inputs: [{ name: "taskId", type: "bytes32" }],
     outputs: [],
     stateMutability: "nonpayable",
   },
 ] as const;
+
+const CLAIM_WITH_VERDICT_ABI = [
+  {
+    type: "function",
+    name: "claimWithVerdict",
+    inputs: [
+      { name: "taskId", type: "bytes32" },
+      { name: "verdict", type: "tuple", components: VERDICT_TUPLE_COMPONENTS },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+] as const;
+
+const DISPUTE_ABI = [
+  {
+    type: "function",
+    name: "disputeTask",
+    inputs: [
+      { name: "taskId", type: "bytes32" },
+      { name: "verdict", type: "tuple", components: VERDICT_TUPLE_COMPONENTS },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+] as const;
+
+/** CC-036 slot — zero until EAS lands. */
+const ZERO_ATTESTATION_UID = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
 // ── USDC address (set via env var — differs per network) ────────────────────
 
@@ -74,6 +143,16 @@ interface OnChainState {
   state: string;
   amount_wei: string;
   deadline: number;
+  /** CC-092: the v2 projection /api/tasks serves — drives the write paths. */
+  reviewWindow: number;
+  submittedAt: number;
+  reviewDeadline: number;
+  specHash: string;
+  evidenceHash: string;
+  verdictHash: string;
+  verdictPassed: boolean;
+  worker: string;
+  agent: string;
 }
 
 interface Task {
@@ -177,6 +256,9 @@ function statusClass(status: string): string {
   }
 }
 
+/** Which per-task affordance is open — CC-092's three evidence-bundle flows. */
+type TaskAction = "submit" | "claim-early" | "dispute";
+
 export default function DashboardPage() {
   const { address, isConnected } = useAccount();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -191,8 +273,16 @@ export default function DashboardPage() {
   });
   const [stakeInput, setStakeInput] = useState("");
   const [unstakeInput, setUnstakeInput] = useState("");
-  const [disputeOpen, setDisputeOpen] = useState<Record<string, boolean>>({});
-  const [disputeLoading, setDisputeLoading] = useState<string | null>(null);
+
+  // ── Task actions (CC-092) ────────────────────────────────────────────────
+  // One open action per task at a time — submit, claim-early and dispute all
+  // take the same evidence-bundle textarea.
+  const [actionOpen, setActionOpen] = useState<Record<string, TaskAction>>({});
+  const [evidenceDrafts, setEvidenceDrafts] = useState<Record<string, string>>({});
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<
+    Record<string, { ok: boolean; text: string; checks?: CheckResult[] }>
+  >({});
   const [stakeStep, setStakeStep] = useState<"idle" | "approving" | "staking" | "unstaking">("idle");
   const [editOpen, setEditOpen] = useState(false);
   const [rateInput, setRateInput] = useState("");
@@ -217,7 +307,7 @@ export default function DashboardPage() {
   // disable every other control in the panel.
   const [autoBookBusy, setAutoBookBusy] = useState<string | null>(null);
 
-  const { writeContract, data: txHash } = useWriteContract();
+  const { writeContract, writeContractAsync, data: txHash } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
   const { isSuccess: txConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
@@ -379,51 +469,67 @@ export default function DashboardPage() {
 
   const escrowContract = process.env.NEXT_PUBLIC_ESCROW_CONTRACT as `0x${string}` | undefined;
 
-  async function handleDispute(task: Task) {
-    if (!escrowContract || !address) return;
-    setDisputeLoading(task.payment_request_id);
-    try {
-      // 1. Call escrow.disputeTask on-chain
-      const taskIdBytes32 = keccak256(toHex(task.payment_request_id));
-      writeContract({
-        address: escrowContract,
-        abi: DISPUTE_ABI,
-        functionName: "disputeTask",
-        args: [taskIdBytes32],
-      });
+  // Review-deadline comparisons in render. Not reactive to the second — a
+  // refresh after the window closes flips the claim button.
+  const nowSec = Math.floor(Date.now() / 1000);
 
-      // 2. Prove wallet ownership (CC-004), then update DB via REST
-      const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: address }),
-      });
-      const { nonce, message } = await challengeRes.json();
-      const signature = await signMessageAsync({ message });
+  // ── Task actions (CC-092): submit, claim, dispute ────────────────────────
+  // All three prove wallet ownership the same way (CC-004): one challenge-
+  // response signature per REST call.
 
-      await fetch("/api/dispute", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-caller-wallet": address,
-          "x-caller-signature": signature,
-          "x-caller-nonce": nonce,
-        },
-        body: JSON.stringify({ payment_request_id: task.payment_request_id }),
-      });
-    } catch {
-      // on-chain tx or signing may fail — best-effort
-    } finally {
-      setDisputeLoading(null);
-      fetchData();
-    }
+  function taskIdOf(task: Task): `0x${string}` {
+    return keccak256(toHex(task.payment_request_id));
   }
 
-  // ── Notification channels (CC-073) ──────────────────────────────────────
+  /** Open one action per task; closing clears its message. */
+  function toggleAction(taskId: string, action: TaskAction) {
+    setActionOpen((prev) => {
+      const next = { ...prev };
+      if (next[taskId] === action) delete next[taskId];
+      else next[taskId] = action;
+      return next;
+    });
+    setActionMsg((prev) => {
+      if (!(taskId in prev)) return prev;
+      const next = { ...prev };
+      delete next[taskId];
+      return next;
+    });
+  }
 
-  // Every channels call needs a fresh challenge-response signature (CC-004),
-  // so each load/add/remove prompts one wallet signature.
-  async function signedChannelHeaders(): Promise<Record<string, string>> {
+  /** One shared textarea for whichever action is open on this task. */
+  function evidenceTextarea(taskId: string) {
+    return (
+      <textarea
+        className={styles.evidenceTextarea}
+        rows={6}
+        spellCheck={false}
+        placeholder={'{"taskId":"<payment_request_id>","artifacts":[{"uri":"https://…"}]} — the exact bytes you will keep; their keccak256 is what gets committed.'}
+        value={evidenceDrafts[taskId] ?? ""}
+        onChange={(e) =>
+          setEvidenceDrafts((prev) => ({ ...prev, [taskId]: e.target.value }))
+        }
+      />
+    );
+  }
+
+  function actionChecks(checks: CheckResult[] | undefined) {
+    if (!checks || checks.length === 0) return null;
+    return (
+      <ul className={styles.checkList}>
+        {checks.map((c) => (
+          <li
+            key={c.check}
+            className={c.passed ? styles.checkPass : styles.checkFail}
+          >
+            {c.check}: {c.passed ? "passed" : (c.reason ?? "failed")}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  async function signedApiHeaders(): Promise<Record<string, string>> {
     if (!address) throw new Error("Wallet not connected");
     const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
       method: "POST",
@@ -438,6 +544,269 @@ export default function DashboardPage() {
       "x-caller-signature": signature,
       "x-caller-nonce": nonce,
     };
+  }
+
+  /** Validates the textarea draft and returns its parse — or shows the error. */
+  function parseDraft(taskId: string) {
+    const draft = (evidenceDrafts[taskId] ?? "").trim();
+    if (!draft) {
+      setActionMsg((prev) => ({
+        ...prev,
+        [taskId]: { ok: false, text: "Paste the evidence bundle JSON first." },
+      }));
+      return null;
+    }
+    try {
+      return parseAndHashEvidenceBundle(draft);
+    } catch (err) {
+      setActionMsg((prev) => ({
+        ...prev,
+        [taskId]: {
+          ok: false,
+          text:
+            err instanceof EvidenceBundleValidationError
+              ? err.message
+              : "Could not parse the evidence bundle.",
+        },
+      }));
+      return null;
+    }
+  }
+
+  /** Funded → Delivered. The hash is computed client-side; only it goes on-chain. */
+  async function handleSubmitWork(task: Task) {
+    if (!escrowContract || !address || !task.on_chain) return;
+    const parsed = parseDraft(task.id);
+    if (!parsed) return;
+    setActionBusy(task.payment_request_id);
+    setActionMsg((prev) => ({
+      ...prev,
+      [task.id]: { ok: true, text: "Confirm submitWork in your wallet…" },
+    }));
+    try {
+      await writeContractAsync({
+        address: escrowContract,
+        abi: SUBMIT_WORK_ABI,
+        functionName: "submitWork",
+        args: [
+          taskIdOf(task),
+          parsed.hash,
+          task.on_chain.specHash as `0x${string}`,
+          ZERO_ATTESTATION_UID,
+        ],
+      });
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: true, text: "Work submitted. The review window is now running." },
+      }));
+    } catch {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: false, text: "submitWork was not sent — cancelled or rejected in your wallet." },
+      }));
+    } finally {
+      setActionBusy(null);
+      fetchData();
+    }
+  }
+
+  /** Delivered + review window elapsed → pull-payment claim, no verdict needed. */
+  async function handleClaimAfterReview(task: Task) {
+    if (!escrowContract || !address) return;
+    setActionBusy(task.payment_request_id);
+    setActionMsg((prev) => ({
+      ...prev,
+      [task.id]: { ok: true, text: "Confirm releaseAfterReview in your wallet…" },
+    }));
+    try {
+      await writeContractAsync({
+        address: escrowContract,
+        abi: RELEASE_AFTER_REVIEW_ABI,
+        functionName: "releaseAfterReview",
+        args: [taskIdOf(task)],
+      });
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: true, text: "Claim submitted — payment will arrive once the transaction confirms." },
+      }));
+    } catch {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: false, text: "Claim was not sent — cancelled or rejected in your wallet." },
+      }));
+    } finally {
+      setActionBusy(null);
+      fetchData();
+    }
+  }
+
+  /** Delivered + passing verdict → claim without waiting out the window. */
+  async function handleClaimEarly(task: Task) {
+    if (!escrowContract || !address) return;
+    const parsed = parseDraft(task.id);
+    if (!parsed) return;
+    setActionBusy(task.payment_request_id);
+    try {
+      const res = await fetch("/api/verdict", {
+        method: "POST",
+        headers: await signedApiHeaders(),
+        body: JSON.stringify({
+          payment_request_id: task.payment_request_id,
+          evidence_bundle: parsed.preimage,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setActionMsg((prev) => ({
+          ...prev,
+          [task.id]: { ok: false, text: data.error ?? "Verdict request failed", checks: data.checks },
+        }));
+        return;
+      }
+      const verdict = parseVerdictPayload(data.verdict);
+      if (!verdict.passed) {
+        // The platform signs what the checker found, pass or fail — a failure
+        // just means early claim is not available (CC-092's worker-facing note).
+        setActionMsg((prev) => ({
+          ...prev,
+          [task.id]: {
+            ok: false,
+            text: "The evidence did not pass the acceptance checks, so there is no passing verdict to claim with. You can still wait out the review window, or dispute with this failing verdict.",
+            checks: data.checks,
+          },
+        }));
+        return;
+      }
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: true, text: "Passing verdict obtained — confirm claimWithVerdict in your wallet…" },
+      }));
+      await writeContractAsync({
+        address: escrowContract,
+        abi: CLAIM_WITH_VERDICT_ABI,
+        functionName: "claimWithVerdict",
+        args: [taskIdOf(task), verdictTupleForContract(verdict), data.signature],
+      });
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: true, text: "Claim submitted — payment will arrive once the transaction confirms." },
+      }));
+    } catch (err) {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: false,
+          text:
+            err instanceof Error && err.message.startsWith("verdict field")
+              ? `The verdict response was malformed: ${err.message}`
+              : "Claim was not sent — cancelled, rejected in your wallet, or the request failed.",
+        },
+      }));
+    } finally {
+      setActionBusy(null);
+      fetchData();
+    }
+  }
+
+  /**
+   * Dispute (ADR-0001 D2): v2 has no bare-assertion dispute, so the flow is
+   * verdict-first — obtain a failing signed verdict from /api/verdict, present
+   * disputeTask on-chain from this wallet, then record it in the DB via
+   * /api/dispute (which reads the now-Disputed chain state).
+   */
+  async function handleDispute(task: Task) {
+    if (!escrowContract || !address) return;
+    const parsed = parseDraft(task.id);
+    if (!parsed) return;
+    setActionBusy(task.payment_request_id);
+    try {
+      const res = await fetch("/api/verdict", {
+        method: "POST",
+        headers: await signedApiHeaders(),
+        body: JSON.stringify({
+          payment_request_id: task.payment_request_id,
+          evidence_bundle: parsed.preimage,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setActionMsg((prev) => ({
+          ...prev,
+          [task.id]: { ok: false, text: data.error ?? "Verdict request failed", checks: data.checks },
+        }));
+        return;
+      }
+      const verdict = parseVerdictPayload(data.verdict);
+      if (verdict.passed) {
+        setActionMsg((prev) => ({
+          ...prev,
+          [task.id]: {
+            ok: false,
+            text: "Cannot dispute: the verdict passed — the evidence satisfies the acceptance spec.",
+            checks: data.checks,
+          },
+        }));
+        return;
+      }
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: true, text: "Failing verdict obtained — confirm disputeTask in your wallet…" },
+      }));
+      await writeContractAsync({
+        address: escrowContract,
+        abi: DISPUTE_ABI,
+        functionName: "disputeTask",
+        args: [taskIdOf(task), verdictTupleForContract(verdict), data.signature],
+      });
+      // Now on-chain Disputed (or the tx failed above). Best-effort DB sync —
+      // the transaction may not be mined yet when the route reads the chain,
+      // and a failure here leaves the chain ahead of the DB, which
+      // /api/dispute's chain-first path reconciles on retry.
+      let recorded = false;
+      try {
+        const syncRes = await fetch("/api/dispute", {
+          method: "POST",
+          headers: await signedApiHeaders(),
+          body: JSON.stringify({ payment_request_id: task.payment_request_id }),
+        });
+        recorded = (await syncRes.json()).ok === true;
+      } catch {
+        // Signing a second message may have been declined — the chain state is
+        // what matters; nothing to undo.
+      }
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: true,
+          text: recorded
+            ? "Dispute submitted on-chain and recorded."
+            : "Dispute submitted on-chain. The database will catch up on your next dispute attempt or a refresh.",
+        },
+      }));
+    } catch (err) {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: false,
+          text:
+            err instanceof Error && err.message.startsWith("verdict field")
+              ? `The verdict response was malformed: ${err.message}`
+              : "Dispute was not sent — cancelled, rejected in your wallet, or the request failed.",
+        },
+      }));
+    } finally {
+      setActionBusy(null);
+      fetchData();
+    }
+  }
+
+  // ── Notification channels (CC-073) ──────────────────────────────────────
+
+  // Every channels call needs a fresh challenge-response signature (CC-004),
+  // so each load/add/remove prompts one wallet signature — the same round trip
+  // the task actions above use.
+  async function signedChannelHeaders(): Promise<Record<string, string>> {
+    return signedApiHeaders();
   }
 
   async function loadChannels() {
@@ -1150,7 +1519,13 @@ export default function DashboardPage() {
 
             {tasks.length > 0 && (
               <div className={styles.taskList}>
-                {tasks.map((task) => (
+                {tasks.map((task) => {
+                  const isWorkerForTask = Boolean(
+                    address &&
+                      task.to_human_wallet.toLowerCase() === address.toLowerCase(),
+                  );
+                  const busy = actionBusy === task.payment_request_id;
+                  return (
                   <div key={task.id} className={styles.taskCard}>
                     <div className={styles.taskHeader}>
                       <span
@@ -1191,41 +1566,148 @@ export default function DashboardPage() {
                       )}
                     </div>
 
-                    {/* Dispute section for active tasks */}
-                    {task.status === "active" && escrowContract && (
-                      <div className={styles.disputeSection}>
-                        <button
-                          className={styles.disputeToggle}
-                          onClick={() =>
-                            setDisputeOpen((prev) => ({
-                              ...prev,
-                              [task.id]: !prev[task.id],
-                            }))
-                          }
-                        >
-                          {disputeOpen[task.id] ? "Cancel" : "Dispute this task"}
-                        </button>
-                        {disputeOpen[task.id] && (
-                          <div className={styles.disputeForm}>
-                            <p className={styles.disputeWarning}>
-                              Disputing will freeze escrowed funds until the
-                              platform owner resolves the dispute.
-                            </p>
+                    {/* ── Submit work (CC-092): Funded → Delivered ─────── */}
+                    {isWorkerForTask &&
+                      escrowContract &&
+                      task.on_chain &&
+                      task.status === "active" &&
+                      task.on_chain.state === "Funded" && (
+                        <div className={styles.workerActionSection}>
+                          <button
+                            className={styles.actionToggle}
+                            onClick={() => toggleAction(task.id, "submit")}
+                          >
+                            {actionOpen[task.id] === "submit"
+                              ? "Cancel"
+                              : "Submit work"}
+                          </button>
+                          {actionOpen[task.id] === "submit" && (
+                            <div className={styles.actionForm}>
+                              <p className={styles.actionNote}>
+                                Paste the evidence bundle and keep those exact
+                                bytes — the platform stores hashes only, and
+                                your wallet commits the bundle&apos;s hash (plus an
+                                acknowledgement of the committed acceptance
+                                criteria) with submitWork.
+                              </p>
+                              {evidenceTextarea(task.id)}
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => handleSubmitWork(task)}
+                                disabled={busy}
+                              >
+                                {busy ? "Working..." : "Submit work"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    {/* ── Claim payment (CC-092): Delivered → Completed ── */}
+                    {isWorkerForTask &&
+                      escrowContract &&
+                      task.on_chain?.state === "Delivered" &&
+                      task.status !== "completed" && (
+                        <div className={styles.workerActionSection}>
+                          {nowSec >= task.on_chain.reviewDeadline ? (
                             <button
-                              className={styles.disputeBtn}
-                              onClick={() => handleDispute(task)}
-                              disabled={disputeLoading === task.payment_request_id}
+                              className={styles.actionBtn}
+                              onClick={() => handleClaimAfterReview(task)}
+                              disabled={busy}
                             >
-                              {disputeLoading === task.payment_request_id
-                                ? "Submitting..."
-                                : "Confirm Dispute"}
+                              {busy ? "Working..." : "Claim Payment (Review Expired)"}
                             </button>
-                          </div>
-                        )}
+                          ) : (
+                            <p className={styles.actionNote}>
+                              Work delivered. The review window closes{" "}
+                              {formatDeadline(task.on_chain.reviewDeadline)}
+                              — after that, claim payment here.
+                            </p>
+                          )}
+                          <button
+                            className={styles.actionToggle}
+                            onClick={() => toggleAction(task.id, "claim-early")}
+                          >
+                            {actionOpen[task.id] === "claim-early"
+                              ? "Cancel"
+                              : "Claim Early (With Verdict)"}
+                          </button>
+                          {actionOpen[task.id] === "claim-early" && (
+                            <div className={styles.actionForm}>
+                              <p className={styles.actionNote}>
+                                Paste the evidence bundle you submitted. The
+                                platform checks it against the committed
+                                acceptance criteria; if it passes, your wallet
+                                claims immediately with the signed verdict —
+                                no waiting out the review window.
+                              </p>
+                              {evidenceTextarea(task.id)}
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => handleClaimEarly(task)}
+                                disabled={busy}
+                              >
+                                {busy ? "Working..." : "Claim early"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    {/* ── Dispute (ADR-0001 D2): verdict-first ─────────── */}
+                    {escrowContract &&
+                      task.on_chain?.state === "Delivered" &&
+                      nowSec < task.on_chain.reviewDeadline &&
+                      task.status !== "disputed" && (
+                        <div className={styles.disputeSection}>
+                          <button
+                            className={styles.disputeToggle}
+                            onClick={() => toggleAction(task.id, "dispute")}
+                          >
+                            {actionOpen[task.id] === "dispute"
+                              ? "Cancel"
+                              : "Dispute this task"}
+                          </button>
+                          {actionOpen[task.id] === "dispute" && (
+                            <div className={styles.disputeForm}>
+                              <p className={styles.disputeWarning}>
+                                A dispute needs a signed failing verdict —
+                                there is no bare-assertion dispute. Paste the
+                                task&apos;s evidence bundle and the platform
+                                computes the verdict from the committed
+                                acceptance criteria; your wallet then submits
+                                disputeTask, freezing the funds until
+                                resolution. It must land before the review
+                                window closes.
+                              </p>
+                              {evidenceTextarea(task.id)}
+                              <button
+                                className={styles.disputeBtn}
+                                onClick={() => handleDispute(task)}
+                                disabled={busy}
+                              >
+                                {busy ? "Working..." : "Confirm Dispute"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    {actionMsg[task.id] && (
+                      <div
+                        className={
+                          actionMsg[task.id].ok
+                            ? styles.actionMsgOk
+                            : styles.actionMsgErr
+                        }
+                      >
+                        <p>{actionMsg[task.id].text}</p>
+                        {actionChecks(actionMsg[task.id].checks)}
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>
