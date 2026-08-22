@@ -3,13 +3,15 @@ import type { NextRequest } from "next/server";
 
 /**
  * Tests for /api/channels (CC-073) — notification channel CRUD for the
- * dashboard, guarded by the CC-004 challenge-response wallet signature.
+ * dashboard, guarded by the CC-004 challenge-response wallet signature —
+ * and the accepts_auto_booking toggle (CC-074).
  */
 
 const mockGetChannelsForContractor = vi.fn();
 const mockGetChannelById = vi.fn();
 const mockRegisterNotificationChannel = vi.fn();
 const mockRemoveNotificationChannel = vi.fn();
+const mockSetChannelAutoBooking = vi.fn();
 vi.mock("@/lib/db/notifications", () => ({
   getChannelsForContractor: (...args: unknown[]) =>
     mockGetChannelsForContractor(...args),
@@ -18,6 +20,8 @@ vi.mock("@/lib/db/notifications", () => ({
     mockRegisterNotificationChannel(...args),
   removeNotificationChannel: (...args: unknown[]) =>
     mockRemoveNotificationChannel(...args),
+  setChannelAutoBooking: (...args: unknown[]) =>
+    mockSetChannelAutoBooking(...args),
 }));
 
 const mockGetHumanByWallet = vi.fn();
@@ -44,7 +48,7 @@ const AUTH_HEADERS = {
 };
 
 function makeRequest(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   opts: { headers?: Record<string, string>; body?: Record<string, unknown> },
 ) {
   return new Request("http://localhost/api/channels", {
@@ -425,6 +429,170 @@ describe("POST /api/channels", () => {
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(JSON.stringify(json)).not.toContain("worker@example.com");
+  });
+});
+
+// ── PATCH (auto-booking toggle, CC-074) ─────────────────────────────────────
+
+describe("PATCH /api/channels", () => {
+  function ownedChannel() {
+    return {
+      id: CHANNEL_ID,
+      contractor_id: CONTRACTOR_ID,
+      type: "webhook",
+      address: "https://example.com/hook",
+      accepts_auto_booking: false,
+      created_at: "2026-08-21T00:00:00Z",
+    };
+  }
+
+  it("rejects an unsigned request with 401", async () => {
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        body: { channel_id: CHANNEL_ID, accepts_auto_booking: true },
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(mockSetChannelAutoBooking).not.toHaveBeenCalled();
+  });
+
+  it("requires accepts_auto_booking explicitly — omitting it is a 400, not a default", async () => {
+    // CC-074: opting in must be an explicit act. If the field were optional
+    // with a default, a malformed client request could silently flip the
+    // worker's pre-authorisation one way or the other.
+    mockRegisteredHuman();
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        headers: AUTH_HEADERS,
+        body: { channel_id: CHANNEL_ID },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockSetChannelAutoBooking).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-boolean accepts_auto_booking with 400", async () => {
+    mockRegisteredHuman();
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        headers: AUTH_HEADERS,
+        body: { channel_id: CHANNEL_ID, accepts_auto_booking: "true" },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockSetChannelAutoBooking).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-UUID channel_id with 400", async () => {
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        headers: AUTH_HEADERS,
+        body: { channel_id: "not-a-uuid", accepts_auto_booking: true },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockGetChannelById).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when the channel does not exist", async () => {
+    mockGetChannelById.mockResolvedValue(null);
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        headers: AUTH_HEADERS,
+        body: { channel_id: CHANNEL_ID, accepts_auto_booking: true },
+      }),
+    );
+    expect(res.status).toBe(404);
+    expect(mockSetChannelAutoBooking).not.toHaveBeenCalled();
+  });
+
+  it("rejects a validly-signed request from another wallet with 403", async () => {
+    mockVerifyChallengeSignature.mockResolvedValue(OTHER_WALLET);
+    mockRegisteredHuman(OTHER_WALLET, OTHER_CONTRACTOR_ID);
+    mockGetChannelById.mockResolvedValue(ownedChannel());
+
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        headers: {
+          ...AUTH_HEADERS,
+          "x-caller-wallet": OTHER_WALLET,
+        },
+        body: { channel_id: CHANNEL_ID, accepts_auto_booking: true },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockSetChannelAutoBooking).not.toHaveBeenCalled();
+  });
+
+  it("enables auto-booking when the owner's signature is valid", async () => {
+    mockRegisteredHuman();
+    mockGetChannelById.mockResolvedValue(ownedChannel());
+    const updated = { ...ownedChannel(), accepts_auto_booking: true };
+    mockSetChannelAutoBooking.mockResolvedValue(updated);
+
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        headers: AUTH_HEADERS,
+        body: { channel_id: CHANNEL_ID, accepts_auto_booking: true },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.channel.accepts_auto_booking).toBe(true);
+    expect(mockSetChannelAutoBooking).toHaveBeenCalledWith(CHANNEL_ID, true);
+  });
+
+  it("disables auto-booking when the owner's signature is valid", async () => {
+    mockRegisteredHuman();
+    mockGetChannelById.mockResolvedValue({
+      ...ownedChannel(),
+      accepts_auto_booking: true,
+    });
+    const updated = { ...ownedChannel(), accepts_auto_booking: false };
+    mockSetChannelAutoBooking.mockResolvedValue(updated);
+
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        headers: AUTH_HEADERS,
+        body: { channel_id: CHANNEL_ID, accepts_auto_booking: false },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.channel.accepts_auto_booking).toBe(false);
+    expect(mockSetChannelAutoBooking).toHaveBeenCalledWith(CHANNEL_ID, false);
+  });
+
+  it("does not leak the destination into the error response on DB failure", async () => {
+    mockRegisteredHuman();
+    mockGetChannelById.mockResolvedValue(ownedChannel());
+    mockSetChannelAutoBooking.mockRejectedValue(
+      new Error("setChannelAutoBooking failed: boom"),
+    );
+
+    const { PATCH } = await import("@/app/api/channels/route");
+    const res = await PATCH(
+      makeRequest("PATCH", {
+        headers: AUTH_HEADERS,
+        body: { channel_id: CHANNEL_ID, accepts_auto_booking: true },
+      }),
+    );
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(JSON.stringify(json)).not.toContain("example.com");
   });
 });
 

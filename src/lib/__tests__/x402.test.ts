@@ -119,4 +119,65 @@ describe("x402 payment", () => {
       }),
     );
   });
+
+  // ─── CC-094 / ADR-0005: the offer stage ──────────────────────────────────
+
+  it("creates a pending offer with the default 24h expiry when the worker must decide (D3/D4)", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+    const before = Math.floor(Date.now() / 1000);
+
+    const result = await initiateX402Payment({ ...BASE_REQUEST, auto_accept: false });
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "pending" }),
+    );
+    const [inserted] = (createTask as ReturnType<typeof vi.fn>).mock.calls[0] as [{ offer_expiry_unix: number }];
+    expect(inserted.offer_expiry_unix).toBeGreaterThanOrEqual(before + 24 * 60 * 60);
+    expect(inserted.offer_expiry_unix).toBeLessThanOrEqual(before + 24 * 60 * 60 + 2);
+    expect(result.worker_status).toBe("pending");
+    expect(result.offer_expiry_unix).toBe(inserted.offer_expiry_unix);
+  });
+
+  it("honours an agent-set expiry within the 15m–7d bounds (D4)", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+    const before = Math.floor(Date.now() / 1000);
+
+    await initiateX402Payment({ ...BASE_REQUEST, offer_expiry_seconds: 15 * 60 });
+
+    const [inserted] = (createTask as ReturnType<typeof vi.fn>).mock.calls[0] as [{ offer_expiry_unix: number }];
+    expect(inserted.offer_expiry_unix).toBeGreaterThanOrEqual(before + 15 * 60);
+    expect(inserted.offer_expiry_unix).toBeLessThanOrEqual(before + 15 * 60 + 2);
+  });
+
+  it("auto-accepts a worker with accepts_auto_booking — born accepted, no expiry (D3)", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+
+    const result = await initiateX402Payment({ ...BASE_REQUEST, auto_accept: true });
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "accepted", offer_expiry_unix: null }),
+    );
+    expect(result.worker_status).toBe("accepted");
+    expect(result.offer_expiry_unix).toBeNull();
+  });
+
+  it("rejects an offer expiry below the 15-minute floor (D4)", async () => {
+    await expect(
+      initiateX402Payment({ ...BASE_REQUEST, offer_expiry_seconds: 14 * 60 }),
+    ).rejects.toThrow("offer_expiry_seconds");
+  });
+
+  it("rejects an offer expiry above the 7-day ceiling (D4)", async () => {
+    await expect(
+      initiateX402Payment({ ...BASE_REQUEST, offer_expiry_seconds: 8 * 24 * 60 * 60 }),
+    ).rejects.toThrow("offer_expiry_seconds");
+  });
+
+  it("tells the agent not to fund until the worker has accepted (CC-094 gate)", async () => {
+    const pending = await initiateX402Payment({ ...BASE_REQUEST, auto_accept: false });
+    expect(pending.instructions).toContain("Wait for the worker to accept");
+
+    const accepted = await initiateX402Payment({ ...BASE_REQUEST, auto_accept: true });
+    expect(accepted.instructions).not.toContain("Wait for the worker to accept");
+  });
 });

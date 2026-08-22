@@ -14,6 +14,7 @@ vi.mock("@/lib/db/whitepages", () => ({
 }));
 
 const mockInitiateX402Payment = vi.fn();
+const mockCountCommittedTasks = vi.fn();
 vi.mock("@/lib/payments/x402", () => ({
   initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
 }));
@@ -26,6 +27,19 @@ vi.mock("@/lib/ratelimit", () => ({
 vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: vi.fn(),
   updateTaskStatus: vi.fn(),
+  countCommittedTasks: (...args: unknown[]) => mockCountCommittedTasks(...args),
+  WORKER_CONCURRENCY_CAP: 3,
+}));
+
+const mockGetChannelsForContractor = vi.fn();
+vi.mock("@/lib/db/notifications", () => ({
+  registerNotificationChannel: vi.fn(),
+  getChannelsForContractor: (...args: unknown[]) => mockGetChannelsForContractor(...args),
+}));
+
+const mockNotifyContractor = vi.fn();
+vi.mock("@/lib/notifications/dispatch", () => ({
+  notifyContractor: (...args: unknown[]) => mockNotifyContractor(...args),
 }));
 
 vi.mock("@/lib/contracts/escrow", () => ({
@@ -99,7 +113,13 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     mockInitiateX402Payment.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
+      worker_status: "pending",
+      offer_expiry_unix: 9999999999,
     });
+    // Default: no channels, so no auto-booking — the offer waits (ADR-0005 D3).
+    mockGetChannelsForContractor.mockResolvedValue([]);
+    mockNotifyContractor.mockResolvedValue({ notified_channels: 0 });
+    mockCountCommittedTasks.mockResolvedValue(0);
   });
 
   it("rejects an unauthenticated caller instead of creating a task row", async () => {
@@ -201,7 +221,12 @@ describe("request_human_work acceptance spec (CC-084)", () => {
     mockInitiateX402Payment.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
+      worker_status: "pending",
+      offer_expiry_unix: 9999999999,
     });
+    mockGetChannelsForContractor.mockResolvedValue([]);
+    mockNotifyContractor.mockResolvedValue({ notified_channels: 0 });
+    mockCountCommittedTasks.mockResolvedValue(0);
   });
 
   it("passes the parsed spec and its hash through to the payment request", async () => {
@@ -270,5 +295,125 @@ describe("request_human_work acceptance spec (CC-084)", () => {
     expect(result.isError).toBe(true);
     expect(json.error).toContain("unsupported schema_version 99");
     expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+  });
+});
+
+describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLimit.mockResolvedValue({ success: true, remaining: 29, retryAfterS: 0 });
+    mockGetHumanByWallet.mockResolvedValue({
+      id: "human-uuid",
+      wallet: WORKER_WALLET.toLowerCase(),
+      categories: ["delivery-errands"],
+      rate_usdc: 40,
+      availability: "available",
+      reputation_score: 80,
+    });
+    mockInitiateX402Payment.mockResolvedValue({
+      status: "awaiting_funding",
+      payment_request_id: "pr_1",
+      worker_status: "pending",
+      offer_expiry_unix: 9999999999,
+    });
+    mockGetChannelsForContractor.mockResolvedValue([]);
+    mockNotifyContractor.mockResolvedValue({ notified_channels: 1 });
+    mockCountCommittedTasks.mockResolvedValue(0);
+  });
+
+  it("reads the worker's channels — the flag becomes a gate, not metadata (D3)", async () => {
+    await callRequestHumanWork();
+
+    expect(mockGetChannelsForContractor).toHaveBeenCalledWith("human-uuid");
+  });
+
+  it("keeps the offer pending when no channel has accepts_auto_booking (D3)", async () => {
+    mockGetChannelsForContractor.mockResolvedValue([
+      { id: "ch1", type: "email", address: "redacted", accepts_auto_booking: false },
+    ]);
+
+    await callRequestHumanWork();
+
+    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: false }),
+    );
+  });
+
+  it("auto-accepts when any channel has accepts_auto_booking (D3)", async () => {
+    mockGetChannelsForContractor.mockResolvedValue([
+      { id: "ch1", type: "email", address: "redacted", accepts_auto_booking: false },
+      { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
+    ]);
+
+    await callRequestHumanWork();
+
+    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: true }),
+    );
+    // Skip-count check only happens on the auto path.
+    expect(mockCountCommittedTasks).toHaveBeenCalledWith(WORKER_WALLET.toLowerCase());
+  });
+
+  it("refuses to auto-book a worker already at the concurrency cap (D5)", async () => {
+    mockGetChannelsForContractor.mockResolvedValue([
+      { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
+    ]);
+    mockCountCommittedTasks.mockResolvedValue(3);
+
+    const { result, json } = await callRequestHumanWork();
+
+    expect(result.isError).toBe(true);
+    expect(json.error).toContain("concurrency cap");
+    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+  });
+
+  it("passes the agent-set offer expiry through, bounded at the schema layer (D4)", async () => {
+    await callRequestHumanWork({ ...VALID_ARGS, offer_expiry_minutes: 30 });
+
+    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+      expect.objectContaining({ offer_expiry_seconds: 30 * 60 }),
+    );
+  });
+
+  it("defaults the offer expiry to 24 hours (ADR-0005 D4 open item, resolved)", async () => {
+    await callRequestHumanWork();
+
+    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+      expect.objectContaining({ offer_expiry_seconds: 24 * 60 * 60 }),
+    );
+  });
+
+  it("rejects an offer expiry outside the 15m–7d bounds at the schema layer (D4)", async () => {
+    const { tool } = await callRequestHumanWork();
+
+    expect(() =>
+      tool.inputSchema.parse({ ...VALID_ARGS, offer_expiry_minutes: 14 }),
+    ).toThrow();
+    expect(() =>
+      tool.inputSchema.parse({ ...VALID_ARGS, offer_expiry_minutes: 10081 }),
+    ).toThrow();
+  });
+
+  it("notifies the worker's channels of the offer (ADR-0005 D7, CC-095 seam)", async () => {
+    await callRequestHumanWork();
+
+    expect(mockNotifyContractor).toHaveBeenCalledWith(
+      "human-uuid",
+      expect.objectContaining({ type: "offer_received", payment_request_id: "pr_1" }),
+    );
+    // Manual-accept path: one event only, no task_funded.
+    expect(mockNotifyContractor).toHaveBeenCalledTimes(1);
+  });
+
+  it("also records the auto-booked commitment on the auto path", async () => {
+    mockGetChannelsForContractor.mockResolvedValue([
+      { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
+    ]);
+
+    await callRequestHumanWork();
+
+    const types = mockNotifyContractor.mock.calls.map(([, ev]) => ev.type);
+    expect(types).toContain("offer_received");
+    expect(types).toContain("task_funded");
   });
 });

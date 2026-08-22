@@ -1,7 +1,8 @@
 /**
  * route.ts — /api/channels
  *
- * Notification channel management for the worker dashboard (CC-073).
+ * Notification channel management for the worker dashboard (CC-073),
+ * plus the per-channel accepts_auto_booking toggle (CC-074).
  * The `notification_channels` table and the `register_notification_channel`
  * MCP tool already exist; this is the website-facing surface on top of them,
  * so a worker can add, change, and remove channels without calling MCP.
@@ -21,6 +22,7 @@ import {
   getChannelById,
   registerNotificationChannel,
   removeNotificationChannel,
+  setChannelAutoBooking,
 } from "@/lib/db/notifications";
 import { getHumanByWallet } from "@/lib/db/whitepages";
 import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
@@ -48,6 +50,14 @@ const UUID_RE =
 
 const deleteSchema = z.object({
   channel_id: z.string().regex(UUID_RE, "channel_id must be a UUID"),
+});
+
+// CC-074: the auto-booking toggle. The boolean is required, not defaulted —
+// opting a worker in to auto-booking must be an explicit act, so a PATCH that
+// omits it is a bad request rather than a silent `true` or `false`.
+const patchSchema = z.object({
+  channel_id: z.string().regex(UUID_RE, "channel_id must be a UUID"),
+  accepts_auto_booking: z.boolean(),
 });
 
 const INVALID_ADDRESS_MESSAGES: Record<(typeof CHANNEL_TYPES)[number], string> =
@@ -210,6 +220,78 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, channel }, { status: 201 });
   } catch (err: unknown) {
     return safeErrorResponse(err, "channel_register_failed");
+  }
+}
+
+/**
+ * Toggle accepts_auto_booking on a channel (CC-074). Only the channel
+ * owner's wallet may do this — the flag pre-authorises agents to book the
+ * worker directly, so it is never settable by anyone else.
+ */
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  try {
+    const auth = await requireWalletAuth(request);
+    if (!auth.ok) return auth.response;
+
+    const parsedBody = await readJsonBody(request);
+    if (!parsedBody.ok) return parsedBody.response;
+
+    const parsed = patchSchema.safeParse(parsedBody.body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Invalid request body — channel_id (UUID) and accepts_auto_booking (boolean) are both required",
+          details: parsed.error.flatten().fieldErrors,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { channel_id, accepts_auto_booking } = parsed.data;
+
+    const channel = await getChannelById(channel_id);
+    if (!channel) {
+      return NextResponse.json(
+        { ok: false, error: "Channel not found" },
+        { status: 404 }
+      );
+    }
+
+    const human = await getHumanByWallet(auth.wallet);
+    if (!human || channel.contractor_id !== human.id) {
+      log("warn", "channel_autobook_unauthorized", {
+        channel_id,
+        caller: auth.wallet,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Not authorized. Only the channel owner may change auto-booking.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const updated = await setChannelAutoBooking(channel_id, accepts_auto_booking);
+    if (!updated) {
+      return NextResponse.json(
+        { ok: false, error: "Channel not found" },
+        { status: 404 }
+      );
+    }
+
+    log("info", "channel_autobook_changed", {
+      wallet: auth.wallet,
+      type: channel.type,
+      accepts_auto_booking,
+    });
+
+    return NextResponse.json({ ok: true, channel: updated });
+  } catch (err: unknown) {
+    return safeErrorResponse(err, "channel_autobook_patch_failed");
   }
 }
 

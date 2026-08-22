@@ -115,35 +115,27 @@ export async function removeNotificationChannel(
 }
 
 /**
- * Flip `accepts_auto_booking` across every channel a contractor owns.
- *
- * Used by the CC-075 AWOL auto-disable: the flag is per-channel, so an AWOL
- * trigger must reach all of them — leaving one channel live would keep
- * auto-booking the worker against the very silence that triggered it.
- * Reversible: the worker re-enables per channel from the dashboard (CC-073/CC-074),
- * which lands here or in `registerNotificationChannel` as a plain upsert.
- *
- * Returns the number of channels updated.
+ * Update the accepts_auto_booking flag on one channel (CC-074).
+ * The dashboard toggle calls this; PATCH /api/channels checks ownership first.
+ * Returns the updated channel, or null if the row does not exist.
  */
-export async function setAcceptsAutoBookingForContractor(
-  contractorId: string,
+export async function setChannelAutoBooking(
+  channelId: string,
   acceptsAutoBooking: boolean
-): Promise<number> {
+): Promise<NotificationChannel | null> {
   const supabase = getSupabaseAdmin();
 
   const { data, error } = await supabase
     .from("notification_channels")
-    .update({
-      accepts_auto_booking: acceptsAutoBooking,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("contractor_id", contractorId)
-    .select("id");
+    .update({ accepts_auto_booking: acceptsAutoBooking })
+    .eq("id", channelId)
+    .select()
+    .single();
 
-  if (error) {
-    throw new Error(`setAcceptsAutoBookingForContractor failed: ${error.message}`);
+  if (error && error.code !== "PGRST116") {
+    throw new Error(`setChannelAutoBooking failed: ${error.message}`);
   }
-  return (data ?? []).length;
+  return (data as NotificationChannel) ?? null;
 }
 
 /**
