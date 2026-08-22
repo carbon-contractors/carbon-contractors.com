@@ -25,6 +25,9 @@ export interface TaskRecord {
   spec_schema_version: number | null;
   /** On-chain block timestamp when Funded was confirmed. Settable once (CC-092). */
   funded_at: string | null;
+  /** Set by the retention engine only (CC-087) — see src/lib/db/retention.ts. */
+  content_purged_at: string | null;
+  content_purge_rule: string | null;
   created_at: string;
 }
 

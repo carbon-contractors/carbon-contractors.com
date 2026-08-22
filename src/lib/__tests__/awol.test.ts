@@ -15,16 +15,21 @@ vi.mock("@/lib/db/notifications", () => ({
 }));
 
 const mockGetTasksByWallet = vi.fn();
+const mockCountCommittedTasks = vi.fn();
 vi.mock("@/lib/db/tasks", () => ({
   getTasksByWallet: (...args: unknown[]) => mockGetTasksByWallet(...args),
   getTaskByPaymentId: vi.fn(),
   updateTaskStatus: vi.fn(),
+  countCommittedTasks: (...args: unknown[]) => mockCountCommittedTasks(...args),
+  WORKER_CONCURRENCY_CAP: 3,
 }));
 
 const mockNotifyAutoBookingDisabled = vi.fn();
+const mockNotifyContractor = vi.fn();
 vi.mock("@/lib/notifications/dispatch", () => ({
   notifyAutoBookingDisabled: (...args: unknown[]) =>
     mockNotifyAutoBookingDisabled(...args),
+  notifyContractor: (...args: unknown[]) => mockNotifyContractor(...args),
 }));
 
 const mockGetHumanByWallet = vi.fn();
@@ -389,7 +394,8 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "log").mockImplementation(() => {});
-    mockLimit.mockResolvedValue({ success: true, remaining: 29, retryAfterS: 0 });
+    mockLimit.mockResolvedValue({ success: true, reset: 0 });
+    mockCountCommittedTasks.mockResolvedValue(0);
     mockGetHumanByWallet.mockResolvedValue({
       id: WORKER_ID,
       wallet: WORKER_WALLET.toLowerCase(),
@@ -458,7 +464,7 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
   });
 
   it("an unreadable AWOL state fails safe to manual acceptance without blocking the hire", async () => {
-    mockGetChannelsForContractor.mockRejectedValue(new Error("supabase down"));
+    mockGetTasksByWallet.mockRejectedValue(new Error("supabase down"));
 
     const { result, json } = await callRequestHumanWork();
 

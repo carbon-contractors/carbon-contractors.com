@@ -16,7 +16,68 @@
  */
 
 import { getChannelsForContractor } from "@/lib/db/notifications";
+import type { NotificationChannel } from "@/lib/db/notifications";
+import type { AwolSignal } from "@/lib/awol";
 import { log } from "@/lib/logging";
+
+export const AUTO_BOOKING_DISABLED_MESSAGE =
+  "Auto-booking was automatically disabled for inactivity (consecutive lapsed offers or expired tasks). You can re-enable it anytime from your dashboard.";
+
+export interface AutoBookingDisabledNotice {
+  kind: "auto_booking_disabled";
+  signal: AwolSignal;
+  contractorId: string;
+  message: string;
+}
+
+export function buildAutoBookingDisabledNotice(input: {
+  contractorId: string;
+  signal: AwolSignal;
+}): AutoBookingDisabledNotice {
+  return {
+    kind: "auto_booking_disabled",
+    signal: input.signal,
+    contractorId: input.contractorId,
+    message: AUTO_BOOKING_DISABLED_MESSAGE,
+  };
+}
+
+export interface DeliveryAttempt {
+  channel_id: string;
+  channel_type: string;
+  delivered: boolean;
+}
+
+export async function notifyAutoBookingDisabled(input: {
+  worker: { id: string; wallet: string };
+  channels: NotificationChannel[];
+  signal: AwolSignal;
+}): Promise<DeliveryAttempt[]> {
+  const notice = buildAutoBookingDisabledNotice({
+    contractorId: input.worker.id,
+    signal: input.signal,
+  });
+
+  const attempts: DeliveryAttempt[] = [];
+
+  for (const channel of input.channels) {
+    log("info", "worker_notice_dispatched", {
+      contractor_id: input.worker.id,
+      channel_id: channel.id,
+      channel_type: channel.type,
+      kind: notice.kind,
+      signal: notice.signal,
+    });
+    // Delivered is false until CC-095 lands real channel delivery
+    attempts.push({
+      channel_id: channel.id,
+      channel_type: channel.type,
+      delivered: false,
+    });
+  }
+
+  return attempts;
+}
 
 export type ContractorNotificationEvent =
   | {
