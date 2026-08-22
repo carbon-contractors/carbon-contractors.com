@@ -213,6 +213,9 @@ export default function DashboardPage() {
   const [newChannelType, setNewChannelType] = useState<ChannelType>("email");
   const [newChannelAddress, setNewChannelAddress] = useState("");
   const [channelBusy, setChannelBusy] = useState(false);
+  // CC-074: per-row busy flag so toggling one channel's auto-booking does not
+  // disable every other control in the panel.
+  const [autoBookBusy, setAutoBookBusy] = useState<string | null>(null);
 
   const { writeContract, data: txHash } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
@@ -517,6 +520,45 @@ export default function DashboardPage() {
       setChannelsError("Network error");
     } finally {
       setChannelBusy(false);
+    }
+  }
+
+  // CC-074: toggle accepts_auto_booking on one channel. Enabling is the
+  // consequential direction, so it gets an explicit confirm spelling out what
+  // is being pre-authorised before the wallet signature is requested.
+  async function handleToggleAutoBooking(channel: Channel, next: boolean) {
+    if (next) {
+      const confirmed = window.confirm(
+        `Turn on auto-booking for this ${channel.type} channel?\n\n` +
+          "Hiring agents will be able to commit you directly to tasks " +
+          "matching your listed categories and rate — accepted on your " +
+          "behalf, with no confirmation step. You will sign one message to confirm."
+      );
+      if (!confirmed) return;
+    }
+    setAutoBookBusy(channel.id);
+    setChannelsError("");
+    try {
+      const res = await fetch("/api/channels", {
+        method: "PATCH",
+        headers: await signedChannelHeaders(),
+        body: JSON.stringify({
+          channel_id: channel.id,
+          accepts_auto_booking: next,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setChannels((prev) =>
+          prev.map((c) => (c.id === data.channel.id ? data.channel : c)),
+        );
+      } else {
+        setChannelsError(data.error ?? "Failed to update auto-booking");
+      }
+    } catch {
+      setChannelsError("Network error");
+    } finally {
+      setAutoBookBusy(null);
     }
   }
 
@@ -939,27 +981,68 @@ export default function DashboardPage() {
                   )}
 
                   {channels.length > 0 && (
-                    <ul className={styles.channelList}>
-                      {channels.map((channel) => (
-                        <li key={channel.id} className={styles.channelRow}>
-                          <span
-                            className={`${styles.channelBadge} ${styles[`channel_${channel.type}`] ?? ""}`}
-                          >
-                            {channel.type}
-                          </span>
-                          <span className={styles.channelAddress}>
-                            {channel.address}
-                          </span>
-                          <button
-                            className={styles.channelRemoveBtn}
-                            onClick={() => handleRemoveChannel(channel)}
-                            disabled={channelBusy}
-                          >
-                            Remove
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+                    <>
+                      {/* CC-074: the consequence of the toggle is spelled out
+                          here, not hidden behind a tooltip. */}
+                      <div className={styles.autoBookingNote}>
+                        <strong>Auto-booking is off by default.</strong> Turn it
+                        on for a channel and any hiring agent can commit you
+                        directly to tasks matching your listed categories and
+                        rate — the booking is accepted on your behalf, with no
+                        manual confirmation step. This is not a minor setting:
+                        you are pre-authorising work without being asked each
+                        time. Leave it off and each offer waits for you to
+                        accept or decline it yourself.
+                      </div>
+                      <ul className={styles.channelList}>
+                        {channels.map((channel) => (
+                          <li key={channel.id} className={styles.channelRow}>
+                            <span
+                              className={`${styles.channelBadge} ${styles[`channel_${channel.type}`] ?? ""}`}
+                            >
+                              {channel.type}
+                            </span>
+                            <span className={styles.channelAddress}>
+                              {channel.address}
+                            </span>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={channel.accepts_auto_booking}
+                              aria-label={`Auto-booking for this ${channel.type} channel`}
+                              className={`${styles.autoBookToggle} ${
+                                channel.accepts_auto_booking
+                                  ? styles.autoBookToggleOn
+                                  : ""
+                              }`}
+                              onClick={() =>
+                                handleToggleAutoBooking(
+                                  channel,
+                                  !channel.accepts_auto_booking,
+                                )
+                              }
+                              disabled={autoBookBusy === channel.id}
+                            >
+                              <span className={styles.autoBookKnob} />
+                              <span className={styles.autoBookToggleLabel}>
+                                {autoBookBusy === channel.id
+                                  ? "Signing..."
+                                  : channel.accepts_auto_booking
+                                    ? "Auto-book on"
+                                    : "Auto-book off"}
+                              </span>
+                            </button>
+                            <button
+                              className={styles.channelRemoveBtn}
+                              onClick={() => handleRemoveChannel(channel)}
+                              disabled={channelBusy}
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
                   )}
 
                   {channelFormOpen ? (
