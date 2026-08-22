@@ -36,6 +36,7 @@ import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
 import { MAX_SPEC_BYTES } from "@/lib/spec/schema";
 import { isIntakePaused } from "@/lib/config";
+import { evaluateAwolAtBooking, type AwolBookingDecision } from "@/lib/awol";
 import { log } from "@/lib/logging";
 
 /** Context provided when a caller authenticates their session. */
@@ -303,6 +304,34 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           };
         }
 
+        // CC-075 / ADR-0005 D6 + ADR-0001 D1: inline AWOL check at auto-booking
+        // time, before the offer would auto-accept. When the worker has crossed
+        // either threshold (3 consecutive lapsed offers, or 3 consecutive expired
+        // tasks with no submission) this disables their auto-booking, notifies
+        // them out-of-band, and leaves this offer as manual acceptance. Checked
+        // inline rather than on a cron — a scheduled job maintaining a flag that
+        // is only read here is pure overhead.
+        let awol: AwolBookingDecision = {
+          evaluated: false,
+          triggered: false,
+          signal: null,
+          consecutiveLapsedOffers: 0,
+          consecutiveExpiredTasks: 0,
+        };
+        try {
+          awol = await evaluateAwolAtBooking({
+            id: worker.id,
+            wallet: worker.wallet,
+          });
+        } catch (err) {
+          // Fail safe: with the AWOL state unreadable the worker is treated as
+          // manual acceptance rather than auto-booked. The hire proceeds.
+          log("warn", "worker_awol_check_failed", {
+            caller: from_agent_wallet,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
         const response = await initiateX402Payment({
           from_agent_wallet,
           to_human_wallet: worker.wallet,
@@ -313,11 +342,24 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           spec,
         });
 
+        // When AWOL triggered, the offer requires the worker's manual
+        // acceptance — the task row is created `pending` either way, with the
+        // standard offer expiry.
+        const awolNotice = awol.triggered
+          ? {
+              worker_auto_booking_disabled: true,
+              awol_signal: awol.signal,
+              acceptance: "manual",
+              notice:
+                "The worker's auto-booking was switched off for repeated missed offers or expiries (CC-075). This task remains pending and requires their manual acceptance.",
+            }
+          : {};
+
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ ok: true, ...response }),
+              text: JSON.stringify({ ok: true, ...response, ...awolNotice }),
             },
           ],
         };
