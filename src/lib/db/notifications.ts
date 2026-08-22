@@ -139,6 +139,29 @@ export async function setChannelAutoBooking(
 }
 
 /**
+ * Bulk-set accepts_auto_booking across every channel owned by a contractor (CC-075).
+ * Used by the AWOL auto-disable logic to turn off auto-booking platform-wide.
+ * Returns the number of channels modified.
+ */
+export async function setAcceptsAutoBookingForContractor(
+  contractorId: string,
+  acceptsAutoBooking: boolean
+): Promise<number> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("notification_channels")
+    .update({ accepts_auto_booking: acceptsAutoBooking })
+    .eq("contractor_id", contractorId)
+    .select("id");
+
+  if (error) {
+    throw new Error(`setAcceptsAutoBookingForContractor failed: ${error.message}`);
+  }
+  return (data ?? []).length;
+}
+
+/**
  * Find all contractors who accept auto-booking.
  * Used by orchestrator agents to find workers they can hire directly.
  */
