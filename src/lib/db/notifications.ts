@@ -115,6 +115,38 @@ export async function removeNotificationChannel(
 }
 
 /**
+ * Flip `accepts_auto_booking` across every channel a contractor owns.
+ *
+ * Used by the CC-075 AWOL auto-disable: the flag is per-channel, so an AWOL
+ * trigger must reach all of them — leaving one channel live would keep
+ * auto-booking the worker against the very silence that triggered it.
+ * Reversible: the worker re-enables per channel from the dashboard (CC-073/CC-074),
+ * which lands here or in `registerNotificationChannel` as a plain upsert.
+ *
+ * Returns the number of channels updated.
+ */
+export async function setAcceptsAutoBookingForContractor(
+  contractorId: string,
+  acceptsAutoBooking: boolean
+): Promise<number> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("notification_channels")
+    .update({
+      accepts_auto_booking: acceptsAutoBooking,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("contractor_id", contractorId)
+    .select("id");
+
+  if (error) {
+    throw new Error(`setAcceptsAutoBookingForContractor failed: ${error.message}`);
+  }
+  return (data ?? []).length;
+}
+
+/**
  * Find all contractors who accept auto-booking.
  * Used by orchestrator agents to find workers they can hire directly.
  */

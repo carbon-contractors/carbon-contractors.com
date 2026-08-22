@@ -57,6 +57,19 @@ vi.mock("@/lib/contracts/signer", () => ({
   resolveDisputeOnChain: vi.fn(),
 }));
 
+// CC-075: the inline AWOL check runs on every hire. Default to "not
+// triggered" — its own behaviour is covered in awol.test.ts.
+const mockEvaluateAwolAtBooking = vi.fn().mockResolvedValue({
+  evaluated: false,
+  triggered: false,
+  signal: null,
+  consecutiveLapsedOffers: 0,
+  consecutiveExpiredTasks: 0,
+});
+vi.mock("@/lib/awol", () => ({
+  evaluateAwolAtBooking: (...args: unknown[]) => mockEvaluateAwolAtBooking(...args),
+}));
+
 const AGENT_WALLET = "0xAGENTagentAGENTagentAGENTagentAGENTagent";
 const WORKER_WALLET = "0xWORKERworkerWORKERworkerWORKERworkerWORK";
 

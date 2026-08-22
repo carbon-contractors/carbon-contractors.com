@@ -2,20 +2,13 @@
  * dispatch.ts
  * Contractor notification dispatch — the seam CC-095 plugs real delivery into.
  *
- * ADR-0005 D7 makes notification delivery a dependency of the offer lifecycle,
- * not a nicety: an offer nobody is told about is an expiry with extra steps.
- * CC-095 (delivery over email/webhook/telegram/discord) is not built yet, so
- * this module records the event per channel as a structured log line and
- * nothing more. Every offer-path caller goes through `notifyContractor`, so
- * CC-095 replaces one function and the lifecycle needs no further change.
- *
- * Never throws: a notification failure must never fail the hire or accept
- * path it rides on. And never log a channel address — notification_channels
- * holds workers' contact addresses, which is exactly the third-party data
- * carve-out in the publish-by-default policy (CC-009, ADR-0002 D9).
+ * ADR-0005 D7: notification delivery is a dependency of anything that acts
+ * on a worker without their involvement.
  */
 
 import { getChannelsForContractor } from "@/lib/db/notifications";
+import type { NotificationChannel } from "@/lib/db/notifications";
+import type { AwolSignal } from "@/lib/awol";
 import { log } from "@/lib/logging";
 
 export type ContractorNotificationEvent =
@@ -64,8 +57,91 @@ export async function notifyContractor(
 
     return { notified_channels: channels.length };
   } catch {
-    // Delivery (and its observability) is CC-095's problem. The lifecycle
-    // event that triggered this must succeed regardless.
     return { notified_channels: 0 };
   }
+}
+
+export type WorkerNoticeKind = "auto_booking_disabled";
+
+export interface WorkerNotice {
+  kind: WorkerNoticeKind;
+  contractor_id: string;
+  signal: AwolSignal;
+  message: string;
+}
+
+export interface DispatchAttempt {
+  channel_id: string;
+  type: NotificationChannel["type"];
+  delivered: boolean;
+  reason?: string;
+}
+
+export const AUTO_BOOKING_DISABLED_MESSAGE =
+  "Auto-booking has been switched off because recent offers to you expired without a response. " +
+  "Nothing is lost and this is not a penalty — if you're still available, you can re-enable " +
+  "auto-booking at any time from your dashboard's notification settings.";
+
+/**
+ * Build the CC-075 notice. Kept separate from delivery so the wording is
+ * assertable in tests independently of any transport.
+ */
+export function buildAutoBookingDisabledNotice(input: {
+  contractorId: string;
+  signal: AwolSignal;
+}): WorkerNotice {
+  return {
+    kind: "auto_booking_disabled",
+    contractor_id: input.contractorId,
+    signal: input.signal,
+    message: AUTO_BOOKING_DISABLED_MESSAGE,
+  };
+}
+
+/**
+ * Deliver one notice to one channel. The transport itself is CC-095's work;
+ * this is the honest placeholder.
+ */
+async function deliverNotice(
+  channel: NotificationChannel,
+  notice: WorkerNotice,
+): Promise<DispatchAttempt> {
+  void notice;
+  return {
+    channel_id: channel.id,
+    type: channel.type,
+    delivered: false,
+    reason: "no delivery transport yet (CC-095)",
+  };
+}
+
+/**
+ * Notify a worker that their auto-booking was disabled for inactivity
+ * (CC-075). Out-of-band by design: the hiring agent's response never waits
+ * on it. Returns the per-channel attempts so callers can log a summary.
+ */
+export async function notifyAutoBookingDisabled(input: {
+  worker: { id: string; wallet: string };
+  channels: NotificationChannel[];
+  signal: AwolSignal;
+}): Promise<DispatchAttempt[]> {
+  const notice = buildAutoBookingDisabledNotice({
+    contractorId: input.worker.id,
+    signal: input.signal,
+  });
+
+  const attempts: DispatchAttempt[] = [];
+  for (const channel of input.channels) {
+    attempts.push(await deliverNotice(channel, notice));
+  }
+
+  log("info", "worker_notice_dispatched", {
+    wallet: input.worker.wallet,
+    kind: notice.kind,
+    signal: notice.signal,
+    channels: attempts.length,
+    delivered: attempts.filter((a) => a.delivered).length,
+  });
+
+  return attempts;
 }
