@@ -5,6 +5,7 @@ import { log } from "@/lib/logging";
 import { validateCategorySelection } from "@/lib/categories";
 import { isValidEmail, rateUsdcError } from "@/lib/validation";
 import { registerNotificationChannel } from "@/lib/db/notifications";
+import { isWalletSanctioned } from "@/lib/sanctions";
 
 /** Maximum age (in seconds) for a registration message to be considered valid. */
 const MAX_MESSAGE_AGE_S = 300; // 5 minutes
@@ -81,6 +82,26 @@ export async function POST(req: NextRequest): Promise<Response> {
   // lowercase (CC-002). Verification above used the original casing, which
   // is what the client actually signed.
   const normalizedWallet = wallet.toLowerCase() as `0x${string}`;
+
+  // Sanctions screening (CC-099): a flagged wallet must never enter the whitepages.
+  // Runs after signature verification (so it cannot be probed unauthenticated) and
+  // before the nonce is consumed (a rejected wallet keeps its nonce). The 403 body
+  // names the code so an automated registrant can classify the rejection; the log
+  // event carries the wallet, which maskMeta masks (CC-009).
+  const screen = await isWalletSanctioned(normalizedWallet);
+  if (screen.sanctioned) {
+    log("warn", "register_sanctioned_wallet_rejected", {
+      wallet: normalizedWallet,
+      list: screen.list,
+    });
+    return Response.json(
+      {
+        error: "Wallet address is restricted under sanctions compliance.",
+        code: "SANCTIONED_WALLET",
+      },
+      { status: 403 },
+    );
+  }
 
   // Parse the signed message to extract registration data + replay protection fields
   let parsed: RegistrationPayload;

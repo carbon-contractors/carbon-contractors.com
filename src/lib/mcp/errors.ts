@@ -22,6 +22,7 @@ export type ToolErrorCode =
   | "TASK_NOT_FOUND" // no task with that payment_request_id
   | "CONTRACTOR_NOT_FOUND" // no contractor with that wallet/id
   | "FORBIDDEN" // authenticated, but not a party/owner for this action
+  | "SANCTIONED_WALLET" // caller or target wallet is restricted (CC-099); never retry
   | "INVALID_TASK_STATE" // task status does not allow this action
   | "VERDICT_INPUT_INVALID" // evidence bundle rejected — deterministic, will fail identically
   | "VERDICT_COMPUTATION_FAILED" // verdict computation failed on our side

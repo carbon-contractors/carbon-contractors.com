@@ -130,6 +130,18 @@ const MONITORS = [
     // infrastructure reasons, so any red here is the checker itself being wrong.
     requires: [],
   },
+  {
+    name: "verify-sanctions",
+    script: "verify-sanctions.ts",
+    exec: "tsx",
+    tier: "normal",
+    invariant:
+      "no registered or in-flight wallet is on a sanctions list today (CC-099 re-screening)",
+    // Anon access only, by design: humans and tasks_public are world-readable, so this
+    // monitor holds no privileged credential. The workflow must supply the two public
+    // Supabase values as secrets/vars or this SKIPs — visibly, never silently.
+    requires: ["SUPABASE_URL", "SUPABASE_ANON_KEY"],
+  },
 ];
 
 /**
