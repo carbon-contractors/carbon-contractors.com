@@ -1,4 +1,4 @@
-*Last updated: 21 August 2026*
+*Last updated: 23 August 2026*
 
 These are the terms for using Carbon Contractors. Read [our privacy policy](/privacy) too — it
 covers what we do with your data, this page covers everything else.
@@ -129,12 +129,9 @@ states are also readable via the public API; task descriptions are not.
 You must not use the platform if you, or any wallet you use with it, are subject to sanctions under
 Australian law (including the DFAT consolidated list), or under the sanctions regimes of the United
 States or any other applicable jurisdiction. We screen wallet addresses against published sanctions
-lists and will refuse or block participation on a match. Screening looks only at addresses — we still
-don't ask who you are.
-
-*(Drafting note, to be removed before publication: this clause commits to a control that ships under
-`CC-099`. Publish the clause and the mechanism together, or the claim is false on day one — the same
-rule `ADR-0002` handover item 9 applied to the waitlist, dropped under `CC-089`.)*
+lists at registration and when tasks are created, re-screen on an ongoing schedule, and will refuse
+or block participation on a match. Screening looks only at addresses — we still don't ask who you
+are.
 
 ## Acceptable use
 

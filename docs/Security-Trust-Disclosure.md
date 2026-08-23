@@ -86,6 +86,35 @@ This section is the honest summary. Everything below it is detail.
 
 ---
 
+## Sanctions screening
+
+Wallet addresses are screened against published sanctions lists (OFAC SDN; the DFAT consolidated
+list is supported by the same mechanism) at two doors: worker registration (`/api/register`) and
+task creation (`request_human_work`, screening **both** the hiring agent's and the worker's wallet).
+A match is refused outright — a listed wallet cannot register, be hired, or hire. Wallets already
+inside the platform are re-screened on a schedule
+([`scripts/audit/verify-sanctions.ts`](../scripts/audit/verify-sanctions.ts)), because lists change
+and a wallet clean at registration can be designated later; that monitor **alerts** rather than
+acting, since freezing in-flight funds is an asset-freezing question, not a monitor's discretion.
+
+**Address-based, not identity-based** ([`ADR-0002`](adr/ADR-0002-*.md) D1): screening checks whether
+an address appears on a published list. It never asks who controls the wallet, and nothing about it
+weakens the pseudonymity model.
+
+Stated as plainly as everything above, what this control is **not**:
+
+- **It is not identity verification.** It cannot catch a listed person using a fresh wallet.
+- **It does not gate the contract itself.** `createTask` is permissionless by design
+  ([`ADR-0001`](adr/ADR-0001-escrow-resolution-and-dispute-authority.md) A1.1 — no platform liveness
+  in the funding path), so an agent can fund a task directly on-chain without ever touching the
+  screened app layer. The screening covers the platform's own doors; the contract's openness is a
+  deliberate, documented trade-off, not an oversight.
+- **The provider layer is optional and currently unverified.** A bundled, cited dataset is the
+  always-on control; a Chainalysis API layer runs only when configured and fails open (loudly) on
+  provider errors — the dataset still applies either way.
+
+---
+
 ## The signing key
 
 **The core guarantee:** no human — including me — can access, view, copy, or extract the private key
@@ -156,6 +185,7 @@ the remaining 64 bytes — the address is the last 20 bytes of that hash.
 node --env-file=.env.local scripts/audit/verify-contract-owner.mjs      # owner() vs KMS-derived address
 node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs   # the deployment is the one described here
 node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs     # USDC.balanceOf(escrow) == totalLocked
+node --env-file=.env.local scripts/audit/verify-sanctions.ts            # no admitted wallet is listed today
 ```
 
 Each exits non-zero on violation. They run on a schedule as well as on demand — see

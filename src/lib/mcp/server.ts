@@ -46,6 +46,7 @@ import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
 import { MAX_SPEC_BYTES } from "@/lib/spec/schema";
 import { isIntakePaused } from "@/lib/config";
+import { isWalletSanctioned } from "@/lib/sanctions";
 import { evaluateAwolAtBooking, type AwolBookingDecision } from "@/lib/awol";
 import { log } from "@/lib/logging";
 
@@ -229,6 +230,24 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         }
         const from_agent_wallet = context.callerWallet;
 
+        // Sanctions screening, caller side (CC-099): before the idempotency replay and
+        // the rate limiter, so a listed agent gets nothing back — not even details of
+        // a task it created before listing — and does not burn rate-limit tokens.
+        // Address-based only (ADR-0002 D1); retryable is false because no retry of
+        // this request can change the answer.
+        const callerScreen = await isWalletSanctioned(from_agent_wallet);
+        if (callerScreen.sanctioned) {
+          log("warn", "request_human_work_sanctioned_wallet_rejected", {
+            caller: from_agent_wallet,
+            role: "agent",
+            list: callerScreen.list,
+          });
+          return toolError(
+            "Caller wallet address is restricted under sanctions compliance.",
+            "SANCTIONED_WALLET",
+          );
+        }
+
         // CC-046 idempotency: a retry after a network failure must return the
         // original task, not a second row the agent might also fund. Checked
         // before the rate limiter — a replay is not a new task creation and must
@@ -292,6 +311,24 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           return toolError(
             "to_human_wallet does not belong to a registered worker. Use search_whitepages to find one.",
             "UNREGISTERED_WORKER",
+          );
+        }
+
+        // Sanctions screening, worker side (CC-099): the worker's payout destination
+        // must not be a listed address, so a flagged wallet cannot be *paid*, let
+        // alone enter the marketplace. Registration screens first (a listed wallet
+        // should never be in the whitepages at all); this catches a wallet listed
+        // after it registered.
+        const workerScreen = await isWalletSanctioned(worker.wallet);
+        if (workerScreen.sanctioned) {
+          log("warn", "request_human_work_sanctioned_wallet_rejected", {
+            caller: from_agent_wallet,
+            role: "worker",
+            list: workerScreen.list,
+          });
+          return toolError(
+            "The target worker's wallet address is restricted under sanctions compliance.",
+            "SANCTIONED_WALLET",
           );
         }
 

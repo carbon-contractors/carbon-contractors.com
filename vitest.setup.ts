@@ -52,6 +52,9 @@ const FORBIDDEN_ENV = [
   "NEXT_PUBLIC_ESCROW_CONTRACT",
   "NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT",
   "ESCROW_DEPLOY_BLOCK",
+  // Screening provider credential (CC-099). A leaked-into-env key would let a unit
+  // test query a real sanctions API — non-deterministic and a credential disclosure.
+  "CHAINALYSIS_API_KEY",
 ];
 
 for (const key of FORBIDDEN_ENV) {

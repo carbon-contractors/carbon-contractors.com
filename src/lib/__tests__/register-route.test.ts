@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
+import { maskWallet } from "@/lib/logging";
 
 const mockVerifyWalletSignature = vi.fn();
 vi.mock("@/lib/wallet/verify", () => ({
@@ -15,6 +16,13 @@ const mockRegisterNotificationChannel = vi.fn();
 vi.mock("@/lib/db/notifications", () => ({
   registerNotificationChannel: (...args: unknown[]) =>
     mockRegisterNotificationChannel(...args),
+}));
+
+// CC-099: the real module is hermetic without a provider key, but mocking keeps these
+// tests about the enforcement wiring. Default: not sanctioned.
+const mockIsWalletSanctioned = vi.fn();
+vi.mock("@/lib/sanctions", () => ({
+  isWalletSanctioned: (...args: unknown[]) => mockIsWalletSanctioned(...args),
 }));
 
 const MIXED_CASE_WALLET = "0xAbCdEf1234567890aBcDeF1234567890ABCDEF12";
@@ -74,6 +82,7 @@ describe("POST /api/register (CC-002 wallet casing)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockVerifyWalletSignature.mockResolvedValue(true);
+    mockIsWalletSanctioned.mockResolvedValue({ sanctioned: false });
   });
 
   it("normalizes a mixed-case wallet to lowercase before writing to humans and used_nonces", async () => {
@@ -126,6 +135,7 @@ describe("POST /api/register (CC-005 contact capture)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockVerifyWalletSignature.mockResolvedValue(true);
+    mockIsWalletSanctioned.mockResolvedValue({ sanctioned: false });
     mockRegisterNotificationChannel.mockResolvedValue({ id: "chan-1" });
   });
 
@@ -216,6 +226,7 @@ describe("POST /api/register (CC-022 rate validation)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockVerifyWalletSignature.mockResolvedValue(true);
+    mockIsWalletSanctioned.mockResolvedValue({ sanctioned: false });
   });
 
   async function postRate(rate: number) {
@@ -280,6 +291,7 @@ describe("POST /api/register (CC-023 clock-skew self-diagnosis)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockVerifyWalletSignature.mockResolvedValue(true);
+    mockIsWalletSanctioned.mockResolvedValue({ sanctioned: false });
   });
 
   it.each([
@@ -306,4 +318,84 @@ describe("POST /api/register (CC-023 clock-skew self-diagnosis)", () => {
       expect(mockFrom).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("POST /api/register (CC-099 sanctions screening)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVerifyWalletSignature.mockResolvedValue(true);
+    mockIsWalletSanctioned.mockResolvedValue({ sanctioned: false });
+  });
+
+  it("screens the normalised wallet after signature verification", async () => {
+    stubHappyPathChain();
+
+    const message = JSON.stringify(validPayload());
+    const { POST } = await import("@/app/api/register/route");
+
+    await POST(
+      makeRequest({ message, signature: "0xsig", wallet: MIXED_CASE_WALLET }),
+    );
+
+    expect(mockIsWalletSanctioned).toHaveBeenCalledWith(LOWER_WALLET);
+    // And only after the signature was accepted — the screen cannot be probed by
+    // an unauthenticated caller.
+    expect(mockVerifyWalletSignature).toHaveBeenCalled();
+  });
+
+  it("rejects a sanctioned wallet with 403 and the SANCTIONED_WALLET code", async () => {
+    mockIsWalletSanctioned.mockResolvedValue({
+      sanctioned: true,
+      list: "OFAC SDN",
+      reason: "test designation",
+    });
+
+    const message = JSON.stringify(validPayload());
+    const { POST } = await import("@/app/api/register/route");
+
+    const res = await POST(
+      makeRequest({ message, signature: "0xsig", wallet: MIXED_CASE_WALLET }),
+    );
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe(
+      "Wallet address is restricted under sanctions compliance.",
+    );
+    expect(json.code).toBe("SANCTIONED_WALLET");
+  });
+
+  it("writes nothing — no nonce consumption, no humans row — for a sanctioned wallet", async () => {
+    mockIsWalletSanctioned.mockResolvedValue({ sanctioned: true, list: "OFAC SDN" });
+
+    const message = JSON.stringify(validPayload());
+    const { POST } = await import("@/app/api/register/route");
+
+    await POST(
+      makeRequest({ message, signature: "0xsig", wallet: MIXED_CASE_WALLET }),
+    );
+
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("logs register_sanctioned_wallet_rejected with the wallet masked, not raw", async () => {
+    mockIsWalletSanctioned.mockResolvedValue({ sanctioned: true, list: "OFAC SDN" });
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const message = JSON.stringify(validPayload());
+    const { POST } = await import("@/app/api/register/route");
+
+    await POST(
+      makeRequest({ message, signature: "0xsig", wallet: MIXED_CASE_WALLET }),
+    );
+
+    const rejected = consoleSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((l) => l.includes("register_sanctioned_wallet_rejected"));
+    expect(rejected).toBeTruthy();
+    expect(rejected).not.toContain(LOWER_WALLET);
+    expect(rejected).toContain(maskWallet(LOWER_WALLET));
+
+    consoleSpy.mockRestore();
+  });
 });

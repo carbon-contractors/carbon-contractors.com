@@ -93,6 +93,14 @@ jobs:
       MONITOR_TELEGRAM_CHAT_ID: ${{ secrets.MONITOR_TELEGRAM_CHAT_ID }}
       MONITOR_HEARTBEAT_URL: ${{ secrets.MONITOR_HEARTBEAT_URL }}
 
+      # Sanctions re-screening (CC-099). The ANON key is sufficient — humans and
+      # tasks_public are world-readable by design — so the scheduled runner never holds
+      # the service role. If unset, verify-sanctions SKIPs (printed in every run and
+      # included in the alert body, per ADR-0003 D3) rather than passing vacuously.
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      CHAINALYSIS_API_KEY: ${{ secrets.CHAINALYSIS_API_KEY }}
+
       # GCP KMS Signer verification via Workload Identity Federation (WIF)
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}

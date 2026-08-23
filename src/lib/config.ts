@@ -67,6 +67,22 @@ const rateLimitSchema = z.object(rateLimitShape);
 
 export type RateLimitConfig = z.infer<typeof rateLimitSchema>;
 
+// ── Sanctions screening (CC-099) ──────────────────────────────────────────────
+//
+// Same reasoning as rate limiting: a schema deliberately narrower than getConfig(), so
+// the screening module never needs the full environment to know whether an API key is
+// configured. The bundled dataset (src/lib/sanctions/data.ts) is the always-on control;
+// this key only enables the optional provider layer on top of it. envOptional so a
+// blanked Vercel field reads as "not configured" rather than as an API key of ""
+// (CC-097).
+const sanctionsShape = {
+  CHAINALYSIS_API_KEY: envOptional(z.string().optional()),
+};
+
+const sanctionsSchema = z.object(sanctionsShape);
+
+export type SanctionsConfig = z.infer<typeof sanctionsSchema>;
+
 const envSchema = z.object({
   // ── Required ──────────────────────────────────────────────────────────────
   SUPABASE_URL: z.url(),
@@ -168,11 +184,13 @@ export type AppConfig = z.infer<typeof envSchema>;
 
 let _config: AppConfig | null = null;
 let _rateLimitConfig: RateLimitConfig | null = null;
+let _sanctionsConfig: SanctionsConfig | null = null;
 
 /** For testing only — resets the cached config so getConfig() re-parses env vars. */
 export function _resetConfig(): void {
   _config = null;
   _rateLimitConfig = null;
+  _sanctionsConfig = null;
 }
 
 function describeFailure(error: z.ZodError): string {
@@ -247,4 +265,24 @@ export function getRateLimitConfig(): RateLimitConfig {
 
   _rateLimitConfig = Object.freeze(result.data) as RateLimitConfig;
   return _rateLimitConfig;
+}
+
+/**
+ * The sanctions screening knobs, validated on their own (CC-099).
+ *
+ * Cannot throw on any environment: every field is optional, so the only failure mode
+ * is an absent key, which the screening module reads as "provider layer disabled" and
+ * the bundled dataset still covers. See getRateLimitConfig for why this is separate.
+ */
+export function getSanctionsConfig(): SanctionsConfig {
+  if (_sanctionsConfig) return _sanctionsConfig;
+
+  const result = sanctionsSchema.safeParse(process.env);
+
+  if (!result.success) {
+    throw new Error(describeFailure(result.error));
+  }
+
+  _sanctionsConfig = Object.freeze(result.data) as SanctionsConfig;
+  return _sanctionsConfig;
 }
