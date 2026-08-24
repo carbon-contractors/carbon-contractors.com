@@ -5,8 +5,9 @@ import { LEARN_MODULES } from "@/lib/learn/modules";
 import { SITE_URL } from "./robots";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  // Learn modules are derived from LEARN_MODULES so a new module is picked up
-  // automatically. No other URLs — the gate-on site is a single page.
+  // Public URL set for launch. Gate-on robots keep crawlers on `/` only; the
+  // sitemap still lists the intended surface so flipping the gate is a robots
+  // change, not a sitemap rewrite. Learn slugs come from LEARN_MODULES.
   const paths = [
     "/",
     "/learn",
