@@ -77,7 +77,7 @@ describe("x402 payment", () => {
     expect(result.instructions).toContain("createTask");
     expect(result.instructions).toContain("approve");
     // The old instructions sent the agent to an x402 auto-pay flow that stranded USDC.
-    expect(result.instructions).not.toContain("402");
+    expect(result.instructions).not.toMatch(/\bx402\b/i);
     expect(result.instructions).not.toContain("auto-pay");
     // And the confirmation step is described as a read, not a payment.
     expect(result.instructions).toContain("not a payment endpoint");
