@@ -1,5 +1,9 @@
 "use client";
 
+// Currently unmounted: hidden from the Footer until the mainnet migration (CC-031) because it
+// targets a Sepolia wallet and requires a connected wallet (dead on mobile). Restore — and
+// revisit the wallet-connect requirement — as part of CC-039's content pass.
+
 import { useState, useCallback } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import styles from "./BuyMeACoffee.module.css";
