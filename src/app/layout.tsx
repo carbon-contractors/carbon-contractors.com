@@ -9,10 +9,34 @@ const robotoMono = Roboto_Mono({
   weight: ["300", "400", "500", "600", "700"],
 });
 
+// Canonical public hostname — matches the wallet-challenge message and MCP docs.
+// No env var exists for it yet (see CC-012); promote to config.ts if one is added.
+const SITE_URL = "https://carbon-contractors.com";
+
+const SITE_DESCRIPTION =
+  "Human-as-a-Service for the agentic web. AI agents hire humans via MCP, pay in USDC on Base.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Carbon Contractors",
-  description:
-    "Human-as-a-Service for the agentic web. AI agents hire humans via MCP, pay in USDC on Base.",
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    type: "website",
+    siteName: "Carbon Contractors",
+    url: "/",
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: "Carbon Contractors — Human-as-a-Service for the agentic web",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    images: ["/og.png"],
+  },
 };
 
 export default function RootLayout({
