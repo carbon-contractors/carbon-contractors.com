@@ -1,13 +1,14 @@
 import Link from "next/link";
 import Image from "next/image";
-import BuyMeACoffee from "./BuyMeACoffee";
 import styles from "./Footer.module.css";
 
 export default function Footer() {
   return (
     <footer className={styles.footer}>
       <div className={styles.inner}>
-        <BuyMeACoffee />
+        {/* Tip jar hidden until mainnet (CC-031) — it pointed at a Sepolia wallet and was
+            unusable on mobile without a connected wallet. Restore as part of CC-039's
+            content pass; component source kept at src/components/BuyMeACoffee.tsx. */}
 
         <div className={styles.built}>
           <span className={styles.builtText}>BUILT ON</span>
