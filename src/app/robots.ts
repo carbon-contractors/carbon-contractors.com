@@ -11,11 +11,12 @@ const COMING_SOON = process.env.NEXT_PUBLIC_COMING_SOON !== "false";
 
 export default function robots(): MetadataRoute.Robots {
   if (COMING_SOON) {
-    // Gate on: everything is the coming-soon page. Allow the homepage, disallow the
-    // rest — `Disallow: /*` with the more specific `Allow: /`, not `Disallow: /`,
-    // which would block the homepage too.
+    // Gate on: only the coming-soon homepage is crawlable. Google's most-specific
+    // rule uses path length, so `Allow: /` + `Disallow: /*` lets `/*` (length 2)
+    // win for every URL including `/`. `Allow: /$` pins the homepage exactly;
+    // `Disallow: /` covers everything else.
     return {
-      rules: { userAgent: "*", allow: "/", disallow: "/*" },
+      rules: { userAgent: "*", allow: "/$", disallow: "/" },
       sitemap: `${SITE_URL}/sitemap.xml`,
     };
   }

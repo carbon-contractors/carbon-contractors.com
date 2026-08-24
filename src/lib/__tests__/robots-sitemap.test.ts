@@ -38,8 +38,8 @@ describe("robots and sitemap routes (CC-013)", () => {
 
         expect(robots.rules).toEqual({
           userAgent: "*",
-          allow: "/",
-          disallow: "/*",
+          allow: "/$",
+          disallow: "/",
         });
         expect(robots.sitemap).toBe("https://carbon-contractors.com/sitemap.xml");
       }
