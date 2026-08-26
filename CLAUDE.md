@@ -106,10 +106,15 @@ exists rather than reasoning from this file.**
 
 **Money path**
 
-- **`/api/fund-task` strands USDC permanently — do not run the funding path.** x402 pays
-  `NEXT_PUBLIC_ESCROW_CONTRACT` as a bare ERC-20 transfer, so `createTask` never runs and the
-  contract has no sweep, rescue or `receive`. Measured 2026-08-11: nothing stranded, because it has
-  never been run. First real use loses the money. → `CC-081` Defect 1, `CC-037`
+- **`/api/fund-task` takes no payment, and must never become an x402 recipient again.** It was
+  one until `CC-081` Defect 1 (fixed 2026-08-21): an x402 settlement is a bare ERC-20 transfer, so
+  paying it deposited USDC into `CarbonEscrow` without calling `createTask`, and the contract has no
+  sweep, rescue or `receive`. Nothing was ever stranded because the path had never been run. It is
+  now a **confirmation endpoint** — the agent funds from its own wallet via `USDC.approve` +
+  `escrow.createTask`, then POSTs here, and the row only moves to `active` once `getTask(taskId)`
+  reads `Funded` and matches on worker and amount. **The contract still has no rescue**, so the rule
+  survives its cause: nothing may ever send USDC to the escrow except `createTask`.
+  → `CC-081` Defect 1, `CC-037`
   · `node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs`
 - **CarbonEscrow v2 is deployed** — `0xe80d03688E8fa6270668AD73191d353e522CB1b1` on Sepolia,
   block `45494043`, owned by the HSM key, verdict signer seeded. Implements `ADR-0001`:
@@ -236,6 +241,15 @@ exists rather than reasoning from this file.**
   committer email resolve to the *same* account, so a correctly signed commit still reads
   `Unverified` there when they do not. Measured 2026-08-26: signing with the `ajclifft` noreply
   address against a key registered elsewhere pushes fine (no `GH007`) and lands unverified.
+- **A stacked PR blocks forever on CodeQL, and it looks like a slow check.** Code scanning is
+  GitHub **default setup**, not a workflow file, so it only analyses PRs targeting the default
+  branch. A PR based on another feature branch gets no analysis at all — and `master`'s ruleset
+  requires `code_scanning` (tool `CodeQL`), so the check is *absent* rather than pending and never
+  arrives. Merging the base does **not** fix it: retargeting changes the base without firing a
+  `pull_request` event, so the head SHA is never analysed. Rebase onto the new `master` to change
+  the head SHA, which triggers it. Measured 2026-08-26 on PR #143. Prefer branching each PR off
+  `master`. `ci.yml`'s own trigger comment is the same lesson from the other direction.
+  · `gh pr view <n> --json statusCheckRollup` — a *missing* CodeQL row is this, not a slow one
 - **Line endings are pinned** (`* text=auto eol=lf`). If `git status` shows every file modified, that
   is the cause. **Python's `write_text` silently writes CRLF on Windows — use `write_bytes`.**
 - **A fresh worktree has neither `node_modules` nor `.env.local`, and only `npm run build` says so.**
@@ -293,7 +307,7 @@ frontmatter field.
 src/app/api/           REST + MCP routes. basedhuman.mcp/ is the MCP server entry point.
 src/app/               Pages: / /connect /dashboard /services /learn /mcp-info
 src/learn/             The 7 Learn modules (markdown); registry in src/lib/learn/modules.ts
-src/lib/mcp/server.ts  All 10 MCP tools and 3 resources
+src/lib/mcp/server.ts  All 11 MCP tools and 3 resources
 src/lib/db/            Supabase access. whitepages.ts reads with the ANON key;
                        register/notifications use the SERVICE ROLE key. Know which you are in.
 src/lib/contracts/     signer.ts (KMS or raw key), kms-signer.ts, escrow.ts (read-only), ABIs
@@ -303,8 +317,11 @@ src/lib/categories.ts  The 10 service categories, max 2 per worker
 contracts/             CarbonEscrow.sol (v2, CC-082), ReputationStake.sol
                        mocks/ is test-only — never deployed to a live network
 test/                  Hardhat/mocha contract tests. `npm run test:contracts`
-supabase/migrations/   001-017, applied by hand in order. Add new ones, never edit an applied one.
-                       No migration runner — check the directory for the next number (CC-057).
+supabase/migrations/   001-020, applied by hand in order. Add new ones, never edit an applied one.
+                       No migration runner — **`ls` the directory for the next number** (CC-057).
+                       There are already two 018s (funded_at, offer_lifecycle) — order-independent
+                       by luck, not design. Trusting a range written here is what produced the
+                       duplicate 014 in August 2026, and then these.
 scripts/audit/         Read-only verification scripts. Run these instead of trusting this file.
 ```
 
