@@ -23,12 +23,12 @@ export default function Footer() {
         </div>
 
         <a
-          href="https://www.base.org/name/wahzammo"
+          href="https://www.base.org/name/carbon-contractors"
           className={styles.basename}
           target="_blank"
           rel="noopener noreferrer"
         >
-          wahzammo.base.eth
+          carbon-contractors.base.eth
         </a>
 
         <div className={styles.links}>
