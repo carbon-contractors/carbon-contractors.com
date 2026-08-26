@@ -168,6 +168,16 @@ const envSchema = z.object({
   NOTIFICATION_EMAIL_WEBHOOK_URL: envOptional(z.string().optional()),
   TELEGRAM_BOT_TOKEN: envOptional(z.string().optional()),
 
+  // ── Scheduled jobs (CC-087) ───────────────────────────────────────────────
+  // Shared secret Vercel Cron sends as `Authorization: Bearer <value>`. Optional
+  // here because most deployments have no cron, but /api/cron/retention refuses to
+  // run when it is absent rather than running unauthenticated — the route deletes
+  // rows and /api/* bypasses the coming-soon gate, so a permissive default would be
+  // an internet-reachable delete. envOptional so a blanked Vercel field reads as
+  // unset rather than as a secret of "" that any empty bearer token would match
+  // (CC-097).
+  CRON_SECRET: envOptional(z.string().optional()),
+
   // ── Rate limiting ─────────────────────────────────────────────────────────
   // Shape shared with getRateLimitConfig() — see rateLimitShape above.
   ...rateLimitShape,
