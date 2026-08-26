@@ -98,6 +98,25 @@ function hammingHex(a: string, b: string): number | null {
   return distance;
 }
 
+/**
+ * Highest similarity between one artefact hash and any reference, in 0..1.
+ *
+ * Returns null when any reference is uncomparable (a differing width), rather than
+ * scoring against the subset that happens to line up — a partial comparison would
+ * report a low similarity for an artefact that was never fully checked, which is the
+ * "could not check" case reading as a pass.
+ */
+function maxSimilarity(artifact: string, references: string[]): number | null {
+  let highest: number | null = null;
+  for (const reference of references) {
+    const distance = hammingHex(reference, artifact);
+    if (distance === null) return null;
+    const similarity = 1 - distance / (reference.length * 4);
+    if (highest === null || similarity > highest) highest = similarity;
+  }
+  return highest;
+}
+
 function hasCameraModel(artifact: EvidenceArtifact): boolean {
   const { cameraMake = "", cameraModel = "" } = artifact.exif ?? {};
   return cameraMake.trim() !== "" || cameraModel.trim() !== "";
@@ -216,35 +235,58 @@ function evaluateV1(
 
   if (c.phash_max_similarity_to !== undefined) {
     const { source, threshold } = c.phash_max_similarity_to;
-    const reference = normalizeHex(source);
-    const referenceBits = reference !== null ? reference.length * 4 : null;
+
+    // A CAP. An artefact fails by being too similar to a reference — a re-upload of
+    // material that already existed — not by failing to match one.
+    //
+    // This was implemented backwards (`similarity >= threshold`, a floor) between
+    // 2026-08-21 and 2026-08-26, which inverted the control: a fraudulent re-upload
+    // passed at similarity 1.0 and an honest new photograph failed. The criterion is
+    // named `max_similarity_to`, CC-084 scopes it against the agent's existing
+    // listing photos, and spec/format.ts renders it to the worker as a cap — all
+    // three agreed with each other and disagreed with the checker. Nothing caught it
+    // because it was the one criterion with no failing canary case; the completeness
+    // block in canary.test.ts now makes that combination impossible.
+    const references = source.map(normalizeHex);
+    const badReferenceIndex = references.findIndex((r) => r === null);
+    const validReferences = badReferenceIndex === -1 ? (references as string[]) : null;
+
     const results = bundle.artifacts.map((a) => {
       const artifact = a.phash !== undefined ? normalizeHex(a.phash) : null;
-      const distance =
-        reference !== null && artifact !== null ? hammingHex(reference, artifact) : null;
       const similarity =
-        distance !== null && referenceBits !== null
-          ? 1 - distance / referenceBits
+        validReferences !== null && artifact !== null
+          ? maxSimilarity(artifact, validReferences)
           : null;
       return {
         uri: a.uri,
         similarity,
-        // Null similarity — unparseable hash, missing hash, width mismatch, or an
-        // uninterpretable reference — is a mismatch, not a skip.
-        matches: similarity !== null && similarity >= threshold,
+        // Fail closed. A hash that is missing, non-hex, or a different width from the
+        // references cannot be shown NOT to be a re-upload, and "could not check" must
+        // never read as "passed".
+        withinCap: similarity !== null && similarity <= threshold,
       };
     });
-    const failing = results.filter((r) => !r.matches).map((r) => r.uri);
+
+    const uncomparable = results.filter((r) => r.similarity === null).map((r) => r.uri);
+    const tooSimilar = results
+      .filter((r) => r.similarity !== null && r.similarity > threshold)
+      .map((r) => r.uri);
+    const failing = results.filter((r) => !r.withinCap);
+
     checks.push({
       check: "phash_max_similarity_to",
       passed: failing.length === 0,
       reason:
         failing.length === 0
           ? undefined
-          : reference === null
-            ? `reference phash in the spec is not a valid hex string: ${source}`
-            : `below the ${threshold} similarity threshold: ${failing.join(", ")}`,
-      details: { threshold, results },
+          : validReferences === null
+            ? `reference phash in the spec is not a valid hex string: ${source[badReferenceIndex]}`
+            : tooSimilar.length > 0
+              ? `${tooSimilar.length} artefact(s) exceed the ${threshold} similarity cap — ` +
+                `already-existing material: ${tooSimilar.join(", ")}`
+              : `${uncomparable.length} artefact(s) have no comparable perceptual hash: ` +
+                uncomparable.join(", "),
+      details: { threshold, reference_count: source.length, results },
     });
   }
 

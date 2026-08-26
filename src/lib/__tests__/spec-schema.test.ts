@@ -10,7 +10,7 @@ const VALID_V1 = JSON.stringify({
     exif_gps_within_m: { lat: -37.8136, lon: 144.9631, radius_m: 100 },
     captured_after: "task_funding_block_timestamp",
     provenance: { require_camera_model: true, reject_c2pa_ai_generated: true },
-    phash_max_similarity_to: { source: "listing_images", threshold: 0.85 },
+    phash_max_similarity_to: { source: ["ff00ff00ff00ff00"], threshold: 0.85 },
   },
 });
 
@@ -109,9 +109,25 @@ describe("acceptance spec validation (CC-084)", () => {
 
     expect(() =>
       parseAndHashSpec(
-        '{"schema_version":1,"criteria":{"phash_max_similarity_to":{"source":"x","threshold":1.5}}}',
+        '{"schema_version":1,"criteria":{"phash_max_similarity_to":{"source":["ff00"],"threshold":1.5}}}',
       ),
     ).toThrow(/threshold/);
+
+    // `source` carries the reference hashes themselves, never a name for a set: the
+    // checker is offline and cannot resolve a label into anything, so a bare string
+    // has to be refused at intake rather than silently never enforced.
+    expect(() =>
+      parseAndHashSpec(
+        '{"schema_version":1,"criteria":{"phash_max_similarity_to":{"source":"listing_images","threshold":0.85}}}',
+      ),
+    ).toThrow(/source/);
+
+    // At least one reference, or the criterion commits to nothing.
+    expect(() =>
+      parseAndHashSpec(
+        '{"schema_version":1,"criteria":{"phash_max_similarity_to":{"source":[],"threshold":0.85}}}',
+      ),
+    ).toThrow(/source/);
   });
 
   it("accepts an ISO timestamp as well as the funding-block sentinel", () => {

@@ -177,32 +177,77 @@ describe("evaluateEvidence — provenance (CC-083)", () => {
 });
 
 describe("evaluateEvidence — phash_max_similarity_to (CC-083)", () => {
-  const reference = "ff00ff00ff00ff00"; // 64 bits
-  const criterion = { phash_max_similarity_to: { source: reference, threshold: 0.9 } };
+  // 64-bit references. similarity = 1 - hammingDistance / 64.
+  const reference = "ff00ff00ff00ff00";
+  const criterion = { phash_max_similarity_to: { source: [reference], threshold: 0.9 } };
 
-  it("passes at similarity 1.0 and at one bit of 64 (0.984)", () => {
-    expect(evaluate(criterion, [artifact({ phash: reference })]).passed).toBe(true);
-    expect(evaluate(criterion, [artifact()]).passed).toBe(true); // ff...01, 1 bit off
+  // A CAP, not a floor. The criterion exists so a worker cannot hand back material the
+  // agent already had — its listing photos — as proof of new work. So high similarity
+  // FAILS and a genuinely new photograph, which looks nothing like the reference, passes.
+  // The checker had this inverted from 2026-08-21 to 2026-08-26; these tests are the
+  // direction CC-084 and spec/format.ts always specified.
+
+  it("passes a genuinely new artefact, dissimilar to the reference", () => {
+    // Every bit inverted — similarity 0.0.
+    expect(evaluate(criterion, [artifact({ phash: "00ff00ff00ff00ff" })]).passed).toBe(true);
   });
 
-  it("fails when the distance indicates a mismatch", () => {
-    const v = evaluate(criterion, [artifact({ phash: "0000000000000000" })]);
+  it("fails a re-upload of the reference itself", () => {
+    const v = evaluate(criterion, [artifact({ phash: reference })]);
     expect(v.passed).toBe(false);
-    expect(v.checks[0].reason).toMatch(/below the 0.9 similarity threshold/);
+    expect(v.checks[0].reason).toMatch(/exceed the 0.9 similarity cap/);
+  });
+
+  it("fails a near-duplicate above the cap", () => {
+    // One bit of 64 → similarity 0.984, well above 0.9.
+    const v = evaluate(criterion, [artifact({ phash: "ff00ff00ff00ff01" })]);
+    expect(v.passed).toBe(false);
+    expect(v.checks[0].reason).toMatch(/exceed the 0.9 similarity cap/);
+  });
+
+  it("treats the threshold as inclusive — at the cap passes, just above fails", () => {
+    // 8 bits of 64 differ → similarity exactly 0.875.
+    const eightBitsOff = "ff00ff00ff00ffff";
+    const atCap = { phash_max_similarity_to: { source: [reference], threshold: 0.875 } };
+    const justUnder = { phash_max_similarity_to: { source: [reference], threshold: 0.87 } };
+
+    expect(evaluate(atCap, [artifact({ phash: eightBitsOff })]).passed).toBe(true);
+    expect(evaluate(justUnder, [artifact({ phash: eightBitsOff })]).passed).toBe(false);
+  });
+
+  it("fails when an artefact matches ANY reference in the set", () => {
+    const many = {
+      phash_max_similarity_to: {
+        source: [reference, "0f0f0f0f0f0f0f0f"],
+        threshold: 0.9,
+      },
+    };
+    // Dissimilar to the first, identical to the second — one match is a re-upload.
+    const v = evaluate(many, [artifact({ phash: "0f0f0f0f0f0f0f0f" })]);
+    expect(v.passed).toBe(false);
+    expect(v.checks[0].reason).toMatch(/exceed the 0.9 similarity cap/);
   });
 
   it("fails closed on a missing hash, a width mismatch, and a non-hex hash", () => {
+    // Fail-closed matters more under a cap than under a floor: an artefact whose hash
+    // cannot be compared has not been shown NOT to be a re-upload, and "could not
+    // check" must never read as "passed".
     for (const phash of [undefined, "ff00ff00", "not-hex-at-all"]) {
       const v = evaluate(criterion, [artifact({ phash })]);
       expect(v.passed, `phash=${phash}`).toBe(false);
+      expect(v.checks[0].reason, `phash=${phash}`).toMatch(
+        /no comparable perceptual hash/,
+      );
     }
   });
 
-  it("fails closed when the spec's reference itself is not interpretable hex", () => {
-    // The checker is offline — it cannot resolve a label by fetching anything. A
-    // reference it cannot interpret is a check that cannot pass, never one that skips.
+  it("fails closed when a reference in the spec is not interpretable hex", () => {
+    // The checker is offline — it cannot resolve a label by fetching anything. This is
+    // why `source` carries hashes and not a name like "listing_images": a reference it
+    // cannot interpret is a check that can never pass, and the schema now refuses one
+    // at intake rather than letting it reach here.
     const v = evaluate(
-      { phash_max_similarity_to: { source: "listing_images", threshold: 0.85 } },
+      { phash_max_similarity_to: { source: ["listing_images"], threshold: 0.85 } },
       [artifact()],
     );
     expect(v.passed).toBe(false);
@@ -210,11 +255,17 @@ describe("evaluateEvidence — phash_max_similarity_to (CC-083)", () => {
   });
 
   it("accepts a 0x prefix on either side", () => {
-    const ok = evaluate(
-      { phash_max_similarity_to: { source: `0x${reference}`, threshold: 0.9 } },
-      [artifact({ phash: `0x${reference}` })],
-    );
-    expect(ok.passed).toBe(true);
+    const prefixed = {
+      phash_max_similarity_to: { source: [`0x${reference}`], threshold: 0.9 },
+    };
+    // Still a re-upload once both sides normalise, so this fails for the right reason.
+    const v = evaluate(prefixed, [artifact({ phash: `0x${reference}` })]);
+    expect(v.passed).toBe(false);
+    expect(v.checks[0].reason).toMatch(/exceed the 0.9 similarity cap/);
+
+    expect(
+      evaluate(prefixed, [artifact({ phash: "0x00ff00ff00ff00ff" })]).passed,
+    ).toBe(true);
   });
 });
 
@@ -224,7 +275,9 @@ describe("evaluateEvidence — verdict shape and determinism (CC-083)", () => {
     exif_gps_within_m: { lat: -37.8136, lon: 144.9631, radius_m: 100 },
     captured_after: "task_funding_block_timestamp",
     provenance: { require_camera_model: true, reject_c2pa_ai_generated: true },
-    phash_max_similarity_to: { source: "ff00ff00ff00ff00", threshold: 0.9 },
+    // Dissimilar to artifact()'s default phash, so the full spec passes: under a cap
+    // the reference is material the artefact must NOT look like.
+    phash_max_similarity_to: { source: ["00ff00ff00ff00ff"], threshold: 0.9 },
   } as const;
 
   it("emits results only for present criteria, in a fixed order", () => {

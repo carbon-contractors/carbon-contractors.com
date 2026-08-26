@@ -157,14 +157,17 @@ export function formatCriteria(
 
   if (criteria.phash_max_similarity_to !== undefined) {
     const { source, threshold } = criteria.phash_max_similarity_to;
+    const plural = source.length === 1 ? "" : "s";
     rows.push({
       key: "phash_max_similarity_to",
       label: "Visual similarity cap",
-      value: `No more than ${num(threshold)} similarity to ${source}`,
+      value: `No more than ${num(threshold)} similarity to ${source.length} reference image${plural}`,
       description:
-        "Each artefact is perceptually hashed and compared against the " +
-        `existing ${source} set. Similarity above ${num(threshold)} — ` +
-        "i.e. a re-upload of existing material — fails the verdict.",
+        `Each artefact is perceptually hashed and compared against ${source.length} ` +
+        `reference fingerprint${plural} supplied with this task — typically material ` +
+        `that already exists. Similarity above ${num(threshold)} — i.e. a re-upload — ` +
+        "fails the verdict. An artefact with no comparable hash also fails, rather " +
+        "than being skipped.",
     });
   }
 

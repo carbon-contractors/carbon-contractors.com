@@ -31,7 +31,7 @@ made.
 | [ADR-0006](ADR-0006-continuity-succession-and-the-right-to-fork.md) | Continuity, succession, and the right to fork | **proposed** | `CC-091`, `funds_control_aml_gating.md` Track C |
 | [ADR-0007](ADR-0007-adjudication-tier-and-arbitrator-isolation.md) | The adjudication tier — value-weighted review, and what an arbitrator may see | **proposed** | `funds_control_aml_gating.md` Track D |
 
-`ADR-0001` carries two amendments, and both change decisions stated above them:
+`ADR-0001` carries three amendments, and each changes decisions stated above it:
 
 - **Amendment 1** (same date) changed D4, D6 and D9 — verdicts became EIP-712 signatures rather than
   platform transactions, and settlement became pull-payment.
@@ -39,6 +39,10 @@ made.
   schema version but **not** the prose, and spec schemas are **never migrated in flight**. It also
   records why the platform cannot refund an in-flight task, which is a bytecode fact rather than a
   policy choice.
+- **Amendment 3** (2026-08-26) corrected D3's illustrative spec — `phash_max_similarity_to.source`
+  carries the reference hashes inline rather than a label for a set, because D5's offline checker
+  cannot resolve a label, and the criterion is a **cap** that fails closed. A3.4 records why the
+  inversion survived five days: it was the only criterion with no failing canary case.
 
 `ADR-0002` carries one amendment:
 

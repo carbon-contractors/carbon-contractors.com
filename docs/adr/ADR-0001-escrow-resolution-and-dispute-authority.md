@@ -3,7 +3,7 @@ id: ADR-0001
 title: Escrow resolution, evidence commitments, and dispute authority
 status: accepted
 date: 2026-08-13
-amended: 2026-08-13 - D4/D6/D9 revised, see Amendment 1; 2026-08-16 - D3 scoped, see Amendment 2
+amended: 2026-08-13 - D4/D6/D9 revised, see Amendment 1; 2026-08-16 - D3 scoped, see Amendment 2; 2026-08-26 - D3's phash criterion corrected, see Amendment 3
 deciders: Aaron Clifft
 supersedes: none
 amends: CC-080 (clarifies "the paying agent controls release")
@@ -268,6 +268,54 @@ The real problem the downtime proposal was reaching for is not a routine version
 **The review window is therefore a security parameter, not only worker UX.** The correction must be signed and presented before the window closes; afterwards the worker can claim and the platform has no lever. `MIN_REVIEW_WINDOW` of 12h is the floor on incident-response time, which is a constraint on how fast `ADR-0003`'s monitors and `CC-086`'s kill switch have to be. Not previously stated anywhere, and it should be.
 
 **Residual, accepted:** an agent can still fund a task on-chain under a version already known to be broken. The kill switch stops it happening through the product, but `createTask` is permissionless and the contract has no version gate. Gating it on a platform-maintained version list would put platform liveness back in the funding path, which A1.1 deliberately removed.
+
+---
+
+## Amendment 3 — 2026-08-26 — `phash_max_similarity_to` carries hashes, and is a cap
+
+Raised by a code review of `CC-083`'s checker. D3's illustrative spec contains a criterion that D5 forbids the checker from evaluating, and the implementation resolved that contradiction by quietly redefining what the criterion means. Both halves are recorded — the correction, and the failure mode, which is the more transferable of the two.
+
+### A3.1 — `source` carries the reference hashes, not a name for a set
+
+D3's example reads `"phash_max_similarity_to": { "source": "listing_images", "threshold": 0.85 }`. `"listing_images"` is a **label** for a set of images held somewhere else. D5 requires the checker to be pure and offline — no network, no fetch, no clock. A checker that cannot fetch cannot resolve a label, so the example specifies something this ADR elsewhere prohibits.
+
+`source` becomes an array of perceptual hashes, supplied inline by the hiring agent at task creation:
+
+```json
+"phash_max_similarity_to": {
+  "source": ["ff00ff00ff00ff00", "0f0f0f0f0f0f0f0f"],
+  "threshold": 0.85
+}
+```
+
+Three properties, in order of weight:
+
+1. **The checker can evaluate it offline.** D5 holds without exception.
+2. **The references sit inside the hashed preimage**, so `specHash` freezes them along with the criteria. A reference set that could move after funding is a goalpost that can move, which is precisely what D4 exists to prevent — and a label pointing at a mutable bucket is exactly that.
+3. **It carries fingerprints, not images.** The platform stores a hash of the agent's own material and never the material itself. `ADR-0002` D3 keeps the platform out of the *evidence* data path; this extends the same property to the criteria.
+
+### A3.2 — It is a cap, it is inclusive, and it fails closed
+
+The criterion's purpose is anti-reuse: a worker must not hand back material that already existed and call it new work. An artefact **fails** when its similarity to *any* reference exceeds the threshold. Similarity exactly at the threshold passes.
+
+An artefact whose hash is missing, non-hex, or a different width from the references **fails**. This is worth stating explicitly because fail-closed is not free here the way it is elsewhere. Under a floor, "cannot compare" and "does not match" coincide, so the safe answer is also the obvious one. Under a cap they diverge: an artefact that cannot be compared has not been shown *not* to be a re-upload, and skipping it would let a worker defeat the criterion by stripping a hash.
+
+### A3.3 — A correction to v1, not a new schema version
+
+`schema_version` stays `1`. A2.2 protects tasks that have already committed a `specHash`, and there are none: the escrow holds 0 USDC, `totalLocked` is 0, and the funding path has never been executed. There is nothing in flight to migrate, so this is a correction to an unused schema rather than a migration of a live one — the case A2.2 was written to forbid does not arise.
+
+**This is the last moment that argument works.** After the first funded task, the same change costs a new schema version plus a checker that supports both indefinitely, because D5 requires an old verdict to stay reproducible. Any further correction to v1's *shape* should be made now or accepted as permanent.
+
+### A3.4 — An example that cannot be implemented is still a specification
+
+Between 2026-08-21 and 2026-08-26 the checker implemented this criterion as a similarity **floor** — passing an artefact only when it was at least `threshold` similar to a single hex reference. That inverts the control it exists to provide: a fraudulent re-upload passed at similarity 1.0, and an honest new photograph failed. The worker-facing renderer built the following day (`CC-084`) implemented the cap correctly, so for five days the product showed the worker one rule and enforced its opposite.
+
+Nothing caught it, and the reason is structural rather than bad luck. It was the **only criterion with no failing canary case**, so `CC-083`'s fixture set and the `verify-checker` monitor were both silent on it. The check that was wrong was the check nothing exercised — a monitor cannot vouch for a criterion it never fails.
+
+Two durable consequences:
+
+- **The canary set's completeness is now asserted, not assumed.** Every criterion the schema accepts must produce a check, and every check the evaluator emits must be failed by at least one canary case. A criterion added without a failing case now fails the suite rather than passing quietly.
+- **An unimplementable ADR example gets raised, not reinterpreted.** The implementing session hit a real constraint — a label cannot be resolved by an offline checker — and resolved it by changing what the criterion meant. That is a design decision, and `CLAUDE.md`'s standing rule is that a design question gets an ADR rather than a guess. Made silently inside a checker, it inverted an anti-fraud control and left no record anyone could review.
 
 ---
 
