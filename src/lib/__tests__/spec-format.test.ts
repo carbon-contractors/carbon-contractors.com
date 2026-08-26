@@ -16,7 +16,10 @@ const FULL_V1 = parseAndHashSpec(
       exif_gps_within_m: { lat: -37.8136, lon: 144.9631, radius_m: 100 },
       captured_after: "task_funding_block_timestamp",
       provenance: { require_camera_model: true, reject_c2pa_ai_generated: true },
-      phash_max_similarity_to: { source: "listing_images", threshold: 0.85 },
+      phash_max_similarity_to: {
+        source: ["ff00ff00ff00ff00", "0f0f0f0f0f0f0f0f"],
+        threshold: 0.85,
+      },
     },
   }),
 ).spec as AcceptanceSpec;
@@ -45,7 +48,7 @@ describe("spec formatting (CC-084)", () => {
     expect(byKey["provenance.require_camera_model"].value).toBe("Yes");
     expect(byKey["provenance.reject_c2pa_ai_generated"].value).toBe("Rejected");
     expect(byKey["phash_max_similarity_to"].value).toBe(
-      "No more than 0.85 similarity to listing_images",
+      "No more than 0.85 similarity to 2 reference images",
     );
 
     // Every row is display-ready: no empty label, value or description.
@@ -92,11 +95,13 @@ describe("spec formatting (CC-084)", () => {
   it("preserves the agent's numbers exactly — no rounding of GPS or thresholds", () => {
     const rows = formatCriteria({
       exif_gps_within_m: { lat: 51.507222, lon: -0.1275, radius_m: 25000 },
-      phash_max_similarity_to: { source: "prior_uploads", threshold: 0.9 },
+      phash_max_similarity_to: { source: ["ff00ff00ff00ff00"], threshold: 0.9 },
     });
 
     expect(rows[0].value).toBe("51.507222, -0.1275 — within 25000 m");
-    expect(rows[1].value).toBe("No more than 0.9 similarity to prior_uploads");
+    expect(rows[1].value).toBe(
+      "No more than 0.9 similarity to 1 reference image",
+    );
   });
 
   it("handles negative provenance flags (require_camera_model: false)", () => {

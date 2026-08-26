@@ -42,9 +42,25 @@ const ProvenanceCriterion = z
   })
   .strict();
 
+/**
+ * A similarity **cap**, not a floor: an artefact fails when it is too close to
+ * something that already existed. The scoped case (CC-084) is the hiring agent's own
+ * listing photos — "do not hand me back my own pictures as proof of work".
+ *
+ * `source` carries the reference hashes themselves rather than a name for a set. The
+ * checker is offline and deterministic by ADR-0001 D5, so it cannot resolve a label
+ * like `"listing_images"` into anything, and a criterion the checker cannot evaluate
+ * is one the worker is shown and nothing enforces. Carrying the hashes inline also
+ * puts them inside the hashed preimage, so the reference set cannot move after
+ * funding — the same goalpost property `specHash` exists to give the criteria.
+ *
+ * Hashes, never images: a perceptual hash is a fingerprint, so the platform stores a
+ * fingerprint of the agent's own material and never the material (ADR-0002 D3).
+ */
 const PhashCriterion = z
   .object({
-    source: z.string().min(1).max(200),
+    /** Reference perceptual hashes, hex, `0x` optional. All must share a width. */
+    source: z.array(z.string().min(1).max(200)).min(1).max(64),
     threshold: z.number().min(0).max(1),
   })
   .strict();

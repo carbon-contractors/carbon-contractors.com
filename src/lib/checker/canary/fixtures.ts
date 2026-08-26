@@ -48,13 +48,18 @@ const FULL_V1_SPEC =
   '"exif_gps_within_m":{"lat":-37.8136,"lon":144.9631,"radius_m":100},' +
   '"captured_after":"task_funding_block_timestamp",' +
   '"provenance":{"require_camera_model":true,"reject_c2pa_ai_generated":true},' +
-  '"phash_max_similarity_to":{"source":"ff00ff00ff00ff00","threshold":0.9}' +
+  '"phash_max_similarity_to":{"source":["ff00ff00ff00ff00"],"threshold":0.9}' +
   "}}";
+
+/** The reference fingerprint in FULL_V1_SPEC — the "already exists" material. */
+const REFERENCE_PHASH = "ff00ff00ff00ff00";
 
 /**
  * -37.8131 is ~56 m north of the target — inside the 100 m radius.
  * "2026-08-17T05:30:00Z" is a day after funding.
- * The phash differs from the reference by one bit of 64 → similarity 0.984 ≥ 0.9.
+ * The phash inverts every bit of the reference → similarity 0.0, far under the 0.9
+ * cap. A genuinely new photograph is meant to look nothing like the reference set;
+ * it is the re-upload that fails.
  */
 function goodArtifact(index: number): EvidenceArtifact {
   return {
@@ -68,7 +73,7 @@ function goodArtifact(index: number): EvidenceArtifact {
       cameraModel: "iPhone 15",
     },
     c2paAiGenerated: false,
-    phash: "ff00ff00ff00ff01",
+    phash: "00ff00ff00ff00ff",
   };
 }
 
@@ -167,6 +172,27 @@ export const CANARY_FAIL_C2PA_AI: CanaryCase = {
   expectedFailedChecks: ["provenance.reject_c2pa_ai_generated"],
 };
 
+/**
+ * The case the set was missing until 2026-08-26, and the reason the checker's phash
+ * comparison sat inverted for five days: with nothing exercising a phash FAILURE,
+ * both the suite and verify-checker were silent on the one criterion that was wrong.
+ * The completeness block in canary.test.ts now refuses that combination.
+ */
+export const CANARY_FAIL_PHASH_REUPLOAD: CanaryCase = {
+  name: "fail-phash-reupload",
+  description:
+    "one artefact IS the reference image — the worker handed back existing material",
+  specPreimage: FULL_V1_SPEC,
+  bundle: (() => {
+    const bundle = goodBundle();
+    bundle.artifacts[1] = { ...bundle.artifacts[1], phash: REFERENCE_PHASH };
+    return bundle;
+  })(),
+  context: CONTEXT,
+  expectedPassed: false,
+  expectedFailedChecks: ["phash_max_similarity_to"],
+};
+
 /** The full set, in stable order. verify-checker (CC-085) iterates this. */
 export const CANARY_CASES: readonly CanaryCase[] = [
   CANARY_PASS_ALL,
@@ -175,4 +201,5 @@ export const CANARY_CASES: readonly CanaryCase[] = [
   CANARY_FAIL_CAPTURED_BEFORE_FUNDING,
   CANARY_FAIL_CAMERA_MODEL,
   CANARY_FAIL_C2PA_AI,
+  CANARY_FAIL_PHASH_REUPLOAD,
 ];

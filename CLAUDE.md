@@ -206,13 +206,36 @@ exists rather than reasoning from this file.**
 
 - **You cannot push to `master`.** Branch → PR → merge on GitHub. Two rulesets require verified
   signatures and code scanning; a direct push is rejected. "Push the commits" means this.
-- **Commit with the noreply email** `244833942+ajclifft@users.noreply.github.com` or the push fails
-  `GH007`. Check `git config user.email` first. → `CC-047`
-- **Signing needs a physical YubiKey touch.** `commit.gpgsign=true`, `gpg.format=ssh`, FIDO2 key. A
-  commit that appears to hang is waiting for the touch, then fails `invalid format?`. Not a config
-  error; retrying does not help. `ssh-add -L` reporting no agent is a red herring. Local commits
-  verify `G`; merge commits show `E` because GitHub's key is not in the local keyring — that is
-  correct, not unsigned.
+- **The commit identity is machine-specific, and must match the signing key's account.** Two
+  identities are in use, one per machine, and they are not interchangeable:
+
+  | Machine | Signing key | Commit as |
+  | :-- | :-- | :-- |
+  | Main PC | `sk-ssh-ed25519` (FIDO2) | `Aaron J Clifft <244833942+ajclifft@users.noreply.github.com>` |
+  | Others | `ssh-ed25519` | `Aaron Clifft <35355423+Wahzammo@users.noreply.github.com>` |
+
+  GitHub verifies a signature by resolving the **committer email** to an account, then looking for
+  the key among *that* account's signing keys. Cross the pair and the commit is signed, pushes
+  cleanly, and lands `Unverified` with reason `unknown_key` — measured 2026-08-26 on three commits
+  carrying ajclifft's address and Wahzammo's key. Any `@users.noreply.github.com` address avoids
+  `GH007`; the specific account is what decides verification. Check both before the first commit on
+  a machine. → `CC-047`
+- **Signing is always on; whether it needs a YubiKey touch is machine-specific.**
+  `commit.gpgsign=true`, `gpg.format=ssh`. **Aaron's main PC signs with a FIDO2 key and a commit
+  blocks until the key is physically touched** — an apparent hang is waiting for the tap, then fails
+  `invalid format?`. Not a config error, retrying does not help, and `ssh-add -L` reporting no agent
+  is a red herring. Other machines carry a plain `ssh-ed25519` key and sign with no interaction at
+  all, so a hang *there* is a real fault rather than a missing tap. Check which before diagnosing —
+  this entry asserted the touch unconditionally until 2026-08-26 and would have sent you looking for
+  a key to press on a machine that has none.
+  · `cut -d' ' -f1 "$(git config user.signingkey | sed "s|^~|$HOME|")"` — an `sk-` prefix
+    (`sk-ssh-ed25519`) is FIDO2 and needs the touch; a bare `ssh-ed25519` does not
+- **Signed is not the same as verified, and the two fail differently.** Local commits verify `G`;
+  merge commits show `E` because GitHub's key is not in the local keyring — that is correct, not
+  unsigned. Separately, GitHub marks a commit **Verified** only when the signing key and the
+  committer email resolve to the *same* account, so a correctly signed commit still reads
+  `Unverified` there when they do not. Measured 2026-08-26: signing with the `ajclifft` noreply
+  address against a key registered elsewhere pushes fine (no `GH007`) and lands unverified.
 - **Line endings are pinned** (`* text=auto eol=lf`). If `git status` shows every file modified, that
   is the cause. **Python's `write_text` silently writes CRLF on Windows — use `write_bytes`.**
 - **A fresh worktree has neither `node_modules` nor `.env.local`, and only `npm run build` says so.**
