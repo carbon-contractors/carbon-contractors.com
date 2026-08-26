@@ -24,7 +24,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # fetch-depth: 0 so check-closure.mjs can diff a PR against its base. A shallow
+      # checkout leaves it unable to resolve one, and a gate that cannot see its base
+      # must fail loudly rather than pass — see the GITHUB_ACTIONS branch in that script.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       # CC-085. Nothing in CI looked at workflow files, so an empty expression pair
       # inside a run: comment reached master and silently disabled the invariant
@@ -80,6 +85,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-issue-ids.mjs
+
+      # CLAUDE.md has always said a closure records what was done and in which commit.
+      # Nothing enforced it, and CC-087's closing diff was two frontmatter lines and
+      # nothing else — for an engine that has no caller, against an Acceptance block
+      # naming a monitor that does not exist. Only checks issues transitioning INTO a
+      # closed state, so the 66 already-closed ones are untouched.
+      #
+      # pull_request only: on a push to master the base is the branch itself, so the
+      # diff is empty and the step would be a silent no-op rather than a check.
+      - name: Closed backlog issues carry a record
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-closure.mjs
 
       - name: Lint
         run: npm run lint
