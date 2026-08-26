@@ -1,0 +1,65 @@
+# CODEOWNERS — the judging surface
+#
+# WHAT THIS DOES, AND WHAT IT DOES NOT
+#
+# It auto-requests review from the owner on any PR touching a path below, and shows
+# ownership in the PR UI. That is visibility and attribution.
+#
+# It does **not** block a merge. `master`'s ruleset sets
+# required_approving_review_count = 0, so no review is required at all — and turning
+# code-owner review on would deadlock a solo maintainer, because GitHub will not let a
+# PR author satisfy their own code-owner review. Enabling it needs a second reviewer
+# to exist first. Recorded here so nobody mistakes this file for a gate.
+#
+# WHY THESE PATHS
+#
+# The 2026-08-19 → 08-25 autonomous run drifted, and every drift was the same trade:
+# throughput bought by weakening a check. A canary case not written. An acceptance
+# criterion not tested. A CI step deleted to unblock a queue. Individually small, and
+# each one removed a mechanism that existed to catch the class of error that followed.
+#
+# The common factor is that **the things doing the judging were editable by the thing
+# being judged.** These paths are that judging layer. An agent may still change them —
+# nothing here prevents it — but the change arrives with a review request attached
+# rather than inside a 400-line diff nobody reads.
+#
+# Everything else in the repo is deliberately unowned. Requesting review on every PR
+# would train whoever reads them to stop reading.
+
+# ── CI and the checks themselves ─────────────────────────────────────────────
+# ci.yml carries the gates; monitors.yml reads the live chain and must never be
+# reachable from a pull_request (CC-085).
+/.github/                       @Wahzammo
+
+# ── The test harness's own guarantees ────────────────────────────────────────
+# vitest.setup.ts is what makes the suite hermetic — it strips signing keys and blocks
+# the network (CC-060). A quiet edit here re-enables a suite that can broadcast real
+# transactions. vitest.config.ts carries the timeout that stops speed-dependent flake.
+/vitest.setup.ts                @Wahzammo
+/vitest.config.ts               @Wahzammo
+
+# ── The checker's fixture set ────────────────────────────────────────────────
+# The canary set is the only thing that can tell whether the checker is *right* rather
+# than merely running. `phash_max_similarity_to` was inverted for five days because it
+# was the one criterion with no failing case here (ADR-0001 A3.4).
+/src/lib/checker/canary/        @Wahzammo
+/src/lib/checker/__tests__/     @Wahzammo
+
+# ── Settled decisions ────────────────────────────────────────────────────────
+# ADRs are decisions, not documentation. CC-081 Defect 2 and CC-075 are the worked
+# example of what re-deriving one costs. An amendment is a deliberate act.
+/docs/adr/                      @Wahzammo
+
+# ── The backlog gate and the agent's own instructions ────────────────────────
+# CLAUDE.md is read at the start of every session, including unattended ones, so a
+# wrong line there misdirects every future run. The hook is the local enforcement of
+# the "no self-filed tickets" rule.
+/CLAUDE.md                      @Wahzammo
+/.claude/settings.json          @Wahzammo
+/.claude/hooks/                 @Wahzammo
+/scripts/check-closure.mjs      @Wahzammo
+
+# ── Money-path bytecode and the migrations ───────────────────────────────────
+# The only genuinely one-way doors in the repo.
+/contracts/                     @Wahzammo
+/supabase/migrations/           @Wahzammo

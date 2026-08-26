@@ -374,3 +374,11 @@ everything passing. → `CC-085`, `ADR-0003` D3/D5
 - Do not create or edit files under docs/backlog/CC-*.md without explicit approval.
 - When you notice a problem outside the current task's scope, log it in a single line under "Observations" in your response instead — don't file it as a ticket.
 - I'll decide what gets promoted to a CC-### issue.
+- **Enforced, partly.** `.claude/hooks/check-backlog.ps1` is registered as a `PreToolUse`
+  hook on `Write|Edit` (`.claude/settings.json`) and denies a write to any
+  `docs/backlog/CC-###.md`. Verified firing 2026-08-26.
+  **It does not cover a write driven through `Bash`** — a shell command carries no
+  `file_path`, and the matcher does not include `Bash`, so a script that edits a ticket
+  sidesteps it entirely. Widening the matcher would be theatre: the path usually lives
+  inside the script, not in the command string. Treat the rule above as the control and
+  the hook as a backstop for the common case.
