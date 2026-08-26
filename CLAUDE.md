@@ -128,13 +128,16 @@ exists rather than reasoning from this file.**
   settlement back to the agent. `expireTask` is agent-only too (refunds are a pull-payment the
   agent claims, `A1.2`), so the remaining function reverts `NotAgent()` from the platform; it
   fails safely and its removal belongs with `CC-081` Defect 1. → `CC-080`, `ADR-0001` D2/A1.2
-- **Dispute authority is decided; do not re-guess it.** `dispute_task` and `resolve_dispute` are both
-  agent-only in the *app layer* today, which lets an agent refund itself after delivery. v2's
-  contract already fixes the on-chain half: either party may dispute, but **only by presenting a
-  signed failing verdict** — there is no bare-assertion dispute, because one would hand the agent
-  both outcomes again. `resolve_dispute` loses agent authority; `completeTask` stays agent-only.
-  "Agent resolves its own dispute" was explicitly rejected. → `ADR-0001` D2 + open items, `CC-081`
-  Defect 2
+- **Dispute authority is decided; do not re-guess it.** Either party may dispute, but **only by
+  presenting a signed failing verdict** — there is no bare-assertion dispute, because one would hand
+  the agent both outcomes. `completeTask` stays agent-only: an agent may always choose to pay, never
+  choose not to. **`resolve_dispute` was removed from MCP on 2026-08-26** — it authorised the hiring
+  agent and executed with the owner key, so `onlyOwner` was notarising one interested party's ruling.
+  "Agent resolves its own dispute" was explicitly rejected.
+  **Arbitration now has no app or MCP surface at all**, deliberately: the owner resolves via
+  `scripts/admin/verify-escrow-lifecycle.ts` with the KMS key until the adjudication tier exists.
+  A disputed task therefore has no clock — `ADR-0006` D3 proposes one and is unaccepted.
+  → `ADR-0001` D2, `ADR-0007` (proposed), `CC-081` Defect 2
 - **Silence favoured the agent, and v2 inverts it.** v1 had one clock, so an agent that did nothing
   after delivery got refunded at expiry. v2 has two: the delivery deadline and an agent-set review
   window (12h–14d, bounded by the contract). Once `Delivered`, `expireTask` is unreachable and the
@@ -307,7 +310,7 @@ frontmatter field.
 src/app/api/           REST + MCP routes. basedhuman.mcp/ is the MCP server entry point.
 src/app/               Pages: / /connect /dashboard /services /learn /mcp-info
 src/learn/             The 7 Learn modules (markdown); registry in src/lib/learn/modules.ts
-src/lib/mcp/server.ts  All 11 MCP tools and 3 resources
+src/lib/mcp/server.ts  All 10 MCP tools and 3 resources (resolve_dispute removed, ADR-0001 D2)
 src/lib/db/            Supabase access. whitepages.ts reads with the ANON key;
                        register/notifications use the SERVICE ROLE key. Know which you are in.
 src/lib/contracts/     signer.ts (KMS or raw key), kms-signer.ts, escrow.ts (read-only), ABIs

@@ -117,7 +117,7 @@ export default function McpInfoPage() {
           <p className={styles.subtitle}>
             Discovery tools are open. Hiring and settlement —{" "}
             <code>request_human_work</code>, <code>confirm_task_completion</code>,{" "}
-            <code>dispute_task</code>, <code>resolve_dispute</code> — need a
+            <code>dispute_task</code> — need a
             verified wallet, and the task is attributed to it rather than to an
             address you supply. Nonces expire after 60 seconds.
           </p>
