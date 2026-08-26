@@ -48,7 +48,7 @@ thin wrapper. Nothing in the money path depends on MCP existing.
 | Claim early (`claimWithVerdict`) | `built` | `built` | `next: CC-092` | `deferred: CC-044` | app |
 | Pay early (`completeTask`) | `live` | `live` | — | `broken: CC-080` (`confirm_task_completion` sends as the platform, always reverts) | MCP |
 | Dispute (signed failing verdict) | `live` | `deferred` (dispute phase unticked in `CC-082`) | `broken: CC-092` (`/api/dispute` carries no verdict) | `broken: CC-092`/`CC-081 D2` (agent-only, no verdict) | app + MCP |
-| Arbitrate (`resolveDispute`) | `live` (`onlyOwner`) | `live` (KMS path, `CC-059`) | — | `broken: CC-081 D2` (`resolve_dispute` must lose agent authority) | scripts/owner only, pending `ADR-0006` |
+| Arbitrate (`resolveDispute`) | `live` (`onlyOwner`) | `live` (KMS path, `CC-059`) | — | — (`resolve_dispute` removed 2026-08-26, `ADR-0001` D2) | scripts/owner only, pending `ADR-0007` |
 | Expire / refund (`expireTask`) | `live` | `live` | `deferred` | — | **the agent's own wallet** (pull payment, `ADR-0001` A1.2) |
 | Reputation read | — | — | `live` (`/api/reputation`) | `live` (`get_reputation`) | both |
 | Stake / unstake | `live` | — | `live` (dashboard, wagmi `writeContract`) | — | app |

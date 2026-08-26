@@ -80,7 +80,6 @@ flowchart LR
 | Hire | `get_task_status` | Poll task state (DB + on-chain) |
 | Settle | `confirm_task_completion` | Mark task complete, release escrow |
 | Dispute | `dispute_task` | Open a dispute — either party, but only by presenting a signed failing verdict |
-| Dispute | `resolve_dispute` | Resolve a disputed task on-chain to one of the two wallets fixed at funding — no agent adjudication of its own dispute |
 | Config | `register_notification_channel` | Set notification prefs + auto-booking flag |
 
 **MCP Resources:**

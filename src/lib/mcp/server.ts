@@ -33,9 +33,7 @@ import {
   getOnChainTask,
   getEscrowConfig,
   toTaskId,
-  getTaskResolvedOutcome,
 } from "@/lib/contracts/escrow";
-import { resolveDisputeOnChain } from "@/lib/contracts/signer";
 import {
   computeAndSignVerdict,
   VerdictInputError,
@@ -63,7 +61,7 @@ export interface McpSessionContext {
  *
  * @param context Optional session context with caller identity.
  *   `request_human_work` requires `callerWallet` and attributes the task to it.
- *   `confirm_task_completion` and `resolve_dispute` require `callerWallet` to
+ *   `confirm_task_completion` requires `callerWallet` to
  *   match the task's `from_agent_wallet`. `dispute_task` and `get_signed_verdict`
  *   accept either party (ADR-0001 D2).
  */
@@ -130,7 +128,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   // CC-081 Defect 4: this tool used to accept `from_agent_wallet` as an argument and
   // never touched `context.callerWallet`, so task provenance was unauthenticated —
   // and every downstream authorisation check (confirm_task_completion, dispute_task,
-  // resolve_dispute) compares the caller against exactly that field. It is now bound
+  // confirm_task_completion) compares the caller against exactly that field. It is now bound
   // to the authenticated caller and cannot be asserted.
   server.tool(
     "request_human_work",
@@ -1156,144 +1154,28 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
     }
   );
 
-  // ─── Tool: resolve_dispute ──────────────────────────────────────────────
-  server.tool(
-    "resolve_dispute",
-    "Resolve a disputed task: releases escrowed USDC on-chain (to the worker or back to the agent) via the platform signer, then sets status to 'completed' or 'expired'.",
-    {
-      payment_request_id: z
-        .string()
-        .min(1)
-        .describe("The payment_request_id of the disputed task"),
-      release_to_worker: z
-        .boolean()
-        .describe("True to release funds to worker, false to refund agent"),
-      resolution_note: z
-        .string()
-        .min(5)
-        .max(500)
-        .describe("Brief explanation of the resolution"),
-    },
-    async ({ payment_request_id, release_to_worker, resolution_note }) => {
-      try {
-        // Authorization: only the originating agent may resolve a dispute
-        if (!context?.callerWallet) {
-          return toolError(
-            "Authentication required. Provide a verified wallet to resolve disputes.",
-            "UNAUTHENTICATED",
-          );
-        }
-
-        const task = await getTaskByPaymentId(payment_request_id);
-        if (!task) {
-          return toolError("Task not found", "TASK_NOT_FOUND");
-        }
-
-        if (task.from_agent_wallet.toLowerCase() !== context.callerWallet.toLowerCase()) {
-          log("warn", "resolve_dispute_unauthorized", {
-            payment_request_id,
-            caller: context.callerWallet,
-            task_agent: task.from_agent_wallet,
-          });
-          return toolError(
-            "Not authorized. Only the originating agent may resolve this dispute.",
-            "FORBIDDEN",
-          );
-        }
-
-        if (task.status !== "disputed") {
-          return toolError(
-            `Task is ${task.status}, can only resolve disputed tasks`,
-            "INVALID_TASK_STATE",
-          );
-        }
-
-        const taskIdBytes32 = toTaskId(payment_request_id);
-        const escrowConfig = getEscrowConfig();
-        let actualReleaseToWorker = release_to_worker;
-        let txHash: string | null = null;
-
-        // Check on-chain state first — handles partial-failure recovery where a previous
-        // call resolved on-chain but the DB update afterward failed. Recover the TRUE
-        // outcome from the TaskResolved event rather than trusting a possibly-mismatched
-        // retry argument.
-        let alreadyResolvedOnChain = false;
-        if (escrowConfig.address) {
-          try {
-            const onChainTask = await getOnChainTask(payment_request_id);
-            if (onChainTask.state === "Resolved") {
-              alreadyResolvedOnChain = true;
-              const outcome = await getTaskResolvedOutcome(payment_request_id);
-              if (outcome) actualReleaseToWorker = outcome.releasedToWorker;
-              log("info", "signer_resolve_dispute_already_done", {
-                payment_request_id,
-                onChainState: onChainTask.state,
-                actualReleaseToWorker,
-              });
-            } else if (onChainTask.state !== "Disputed") {
-              // DB says disputed but chain disagrees and it isn't already Resolved either —
-              // don't guess, surface it.
-              return toolError(
-                `DB/chain state mismatch: DB says disputed, on-chain state is ${onChainTask.state}`,
-                "CHAIN_STATE_MISMATCH",
-                { reason: "db_chain_divergence" },
-              );
-            }
-          } catch {
-            // Contract may not be deployed yet — proceed with the on-chain call attempt below.
-          }
-        }
-
-        if (!alreadyResolvedOnChain) {
-          try {
-            txHash = await resolveDisputeOnChain(taskIdBytes32, release_to_worker);
-          } catch (chainErr: unknown) {
-            const chainMsg = chainErr instanceof Error ? chainErr.message : String(chainErr);
-            log("error", "signer_resolve_dispute_failed", {
-              payment_request_id,
-              error: chainMsg,
-            });
-            return toolError(
-              `On-chain resolveDispute failed: ${chainMsg}`,
-              "CHAIN_WRITE_FAILED",
-              { reason: "resolve_dispute_tx_failed" },
-            );
-          }
-        }
-
-        const newStatus = actualReleaseToWorker ? "completed" : "expired";
-        await updateTaskStatus(payment_request_id, newStatus);
-
-        log("info", "dispute_resolved", {
-          payment_request_id,
-          release_to_worker: actualReleaseToWorker,
-          resolution_note,
-          amount_usdc: task.amount_usdc,
-          txHash,
-        });
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: true,
-                payment_request_id,
-                status: newStatus,
-                release_to_worker: actualReleaseToWorker,
-                task_id_bytes32: taskIdBytes32,
-                escrow_contract: escrowConfig.address,
-                tx_hash: txHash,
-              }),
-            },
-          ],
-        };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return toolError(message, "INTERNAL");
-      }
-    }
-  );
+  // resolve_dispute was removed here (ADR-0001 D2).
+  //
+  // It authorised `task.from_agent_wallet === callerWallet` — the hiring agent — and
+  // then executed that decision with the platform's owner key, which owns the escrow.
+  // So the reachable sequence was: agent funds, worker delivers, agent disputes, agent
+  // resolves in its own favour, platform signs it. `onlyOwner` on the contract was doing
+  // nothing but notarising one interested party's ruling, and the worker had no
+  // adjudicator at all.
+  //
+  // D2: "the agent already holds release (completeTask) and already holds refusal
+  // (inaction). Granting resolve_dispute as well means it holds both outcomes." Removing
+  // the tool is the app-layer half; the contract half already landed in v2, where
+  // `disputeTask` requires a signed failing verdict so a refusal is at least falsifiable.
+  //
+  // **There is deliberately no MCP replacement.** Arbitration is owner-only until the
+  // adjudication tier exists (`ADR-0007`, proposed): the owner resolves through
+  // `scripts/admin/verify-escrow-lifecycle.ts` with the KMS key (`CC-059`). That matches
+  // the Capability Surface Matrix — "scripts/owner only, pending ADR-0006" — and it is
+  // the honest position, because there is no neutral adjudicator to route this to yet.
+  //
+  // Do not reintroduce an agent-callable path. If an adjudication tool is ever added it
+  // authorises an arbitrator, never a party to the task.
 
   // ─── Resource: human_whitepages ───────────────────────────────────────────
   server.resource(

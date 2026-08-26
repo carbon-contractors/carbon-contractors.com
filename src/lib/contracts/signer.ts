@@ -112,6 +112,13 @@ function getEscrowAddress(): Address {
 /**
  * Call escrow.resolveDispute(taskId, releaseToWorker) on-chain.
  *
+ * **Owner-operated only.** Its sole caller is
+ * `scripts/admin/verify-escrow-lifecycle.ts`, run by hand with the KMS key that owns
+ * the escrow (`CC-059`). The MCP `resolve_dispute` tool used to call this and was
+ * removed under `ADR-0001` D2 — it let the hiring agent direct the owner key to rule on
+ * the agent's own dispute. Nothing request-scoped may call this: arbitration has no
+ * app or MCP surface until the adjudication tier exists (`ADR-0007`, proposed).
+ *
  * CC-081 Defect 3: waits for the receipt before returning. The hash from
  * `writeContract` only proves the transaction was *submitted* — a reorg or a dropped
  * transaction would leave the caller (and the DB update gated on this call) claiming
