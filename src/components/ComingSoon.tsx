@@ -52,12 +52,12 @@ export default function ComingSoon() {
           </div>
 
           <a
-            href="https://www.base.org/name/wahzammo"
+            href="https://www.base.org/name/carbon-contractors"
             className={styles.basename}
             target="_blank"
             rel="noopener noreferrer"
           >
-            wahzammo.base.eth
+            carbon-contractors.base.eth
           </a>
           <br />
           CARBON&#8209;CONTRACTORS.COM &nbsp;&middot;&nbsp; EST. 2026
