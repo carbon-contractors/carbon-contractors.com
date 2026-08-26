@@ -258,4 +258,25 @@ describe("GET /api/tasks on-chain enrichment (CC-092 v2 fields)", () => {
     const json = await res.json();
     expect(json.tasks[0].on_chain).toBeNull();
   });
+
+  it("survives a live offer whose payment_request_id the view withholds (migration 021)", async () => {
+    // tasks_public NULLs the id while a task is `pending`/`accepted`, because taskId is
+    // keccak256 of it and `createTask` is permissionless first-come-first-served — an
+    // unauthenticated observer could otherwise burn the id for 1 unit of USDC before the
+    // agent funds. The list must still render; on_chain is simply not derivable.
+    mockEscrowAddress = "0xescrow";
+    mockGetPublicTasks.mockResolvedValue([
+      { ...PUBLIC_TASK, status: "pending", payment_request_id: null },
+    ]);
+    const { GET } = await import("@/app/api/tasks/route");
+
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.tasks).toHaveLength(1);
+    expect(json.tasks[0].payment_request_id).toBeNull();
+    expect(json.tasks[0].on_chain).toBeNull();
+    // No id means no derivable taskId, so the chain must not be consulted at all.
+    expect(mockGetOnChainTask).not.toHaveBeenCalled();
+  });
 });

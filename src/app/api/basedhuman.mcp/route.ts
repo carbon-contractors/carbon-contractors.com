@@ -81,10 +81,15 @@ function createTransport(context: McpSessionContext): WebStandardStreamableHTTPS
 
 // ── JSON-RPC error helpers ───────────────────────────────────────────────────
 
-function jsonRpcError(code: number, message: string, status: number): Response {
+function jsonRpcError(
+  code: number,
+  message: string,
+  status: number,
+  extraHeaders?: Record<string, string>,
+): Response {
   return new Response(
     JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: null }),
-    { status, headers: { "Content-Type": "application/json" } }
+    { status, headers: { "Content-Type": "application/json", ...extraHeaders } }
   );
 }
 
@@ -98,7 +103,13 @@ async function handler(req: NextRequest): Promise<Response> {
   const ip = req.headers.get("x-forwarded-for") ?? "127.0.0.1";
   const { success, retryAfterS } = await mcpRateLimiter.limit(ip);
   if (!success) {
-  return jsonRpcError(-32029, "Rate limit exceeded. Try again later.", 429);
+    // The limiter already computes when the window reopens; sending it as
+    // Retry-After is what lets an agent back off correctly instead of hammering.
+    // It was previously destructured and dropped, which is the lint warning this
+    // resolves — by using the value rather than deleting it.
+    return jsonRpcError(-32029, "Rate limit exceeded. Try again later.", 429, {
+      "Retry-After": String(retryAfterS),
+    });
   }
 
   if (req.method === "POST") {
