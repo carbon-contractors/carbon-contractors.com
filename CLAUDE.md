@@ -206,8 +206,20 @@ exists rather than reasoning from this file.**
 
 - **You cannot push to `master`.** Branch → PR → merge on GitHub. Two rulesets require verified
   signatures and code scanning; a direct push is rejected. "Push the commits" means this.
-- **Commit with the noreply email** `244833942+ajclifft@users.noreply.github.com` or the push fails
-  `GH007`. Check `git config user.email` first. → `CC-047`
+- **The commit identity is machine-specific, and must match the signing key's account.** Two
+  identities are in use, one per machine, and they are not interchangeable:
+
+  | Machine | Signing key | Commit as |
+  | :-- | :-- | :-- |
+  | Main PC | `sk-ssh-ed25519` (FIDO2) | `Aaron J Clifft <244833942+ajclifft@users.noreply.github.com>` |
+  | Others | `ssh-ed25519` | `Aaron Clifft <35355423+Wahzammo@users.noreply.github.com>` |
+
+  GitHub verifies a signature by resolving the **committer email** to an account, then looking for
+  the key among *that* account's signing keys. Cross the pair and the commit is signed, pushes
+  cleanly, and lands `Unverified` with reason `unknown_key` — measured 2026-08-26 on three commits
+  carrying ajclifft's address and Wahzammo's key. Any `@users.noreply.github.com` address avoids
+  `GH007`; the specific account is what decides verification. Check both before the first commit on
+  a machine. → `CC-047`
 - **Signing is always on; whether it needs a YubiKey touch is machine-specific.**
   `commit.gpgsign=true`, `gpg.format=ssh`. **Aaron's main PC signs with a FIDO2 key and a commit
   blocks until the key is physically touched** — an apparent hang is waiting for the tap, then fails
