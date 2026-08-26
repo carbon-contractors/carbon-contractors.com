@@ -334,7 +334,14 @@ export async function getTasksByWallet(
  */
 export interface PublicTaskRecord {
   id: string;
-  payment_request_id: string;
+  /**
+   * NULL while the offer is live and unfunded (`pending`/`accepted`) — migration 021.
+   * `taskId` on-chain is keccak256 of this, and `createTask` is permissionless and
+   * first-come-first-served, so publishing it before the agent funds lets anyone burn
+   * the id for the price of 1 unit of USDC. Callers must handle null; the authenticated
+   * path (`getTasksForParties`) reads the base table and always has it.
+   */
+  payment_request_id: string | null;
   from_agent_wallet: string;
   to_human_wallet: string;
   amount_usdc: number;
