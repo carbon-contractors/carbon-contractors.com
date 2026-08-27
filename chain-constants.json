@@ -1,0 +1,148 @@
+{
+  "$comment": [
+    "ADR-0006 D7 deliverable. The single place a stranger can find every value needed to",
+    "stand this protocol back up, instead of reconstructing it from .env.example, CLAUDE.md",
+    "hazard notes and ticket bodies — which is also why those kept going stale.",
+    "",
+    "THIS FILE IS A RECORD, NOT AN AUTHORITY. The repo's standing rule is to verify with the",
+    "command rather than trust the written value (CLAUDE.md, 'Where truth lives'). Every",
+    "network block below carries the audit script that re-derives it. If this file and the",
+    "chain disagree, the chain is right and this file is a bug.",
+    "",
+    "Nothing here is secret. Addresses, block numbers and hashes are public on-chain data or",
+    "digests of committed source. No key material, no credentials, no endpoints requiring auth."
+  ],
+
+  "schemaVersion": 1,
+  "updated": "2026-08-26",
+
+  "protocol": {
+    "$comment": "Network-independent. These are properties of the committed source, not of a deployment.",
+
+    "eip712Domain": {
+      "name": "CarbonEscrow",
+      "version": "2",
+      "$comment": "contracts/CarbonEscrow.sol constructor. Any reimplementation must match both strings exactly or every signed verdict is rejected."
+    },
+
+    "verdictTypehash": "Verdict(bytes32 taskId,bytes32 specHash,bytes32 evidenceHash,bytes32 checkerHash,bool passed,bytes32 breakdownHash,uint256 expiry,uint256 nonce)",
+
+    "reviewWindowSeconds": {
+      "min": 43200,
+      "max": 1209600,
+      "$comment": "12h and 14d, contract constants. The lower bound is also the floor on incident-response time (ADR-0001 A2.4)."
+    },
+
+    "arbitrationDeadlineSeconds": {
+      "min": null,
+      "max": null,
+      "$comment": "ADR-0006 D3, accepted 2026-08-26: a bounded arbitration deadline goes into the bytecode before the mainnet deploy, and an unresolved arbitration defaults to the WORKER via pull payment. The bound values are an open item and must be chosen before the CC-034 bytecode is frozen."
+    },
+
+    "checker": {
+      "checkerHash": "0xe864356c931cae8e7daf4130a5956c6dfccb48f8ece0bbe4377e0960c9e4e7a9",
+      "ruleVersion": 1,
+      "$comment": "src/lib/checker/hash.ts. Pinned into every verdict, so a six-month-old verdict stays re-runnable (ADR-0001 D5). Re-derive: getCheckerHash()."
+    },
+
+    "canary": {
+      "digest": "0x58cd94df32e0a4f94734df65f37e55ad511831450d0d171b8870ccb74200e9b1",
+      "caseCount": 7,
+      "cases": [
+        "pass-all",
+        "fail-min-artefacts",
+        "fail-gps-radius",
+        "fail-captured-before-funding",
+        "fail-camera-model",
+        "fail-c2pa-ai-generated",
+        "fail-phash-reupload"
+      ],
+      "digestDefinition": "sha256 over the newline-joined, source-ordered JSON of {name, specPreimage, expectedPassed, expectedFailedChecks(sorted)} per case. Bundles are excluded deliberately: this pins WHAT is asserted, so adding a case or changing an expectation moves the digest.",
+      "$comment": "The fixture set is the only thing that can show the checker is RIGHT rather than merely running. fail-phash-reupload was added 2026-08-26 — its absence is how an inverted criterion survived five days (ADR-0001 A3.4)."
+    },
+
+    "spec": {
+      "supportedVersions": [1],
+      "$comment": "Versions accepted for NEW tasks. A task resolves under the schema it was created with, permanently (ADR-0001 A2.2), so the checker must keep evaluating every version with tasks outstanding."
+    },
+
+    "retention": {
+      "ruleVersion": "cc087.2026-08-22.1",
+      "disputeWindowSeconds": 1209600,
+      "$comment": "src/lib/db/retention.ts. The window is the contract's MAX_REVIEW_WINDOW until ADR-0001's dispute-window duration is decided; shorten only with that decision."
+    }
+  },
+
+  "networks": {
+    "base-sepolia": {
+      "chainId": 84532,
+      "status": "live",
+      "escrow": {
+        "address": "0xe80d03688E8fa6270668AD73191d353e522CB1b1",
+        "version": 2,
+        "deployedAt": "2026-08-15",
+        "deployBlock": 45494043,
+        "$comment": "deployBlock is load-bearing for cost, not correctness: unset, every getLogs query scans from genesis (~36x the requests) and fails slowly rather than loudly (CC-070)."
+      },
+      "reputationStake": {
+        "address": null,
+        "$comment": "Deployed, address not recorded here — it lives only in the Vercel environment. Recover with `node --env-file=.env.local scripts/audit/inspect-live-schema.sql`-adjacent tooling or the deploy transaction, then fill this in. Left null rather than guessed."
+      },
+      "usdc": {
+        "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        "decimals": 6
+      },
+      "owner": {
+        "address": "0xa8931097540e69B474013D294d0bA6A2cC853e4b",
+        "custody": "single GCP Cloud KMS / HSM key",
+        "$comment": "ADR-0006 D2 accepted 2026-08-26: this becomes a 2-of-4 Safe over four hardware-isolated keys (Tangem cards bought SEPARATELY, so no shared seed is possible) before the mainnet deploy. Custody: Aaron holds two, two family members hold one each; the two family keys reach threshold alone. This entry has been wrong in both directions historically — never re-derive it by reading (CC-059)."
+      },
+      "acceptedVerdictSigners": [
+        "0xa8931097540e69B474013D294d0bA6A2cC853e4b"
+      ],
+      "verdictSignerSeparation": {
+        "separated": false,
+        "$comment": "Owner and verdict signer are currently the SAME key. ADR-0006 D2 requires separation before mainnet; CC-090 carries it. Recorded as false rather than omitted, because an absent field reads as 'fine'."
+      },
+      "rpcMaxBlockRange": 10000,
+      "verify": [
+        "node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs",
+        "node --env-file=.env.local scripts/audit/verify-contract-owner.mjs",
+        "node --env-file=.env.local scripts/audit/verify-signer.mjs",
+        "node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs",
+        "node --env-file=.env.local scripts/audit/find-deploy-block.mjs"
+      ]
+    },
+
+    "base-mainnet": {
+      "chainId": 8453,
+      "status": "not deployed",
+      "escrow": {
+        "address": null,
+        "deployBlock": null
+      },
+      "reputationStake": { "address": null },
+      "usdc": {
+        "address": null,
+        "decimals": 6,
+        "$comment": "Left null deliberately. The mainnet USDC address is well known, but writing it here before CC-034 invites it being trusted as 'configured' — and the whole point of this file is that a value present reads as verified."
+      },
+      "owner": {
+        "address": null,
+        "custody": "2-of-4 Safe, four hardware-isolated keys (ADR-0006 D2). Slots 3 and 4 are transitional and rotate to partners or a professional key-holder service on the D11 triggers."
+      },
+      "acceptedVerdictSigners": [],
+      "rpcMaxBlockRange": null,
+      "$comment": "CC-034 fills this in. Two things must be true before it does: the 2-of-4 Safe owns the contract (not the deployer — a redeploy resets ownership to the deployer, CC-082), and the arbitration deadline is in the bytecode (ADR-0006 D3). The mainnet deploy is the one genuinely one-way door in the project."
+    }
+  },
+
+  "related": [
+    "docs/BCP-DR.md",
+    "docs/adr/ADR-0006-continuity-succession-and-the-right-to-fork.md",
+    "docs/Security-Trust-Disclosure.md",
+    "docs/Key-Compromise-Recovery.md",
+    "docs/backlog/CC-034.md",
+    "docs/backlog/CC-090.md"
+  ]
+}

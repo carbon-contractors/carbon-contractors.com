@@ -1,8 +1,9 @@
 ---
 id: ADR-0007
 title: The adjudication tier — value-weighted review, and what an arbitrator may see
-status: proposed
+status: accepted
 date: 2026-08-19
+accepted: 2026-08-26 - A1.1 exit metrics set, see Status
 deciders: Aaron Clifft
 depends-on: ADR-0001 (D5 checker, D7 reputation, D8 jury sketch, D9 authority), ADR-0002 (D1 pseudonymity, D3 data path, D7 notices), ADR-0006 (D3 arbitration clock)
 resolves: funds_control_aml_gating.md Track D
@@ -14,9 +15,44 @@ epic: v2
 
 ## Status
 
-**Proposed**, 2026-08-19. Nothing here is scheduled. The purpose of writing it now is that
+**Accepted, 2026-08-26**, with A1.1's exit metrics set. Drafted 2026-08-19 because
 `funds_control_aml_gating.md` calls the jury tier *"the single largest true unknown in the whole
 adjudication stack"*, and an unknown with a design is smaller than one without.
+
+**Accepted is not scheduled.** The epic is still `v2`. What acceptance buys is that the bootstrap
+pool now has a published exit test *before* the pool exists, which A1.1 argued was the difference
+between a transitional mechanism and a permanent one. Nothing here is built.
+
+### A1.1 exit metrics — the measure of "organic"
+
+All six must hold simultaneously for the stability horizon before the platform's fallback keys
+auto-revoke:
+
+| Criterion | Threshold |
+| :-- | :-- |
+| Participant floor | **21** active non-platform stakers |
+| Individual stake cap | **≤ 10%** of total pool stake per entity |
+| Selection ceiling | **≤ 15%** of panels per entity, rolling 30 days |
+| Capital ratio | pool collateral **≥ 10×** the maximum allowed T2 escrow value |
+| Stability horizon | **90 consecutive days** meeting all criteria |
+| Juror minimum stake | **100 USDC** |
+
+**Three consequences of these numbers, stated because they are easy to miss:**
+
+1. **The capital ratio is not yet computable.** It is defined against "the maximum allowed T2 escrow
+   value", and D1's tier boundaries are still unset — they depend on a fee model that deliberately
+   does not exist (`ADR-0002` A1.2). The ratio is a settled *formula* with an unsettled input, so it
+   cannot be evaluated until the T2 ceiling is chosen. That is a smaller open item than "what does
+   organic mean", which is the point of setting it now.
+2. **21 stakers × 10% is not a coincidence, and the two caps interact.** A floor of 21 with a 10%
+   stake cap means no entity can be pivotal on stake alone, and the 15% selection ceiling stops a
+   compliant staker being over-drawn by the selection algorithm. Both are needed: the stake cap
+   without the selection ceiling lets a small holder sit on most panels.
+3. **"Auto-revoke" is a mechanism, not a policy, and it does not exist.** Fallback keys that revoke
+   themselves after 90 compliant days require something trusted to evaluate the criteria and act.
+   Whatever evaluates them is a new trusted component — precisely the kind this ADR's D6 tries to
+   avoid — so how revocation is triggered and who can pause it is an open item, not an implementation
+   detail.
 
 ---
 
@@ -187,6 +223,11 @@ items raised.
   single entity selected for more than X% of cases over a rolling window, sustained for a period.
   A transitional mechanism with no exit test is a permanent mechanism with good intentions.
 
+**Set 2026-08-26** — the six thresholds are in the Status section above, and they are the published
+measure this condition demanded. They must appear in `Security-Trust-Disclosure.md` alongside the
+bootstrap-pool disclosure: an exit test nobody outside the platform can check is not published, it is
+merely written down.
+
 **Vetting must not become identity verification.** `ADR-0002` D1 stands. Vetting is by stake, track
 record, and a published undertaking — not by name or document.
 
@@ -285,9 +326,13 @@ yield and will attract both humans and automated reviewers. It is **speed-clicki
 - **The floor and ceiling numbers.** The floor is set by what a tier can pay; the ceiling by D6's
   stake bound. Neither can be chosen without a fee model, which does not exist (`ADR-0002` A1.2 —
   there is no platform fee today, deliberately, and it is also an AUSTRAC argument).
-- ~~Where the pool comes from.~~ → **A vetted bootstrap pool** (A1.1). What remains open is the
-  **exit condition**: the specific measure of "organic enough to dissolve the curated pool", which
-  must be chosen before the pool exists, not after it is comfortable.
+- ~~Where the pool comes from.~~ → **A vetted bootstrap pool** (A1.1).
+- ~~The **exit condition**.~~ → **Set 2026-08-26**: six thresholds, in Status. Two dependent items
+  remain and neither was created by this decision:
+  - the **capital ratio's input** — the maximum T2 escrow value, which waits on the fee model;
+  - the **auto-revoke mechanism** — what evaluates the criteria, what acts on them, and who may
+    pause it. A self-revoking key needs a trusted evaluator, which is a new trust assumption rather
+    than a smaller one.
 - **The joint retention / retroactive-audit window** (A1.2) — one number, two ADRs, currently unset.
 - **Whether agents must stake to file a dispute** (A1.3 symmetry), and at what ratio.
 - **Who performs redaction** — worker's device at capture, or the checker in its scratch pass. The

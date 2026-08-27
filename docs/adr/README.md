@@ -28,8 +28,8 @@ made.
 | [ADR-0003](ADR-0003-monitoring-as-correctness-dependency.md) | Monitoring as a correctness dependency, not an ops nicety | accepted | rescopes and splits `CC-040` |
 | [ADR-0004](ADR-0004-public-claims-and-pseudonymity.md) | Public claims — copy describes the target state, and the identity claim is pseudonymity | accepted | two positions `CLAUDE.md` kept re-litigating |
 | [ADR-0005](ADR-0005-worker-acceptance-and-offer-lifecycle.md) | Worker acceptance, the offer lifecycle, and concurrency limits | accepted | the worker never consented to being hired |
-| [ADR-0006](ADR-0006-continuity-succession-and-the-right-to-fork.md) | Continuity, succession, and the right to fork | **proposed** | `CC-091`, `funds_control_aml_gating.md` Track C |
-| [ADR-0007](ADR-0007-adjudication-tier-and-arbitrator-isolation.md) | The adjudication tier — value-weighted review, and what an arbitrator may see | **proposed** | `funds_control_aml_gating.md` Track D |
+| [ADR-0006](ADR-0006-continuity-succession-and-the-right-to-fork.md) | Continuity, succession, and the right to fork | accepted | `CC-091`, `funds_control_aml_gating.md` Track C |
+| [ADR-0007](ADR-0007-adjudication-tier-and-arbitrator-isolation.md) | The adjudication tier — value-weighted review, and what an arbitrator may see | accepted | `funds_control_aml_gating.md` Track D |
 
 `ADR-0001` carries three amendments, and each changes decisions stated above it:
 
@@ -86,10 +86,18 @@ the index table above current by hand.
 its own decisions. `ADR-0002` next. `ADR-0003` refers to `ADR-0002`'s retention decisions, and
 `ADR-0004` restates `ADR-0002` D1/D6 as an operational rule.
 
-**`ADR-0006` and `ADR-0007` are drafts, not decisions.** Both were written during the 2026-08-19
-documentation-alignment review (`docs/design-review-2026-08-19.md`) and are `proposed` until Aaron
-accepts or rejects them. `ADR-0006` carries contract-level decisions (an arbitration clock, multisig
-ownership) that must land with `CC-034` or not at all for v1, so it is the one with a deadline.
+**`ADR-0006` and `ADR-0007` were accepted 2026-08-26** with execution parameters; both were drafted
+during the 2026-08-19 documentation-alignment review (`docs/design-review-2026-08-19.md`).
+
+- **`ADR-0006`** carries the two contract-level items that must land with `CC-034` or not at all for
+  v1: the **arbitration deadline in bytecode** (D3) and **2-of-4 Safe ownership** (D2). Its Status
+  section holds the accepted parameters, including custody (Aaron two keys in two buildings, two
+  family members one each) and D11's custody-escalation triggers. What the parameters do *not* settle
+  is the family-only signing rehearsal, the estate packet, and the legal instrument — all three
+  human rather than technical.
+- **`ADR-0007` is accepted but not scheduled** (epic `v2`). What acceptance bought is A1.1's exit
+  test — six published thresholds for when the bootstrap juror pool dissolves — chosen before the
+  pool exists rather than after it gets comfortable.
 
 `ADR-0005` is the only accepted one that is **not** about money, custody or claims — it is the matching layer,
 and it needs no contract knowledge to read. Read it before touching the hire path, `CC-074`,

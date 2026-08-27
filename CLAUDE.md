@@ -136,7 +136,10 @@ exists rather than reasoning from this file.**
   "Agent resolves its own dispute" was explicitly rejected.
   **Arbitration now has no app or MCP surface at all**, deliberately: the owner resolves via
   `scripts/admin/verify-escrow-lifecycle.ts` with the KMS key until the adjudication tier exists.
-  A disputed task therefore has no clock — `ADR-0006` D3 proposes one and is unaccepted.
+  A disputed task therefore has no clock **yet**: `ADR-0006` D3 was **accepted 2026-08-26** and puts
+  a bounded arbitration deadline in the bytecode, defaulting an unresolved arbitration to the
+  **worker** via pull payment. It lands with `CC-034` or not at all for v1 — until it ships, a
+  dispute can sit indefinitely and only the owner can end it.
   → `ADR-0001` D2, `ADR-0007` (proposed), `CC-081` Defect 2
 - **Silence favoured the agent, and v2 inverts it.** v1 had one clock, so an agent that did nothing
   after delivery got refunded at expiry. v2 has two: the delivery deadline and an agent-set review
@@ -147,6 +150,12 @@ exists rather than reasoning from this file.**
   been wrong in **both** directions; never re-derive it by reading. → `CC-059`
   · `node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`
   · **A redeploy resets ownership to the deployer — re-transfer it (`CC-082`).**
+  · **Target is a 2-of-4 Safe before mainnet** (`ADR-0006` D2, accepted; `CC-090`, now P1), with the
+    verdict signer split onto its own HSM key. Custody: Aaron two keys in two buildings, two family
+    members one each — the two family keys reach threshold alone, which is what makes succession work
+    without an estate finding anything. Cards are bought **separately**, so a shared seed is
+    impossible by construction; the test is still on-chain — four owner addresses, no shared
+    derivation.
 - **The DB is not the authority on money.** Payout destinations come from the contract, never
   Supabase. Load-bearing for fund safety *and* the regulatory position. → `CC-037`, `CC-051`
 
@@ -286,6 +295,8 @@ exists rather than reasoning from this file.**
 | Question | Answer |
 | :-- | :-- |
 | Design decisions and rejected alternatives | `docs/adr/` — **read `README.md` first** |
+| Addresses, deploy blocks, hashes, rule versions | `chain-constants.json` — a *record*, verify with the audit scripts it names |
+| Continuity, custody, renewals, what breaks if it lapses | `docs/BCP-DR.md` |
 | What needs doing | `docs/backlog/` |
 | Product narrative, MCP tool list, stack | `README.md` |
 | Security findings AUD-001..010 | `AUDIT-2026-03-25.md` |
