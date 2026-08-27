@@ -1,8 +1,9 @@
 ---
 id: ADR-0006
 title: Continuity, succession, and the right to fork
-status: proposed
+status: accepted
 date: 2026-08-19
+accepted: 2026-08-26 - execution parameters set, see Status
 deciders: Aaron Clifft
 depends-on: ADR-0001 (D6, D9, A1.2 — why funds already survive the founder), ADR-0002 (D4/D5/D9 — retention vs recoverability)
 resolves: CC-091, funds_control_aml_gating.md Track C
@@ -15,8 +16,33 @@ epic: mainnet
 
 ## Status
 
-**Proposed**, 2026-08-19. Drafted during a documentation-alignment review; `CC-091` predicted it
-("this probably graduates to an ADR") and it does.
+**Accepted, 2026-08-26**, with execution parameters. Drafted 2026-08-19 during a
+documentation-alignment review; `CC-091` predicted it ("this probably graduates to an ADR") and it
+does.
+
+### Execution parameters set on acceptance
+
+| Decision | Parameter |
+| :-- | :-- |
+| **D1** copyright | **Aaron James Clifft, personally.** AGPL-3.0-or-later at the repository root; `contracts/` MIT. |
+| **D2** ownership | **2-of-3 Safe**, three hardware-isolated keys — Tangem cards **initialised as distinct standalone wallets**. Owner separate from the automated HSM verdict signer, confirmed. |
+| **D3** arbitration clock | **Bounded arbitration deadline in the contract bytecode, before the mainnet deploy.** An unresolved arbitration defaults to the **worker**, claimed as a pull payment. |
+| **D5 / D7** continuity | `docs/BCP-DR.md` and `chain-constants.json` live **in-repo**. No dependency on any private workspace. |
+| **D8** backups | The DB backup posture **excludes task content and evidence**, so `privacy.md`'s deletion guarantee survives a restore. |
+
+**Two things the parameters do not settle, and both are load-bearing.** They are carried forward in
+Open items rather than treated as closed:
+
+1. **Three Tangem cards are only a 2-of-3 if they are three keys.** Tangem sells cards as a set that
+   *shares one seed* by default — a set restored from one backup is one key wearing three plastic
+   coats, and a 2-of-3 built on it has the security of a 1-of-1 while looking like a multisig on
+   Basescan. "Initialised as distinct standalone wallets" is therefore not a preference, it is the
+   whole property, and it must be **verified on-chain** (three unrelated addresses as Safe owners)
+   rather than assumed from the setup flow.
+2. **Who holds the three cards is still open, and D2's purpose depends on it.** D2 says "the founder
+   holds one key, not all three". Three cards in one person's custody delivers *loss resistance* —
+   a single lost or bricked card is survivable — but not *succession*, which is the problem this ADR
+   exists to solve. An estate cannot reach a key it cannot find, and it certainly cannot reach two.
 
 **Two decisions confirmed by Aaron on 2026-08-19, ahead of the rest:**
 
@@ -78,6 +104,13 @@ inbound contribution grant.
 - **Prospective, not retroactive.** Whatever the prior README declaration granted, it granted. Say so
   plainly rather than restating history (`CC-056`).
 
+**Accepted 2026-08-26 — copyright is retained by Aaron James Clifft personally**, not by North Metro
+Tech. That closes this ADR's open item. Consequences worth naming: the estate inherits the copyright
+directly rather than through a company, the inbound contribution grant runs to a natural person, and
+any later assignment to an entity is a deliberate act with its own paperwork rather than a default.
+The AGPL grant itself needs no further advice; the **terms of the commercial alternative still do**,
+which is why `COMMERCIAL.md` offers a negotiation rather than a priced licence.
+
 ### D2 — Contract ownership moves to a 2-of-3 multisig before mainnet, and the owner is not the verdict signer
 
 One HSM key currently owns the contracts *and* is the accepted verdict signer. `CC-090` proposed
@@ -92,6 +125,20 @@ same change, and it re-rates `CC-090` to P1.
 - Naming the other two key-holders is the hard part, and it is a decision, not an engineering task —
   see open items.
 
+**Accepted 2026-08-26 — the architecture is a 2-of-3 Safe over three hardware-isolated keys**,
+implemented as Tangem cards initialised as **distinct standalone wallets**. Separation of the
+contract owner from the automated HSM verdict signer is confirmed and is now a stated invariant
+rather than an aspiration: `verify-contract-owner.mjs` and `verify-signer.mjs` already assert each
+half, and together they assert the separation.
+
+**The failure mode to design against is a multisig that is not one.** A Tangem set restored from a
+single seed presents three cards and one key. The acceptance test is therefore on-chain and not
+procedural: three Safe owners at three addresses with no shared derivation, checked before any value
+moves. `CC-090` carries it.
+
+Custody of the three cards remains open (see Open items). Until it is answered, this change buys key-
+loss resistance and signer separation — not succession.
+
 ### D3 — Arbitration gets a clock, and its default follows D6
 
 The stranding case is closed in the contract, not in a runbook.
@@ -103,6 +150,19 @@ The stranding case is closed in the contract, not in a runbook.
 - Worker-default rather than refund-default for the reason `ADR-0001` D6 already gives: the
   alternative hands the platform a griefing lever by inaction, and here it would also mean the
   operator's death pays the agent.
+
+**Accepted 2026-08-26 — the deadline is embedded in the contract bytecode before the mainnet deploy,
+and an unresolved arbitration defaults to the worker via pull payment.** Both halves matter:
+
+- **In bytecode, not in a job.** A clock enforced by a scheduled task is a clock that stops when the
+  operator does, which is the exact scenario this ADR is about. `ADR-0001` A1.1 removed platform
+  liveness from settlement; a runbook-enforced deadline would put it back.
+- **Worker-default, pull payment.** Same mechanism as `releaseAfterReview`: the worker claims, the
+  platform transacts nowhere. `ADR-0001` D6's reasoning carries over unchanged — a refund-default
+  would mean the operator's death pays the agent, and would hand the platform a griefing lever it
+  exercises by doing nothing.
+
+Still to choose: the **bound values**, in the same `MIN`/`MAX` shape as the review window. Open item.
 
 This is a contract change. It lands with the mainnet deploy (`CC-034`) or it does not land in v1.
 
@@ -126,6 +186,11 @@ can reach it, what it costs, when it renews, and what breaks first if it lapses 
 registrar, DNS, Vercel, Supabase, GCP/Cloud KMS, the GitHub org, the npm org. No credentials, only the
 map. **Nothing in it may depend on a private workspace**, which is the flaw in the current DR plan
 living only in a Claude project.
+
+**Accepted 2026-08-26 — in-repo, with no dependency on a private workspace.** `docs/BCP-DR.md`
+exists (seeded 2026-08-26 with the two ENS registrations) and `chain-constants.json` is added in the
+same change. The constraint is the point: a continuity register that lives in a Claude project, a
+password manager note or anyone's head is not a continuity register.
 
 ### D6 — Discoverability failover: DNS for humans, ENS for agents
 
@@ -168,6 +233,13 @@ none") from the DR side, where it becomes unavoidable.
   `privacy.md` is false, and a disaster-recovery action becomes a privacy breach.
 - `verify-retention` (`ADR-0003` D2) therefore asserts the **backup posture** as well as the live
   tables. Checking live rows only would pass throughout the failure.
+
+**Accepted 2026-08-26 — backups exclude task content and evidence.** The deletion guarantee in
+`src/legal/privacy.md` and `/learn` module 7 is only true if a restore cannot resurrect what
+retention deleted. `ADR-0002` D9 already names this as one of the three traps that would make the
+claim false; D8 is now the operative rule rather than a caution. Registration data is backed up;
+task content is not, which also means task content has no restore path — accepted deliberately,
+because the alternative is a backup that silently un-deletes.
 
 ### D9 — The registry gets its own integrity mechanism, because commitments do not cover it
 
@@ -222,12 +294,20 @@ role.
 
 ## Open items
 
-- **Who holds the other two multisig keys.** Naming them is the hard part, not the contract change.
-  Options include a second person, a second custody mechanism under Aaron's control but separately
-  held, and a legal/estate arrangement.
-- **Copyright holder: Aaron personally, or North Metro Tech.** Affects `COMMERCIAL.md`,
-  the CLA, and what an estate inherits. Needs the same lawyer as `CC-051`/`CC-098`.
+- ~~**Copyright holder: Aaron personally, or North Metro Tech.**~~ → **Aaron James Clifft
+  personally**, accepted 2026-08-26 (D1). The commercial *terms* still want a lawyer; the AGPL grant
+  does not.
+- **Who holds the three multisig keys — still open, and it is the whole of D2's succession value.**
+  The architecture is settled (2-of-3 Safe, three distinct Tangem wallets); custody is not. Three
+  cards in one person's hands is loss resistance, not succession. Options unchanged: a second person,
+  a separately-held mechanism, a legal/estate arrangement. **Do not treat D2 as delivering succession
+  until this is answered** — that would be the most consequential mis-read available in this ADR.
 - **Arbitration deadline bounds** — the D3 numbers, in the same shape as `MIN`/`MAX_REVIEW_WINDOW`.
+  Needed before the `CC-034` bytecode is frozen, because D3 is now a bytecode commitment.
+- **Backup mechanism for the D8 split** — which Supabase facility (or replacement) can back up
+  registration data while excluding the task-content columns. D8 states the requirement; nothing yet
+  implements it, and a backup configured wrong is indistinguishable from one configured right until a
+  restore.
 - **Does any of this need to exist in law rather than in code?** An estate cannot inherit a key it
   cannot find. Out of engineering scope.
 - **Supabase Scenario B target** — self-hosted Postgres or an alternative managed provider — remains
@@ -235,12 +315,16 @@ role.
 
 ## Handover — implementation order
 
-1. **`LICENSE`, `COMMERCIAL.md`, README licence line** (D1). Done in draft 2026-08-19; needs Aaron's
-   accept and the entity decision.
-2. **`docs/BCP-DR.md` and `chain-constants.json`** (D5, D7). Cheap, no dependencies.
+1. ~~**`LICENSE`, `COMMERCIAL.md`, README licence line** (D1).~~ **Done 2026-08-26.** Entity set to
+   Aaron James Clifft personally; `LICENSE` AGPL-3.0 verbatim; `contracts/LICENSE` MIT added so the
+   carve-out is a file and not only an SPDX header.
+2. ~~**`docs/BCP-DR.md` and `chain-constants.json`** (D5, D7).~~ **Done 2026-08-26.**
 3. **Restore test and the backed-up/unbacked split** (D8), with a scope line on `CC-087`.
-4. **Multisig ownership and signer separation** (D2, `CC-090`) — before `CC-034`.
-5. **Arbitration deadline in the contract** (D3) — in the mainnet deploy, with tests.
+   *Requirement accepted; nothing implements it yet.*
+4. **Multisig ownership and signer separation** (D2, `CC-090`) — before `CC-034`. Scoped into both
+   tickets 2026-08-26. **Blocked on custody**, not on engineering.
+5. **Arbitration deadline in the contract** (D3) — in the mainnet deploy, with tests. Scoped into
+   `CC-034` 2026-08-26. **Blocked on the bound values.**
 6. **Profile signing** (D9) — before the registry holds real workers.
 7. **ENS record and the announcement channel** (D6), folded into `CC-044`'s rewrite.
 8. **Protocol spec** (D7) — after `CC-092`, when the surface it describes exists.

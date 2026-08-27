@@ -4,9 +4,15 @@ Carbon Contractors is published under the **GNU Affero General Public License, v
 (`LICENSE`). This page explains what that means in practice, and offers an alternative for anyone
 who cannot work within it.
 
-**Status: draft, 2026-08-19.** Not yet an offer capable of acceptance — the entity, contact address
-and fee model below are placeholders pending Aaron's decision and, for anything beyond the AGPL
-grant itself, a lawyer's read. Recorded per `ADR-0006` D1.
+**Status: in force for the AGPL grant, 2026-08-26.** `ADR-0006` D1 is accepted and the entity is
+settled — **copyright is retained by Aaron James Clifft personally.** The AGPL-3.0-or-later grant in
+`LICENSE`, the `contracts/` MIT carve-out in `contracts/LICENSE`, and the inbound contribution grant
+below are operative from that date.
+
+**The commercial alternative is an invitation to negotiate, not an offer capable of acceptance.**
+There is no price list and no standard form, deliberately — see *Commercial licence* below. Anything
+beyond the AGPL grant still wants a lawyer's read, and the contact address must exist before this
+page is published.
 
 ---
 
@@ -60,9 +66,11 @@ argument after the fact.
 A commercial licence removes the AGPL's source-disclosure obligations for a specific product or
 deployment. It is available from the copyright holder.
 
-- **Copyright holder:** **Aaron James Clifft**, personally. Confirmed 2026-08-19. Not held by a
-  company, which keeps the licensing right with the author and makes the succession question an
-  estate question rather than a corporate one — see `ADR-0006` D1 and its open items.
+- **Copyright holder:** **Aaron James Clifft**, personally. **Accepted `ADR-0006` D1, 2026-08-26.**
+  Not held by a company, which keeps the licensing right with the author and makes the succession
+  question an estate question rather than a corporate one. Two consequences worth stating: the estate
+  inherits the copyright directly, and any later assignment to an entity is a deliberate act with its
+  own paperwork rather than something that happens by default.
 - **Contact:** `licensing@carbon-contractors.com` *(placeholder — must exist before this page is
   published)*
 - **Terms:** negotiated per deployment. There is no published price list, because there is no
@@ -85,7 +93,8 @@ the PR template:
 That is a DCO-style inbound grant with an explicit relicensing right. If Carbon Contractors ever
 acquires contributors it cares about keeping, replace it with a proper CLA.
 
-**Contributions to `contracts/` are inbound-MIT**, consistent with the carve-out above.
+**Contributions to `contracts/` are inbound-MIT**, consistent with the carve-out above and with
+`contracts/LICENSE`, which states it as a file rather than leaving it to the SPDX headers.
 
 ## Prospective, not retroactive
 
