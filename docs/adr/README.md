@@ -90,9 +90,11 @@ its own decisions. `ADR-0002` next. `ADR-0003` refers to `ADR-0002`'s retention 
 during the 2026-08-19 documentation-alignment review (`docs/design-review-2026-08-19.md`).
 
 - **`ADR-0006`** carries the two contract-level items that must land with `CC-034` or not at all for
-  v1: the **arbitration deadline in bytecode** (D3) and **2-of-3 Safe ownership** (D2). Its Status
-  section holds the accepted parameters, and two things the parameters deliberately do not settle —
-  key custody, and the fact that three Tangem cards are only a 2-of-3 if they are three *keys*.
+  v1: the **arbitration deadline in bytecode** (D3) and **2-of-4 Safe ownership** (D2). Its Status
+  section holds the accepted parameters, including custody (Aaron two keys in two buildings, two
+  family members one each) and D11's custody-escalation triggers. What the parameters do *not* settle
+  is the family-only signing rehearsal, the estate packet, and the legal instrument — all three
+  human rather than technical.
 - **`ADR-0007` is accepted but not scheduled** (epic `v2`). What acceptance bought is A1.1's exit
   test — six published thresholds for when the bootstrap juror pool dissolves — chosen before the
   pool exists rather than after it gets comfortable.

@@ -150,10 +150,12 @@ exists rather than reasoning from this file.**
   been wrong in **both** directions; never re-derive it by reading. → `CC-059`
   · `node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`
   · **A redeploy resets ownership to the deployer — re-transfer it (`CC-082`).**
-  · **Target is a 2-of-3 Safe before mainnet** (`ADR-0006` D2, accepted; `CC-090`, now P1), with the
-    verdict signer split onto its own HSM key. Three Tangem cards are only a 2-of-3 **if they are
-    three keys** — a set restored from one seed is a 1-of-1 that looks like a multisig on Basescan.
-    The test is on-chain: three owner addresses, no shared derivation.
+  · **Target is a 2-of-4 Safe before mainnet** (`ADR-0006` D2, accepted; `CC-090`, now P1), with the
+    verdict signer split onto its own HSM key. Custody: Aaron two keys in two buildings, two family
+    members one each — the two family keys reach threshold alone, which is what makes succession work
+    without an estate finding anything. Cards are bought **separately**, so a shared seed is
+    impossible by construction; the test is still on-chain — four owner addresses, no shared
+    derivation.
 - **The DB is not the authority on money.** Payout destinations come from the contract, never
   Supabase. Load-bearing for fund safety *and* the regulatory position. → `CC-037`, `CC-051`
 

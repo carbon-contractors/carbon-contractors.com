@@ -78,20 +78,56 @@ and the mainnet block — because an absent field reads as "fine".
 | | |
 | :-- | :-- |
 | **What it is today** | A single GCP Cloud KMS / HSM key, `0xa893…3e4b`, which owns `CarbonEscrow` **and** is its only accepted verdict signer. |
-| **What it becomes** | A **2-of-3 Safe** over three hardware-isolated keys — Tangem cards initialised as **distinct standalone wallets** — with the verdict signer separated onto its own HSM key. `ADR-0006` D2, accepted 2026-08-26. Lands before the mainnet deploy (`CC-034`), tracked by `CC-090`. |
-| **Who can reach it** | **TO FILL, and this is the gap that matters.** See below. |
+| **What it becomes** | A **2-of-4 Safe** over four hardware-isolated keys — Tangem cards bought **separately**, so a shared seed is impossible — with the verdict signer separated onto its own HSM key. `ADR-0006` D2, accepted 2026-08-26. Lands before the mainnet deploy (`CC-034`), tracked by `CC-090`. |
+| **Who can reach it** | **Aaron: two keys, in two separate buildings. Two family members: one key each.** Roles only — locations are deliberately **not** recorded here, see below. The two family keys reach threshold alone, which is what makes succession work. |
 | **What breaks first if it is lost** | Arbitration only. Funds are not stranded: `ADR-0001` A1.2 made every settlement path a pull payment the parties claim themselves, and D3's arbitration clock (accepted, not yet built) will default an unresolved dispute to the worker. The owner key cannot move money to any address other than the two fixed at funding (`ADR-0001` D9). |
 
-**The failure mode to design against is a multisig that is not one.** Tangem sells cards as a set
-that shares one seed by default; a 2-of-3 built on a restored set has the security of a 1-of-1 while
-looking like a multisig on Basescan. The acceptance test is on-chain — three Safe owners at three
-addresses with no shared derivation — not procedural.
+**Locations are not in this file, on purpose.** The repository is public (`CC-056`). Recording which
+building holds which card would publish a burglary map for a wallet with arbitration authority over
+live escrow. Locations belong with the estate documents; this register carries roles and separation.
 
-**Custody is the open question, and D2's purpose depends on it.** D2 says "the founder holds one key,
-not all three". Three cards in one person's custody delivers *loss resistance*; it does not deliver
-*succession*, which is the problem this ADR exists to solve. An estate cannot reach a key it cannot
-find, and it certainly cannot reach two of three. Until custody is answered, do not record this as
-succession being handled.
+**The failure mode to design against is a multisig that is not one.** Tangem sells cards as a set that
+shares one seed by default, and a multisig built on a restored set has the security of a 1-of-1 while
+looking like a real multisig on Basescan. Buying the cards separately closes that by construction.
+The acceptance test is still on-chain — four Safe owners at four addresses with no shared derivation
+— because "bought separately" is a claim and the chain is evidence.
+
+**Why 2-of-4 and what it buys.** It tolerates losing any two keys; Aaron can still act alone holding
+two; and critically **the two family keys reach threshold without him**, so succession does not depend
+on an estate locating and recognising one of Aaron's cards. Losing three of four is the only failure.
+
+**What is left is human, and it sits exactly on the succession path.** Both family holders are
+non-technical and they are the two who must act together if Aaron is gone:
+
+- **A 2-of-4 signature by the two family keys alone**, rehearsed on testnet, is a `CC-090` closing
+  condition. Not one that merely includes them — the succession path is family-only, so that is the
+  path to prove.
+- **An estate packet** held with the will: that the keys exist, what a Tangem card looks like, what it
+  controls, who the other holders are, how to reach the signing flow. The likeliest failure is not
+  that nobody finds a card, it is that somebody finds one and throws it out.
+
+**Slots 3 and 4 are transitional.** `ADR-0006` D11 rotates them to partners or a professional
+key-holder service on measured-adoption triggers; the threshold stays 2-of-4 and the Safe is never
+rebuilt. Rotate while the outgoing holder is still reachable — the swap is itself a 2-of-4
+transaction.
+
+### Custody escalation triggers (`ADR-0006` D11)
+
+Keyed to the limbs `verify-concurrent-escrow.mjs` already measures — the AU Digital Assets Framework
+small-scale exemption ($5,000 peak concurrent per agent, $10m trailing-365-day volume, commencing
+2027-04-09, `CC-051`).
+
+| | Rotate | Any one of | Sustained |
+| :-- | :-- | :-- | :-- |
+| **Tier 1** | one family slot → professional key-holder service | aggregate peak escrow ≥ $25,000 · 365-day volume ≥ $250,000 · ≥ 50 workers with funds in flight | 30 days |
+| **Tier 2** | second family slot → partner | 365-day volume ≥ $1,000,000 · aggregate peak escrow ≥ $100,000 | 90 days |
+
+**Volume-independent backstops:** Tier 1 also fires on **2027-04-09** if the platform is live and not
+clearly exempt; and either family key going **12 months untested** is its own escalation, because
+under 2-of-4 those two keys *are* the succession path.
+
+These are governance triggers, not invariants — the monitor warns, it must not fail. A monitor that
+goes red on commercial success teaches its reader to ignore it.
 
 ---
 
