@@ -33,11 +33,9 @@
       "$comment": "12h and 14d, contract constants. The lower bound is also the floor on incident-response time (ADR-0001 A2.4)."
     },
 
-    "arbitrationDeadlineSeconds": {
-      "min": null,
-      "max": null,
-      "$comment": "ADR-0006 D3, accepted 2026-08-26: a bounded arbitration deadline goes into the bytecode before the mainnet deploy, and an unresolved arbitration defaults to the WORKER via pull payment. The bound values are an open item and must be chosen before the CC-034 bytecode is frozen."
-    },
+    "arbitrationWindowSeconds": 604800,
+    "arbitrationWindowNote": "7 days. ADR-0006 D3 + Amendment 1, set 2026-08-26. A CONSTANT, not a settable window: the arbitrator must not choose its own deadline. The clock runs from disputeTask - NOT from beginArbitration, which is onlyOwner and optional, so a deadline set there could be withheld indefinitely by never calling it. An unresolved arbitration defaults to the WORKER via pull payment. Worst-case post-delivery wait is MAX_REVIEW_WINDOW + this = 21 days. Not in the deployed Sepolia bytecode; lands with CC-034.",
+
 
     "checker": {
       "checkerHash": "0xe864356c931cae8e7daf4130a5956c6dfccb48f8ece0bbe4377e0960c9e4e7a9",
