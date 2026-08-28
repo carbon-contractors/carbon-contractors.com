@@ -89,6 +89,24 @@ const RELEASE_AFTER_REVIEW_ABI = [
   },
 ] as const;
 
+/**
+ * ADR-0006 D3. The counterpart to releaseAfterReview one state along: when an
+ * arbitration runs out of time without a ruling, the worker claims by default.
+ *
+ * A separate function, not a flag on the other one — so the dashboard has to pick, and
+ * picking wrong reverts. That is the whole reason `arbitrationClock` is plumbed through
+ * from the chain read rather than assumed.
+ */
+const RELEASE_AFTER_ARBITRATION_ABI = [
+  {
+    type: "function",
+    name: "releaseAfterArbitration",
+    inputs: [{ name: "taskId", type: "bytes32" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+] as const;
+
 const CLAIM_WITH_VERDICT_ABI = [
   {
     type: "function",
@@ -147,6 +165,15 @@ interface OnChainState {
   reviewWindow: number;
   submittedAt: number;
   reviewDeadline: number;
+  /** 0 unless the task was disputed. ADR-0006 D3. */
+  disputedAt: number;
+  /** When `releaseAfterArbitration` opens. Meaningless while `disputedAt` is 0. */
+  arbitrationDeadline: number;
+  /**
+   * Whether the deployed escrow has the arbitration clock. False against a contract
+   * deployed before 2026-08-28 — do not render the timeout claim in that case.
+   */
+  arbitrationClock: boolean;
   specHash: string;
   evidenceHash: string;
   verdictHash: string;
@@ -623,6 +650,42 @@ export default function DashboardPage() {
         address: escrowContract,
         abi: RELEASE_AFTER_REVIEW_ABI,
         functionName: "releaseAfterReview",
+        args: [taskIdOf(task)],
+      });
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: true, text: "Claim submitted — payment will arrive once the transaction confirms." },
+      }));
+    } catch {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: false, text: "Claim was not sent — cancelled or rejected in your wallet." },
+      }));
+    } finally {
+      setActionBusy(null);
+      fetchData();
+    }
+  }
+
+  /**
+   * Disputed/Arbitrating + arbitration window elapsed → pull-payment claim (ADR-0006 D3).
+   *
+   * The worker's last resort, and the one they reach having already delivered, waited out
+   * a review window, and been through a dispute. No verdict, no owner, no platform
+   * transaction: the clock ran out and the default is the worker.
+   */
+  async function handleClaimAfterArbitration(task: Task) {
+    if (!escrowContract || !address) return;
+    setActionBusy(task.payment_request_id);
+    setActionMsg((prev) => ({
+      ...prev,
+      [task.id]: { ok: true, text: "Confirm releaseAfterArbitration in your wallet…" },
+    }));
+    try {
+      await writeContractAsync({
+        address: escrowContract,
+        abi: RELEASE_AFTER_ARBITRATION_ABI,
+        functionName: "releaseAfterArbitration",
         args: [taskIdOf(task)],
       });
       setActionMsg((prev) => ({
@@ -1650,6 +1713,43 @@ export default function DashboardPage() {
                                 {busy ? "Working..." : "Claim early"}
                               </button>
                             </div>
+                          )}
+                        </div>
+                      )}
+
+                    {/* ── Claim after arbitration timeout (ADR-0006 D3) ── */}
+                    {isWorkerForTask &&
+                      escrowContract &&
+                      (task.on_chain?.state === "Disputed" ||
+                        task.on_chain?.state === "Arbitrating") && (
+                        <div className={styles.workerActionSection}>
+                          {!task.on_chain.arbitrationClock ? (
+                            <p className={styles.actionNote}>
+                              This task is under dispute. The escrow contract it was
+                              funded on has no arbitration deadline, so it can only be
+                              resolved by the platform — there is nothing to claim here.
+                            </p>
+                          ) : nowSec >= task.on_chain.arbitrationDeadline ? (
+                            <>
+                              <p className={styles.actionNote}>
+                                The arbitration deadline passed without a ruling. Under
+                                the escrow&apos;s terms the task now defaults to you.
+                              </p>
+                              <button
+                                className={styles.actionBtn}
+                                onClick={() => handleClaimAfterArbitration(task)}
+                                disabled={busy}
+                              >
+                                {busy ? "Working..." : "Claim Payment (Arbitration Expired)"}
+                              </button>
+                            </>
+                          ) : (
+                            <p className={styles.actionNote}>
+                              This task is under dispute. If it is not resolved by{" "}
+                              {formatDeadline(task.on_chain.arbitrationDeadline)}, the
+                              payment defaults to you and you can claim it here — no
+                              ruling needed.
+                            </p>
                           )}
                         </div>
                       )}

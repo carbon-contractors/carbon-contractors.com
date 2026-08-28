@@ -110,6 +110,13 @@ export async function GET(req: NextRequest) {
               reviewWindow: onChainTask.reviewWindow,
               submittedAt: Number(onChainTask.submittedAt),
               reviewDeadline: Number(onChainTask.reviewDeadline),
+              // ADR-0006 D3. arbitrationClock says whether the DEPLOYED contract has
+              // the clock at all — the dashboard needs it to decide whether the timeout
+              // claim exists, because offering a button for a function the deployment
+              // does not have reverts and reads to a worker as being refused.
+              disputedAt: Number(onChainTask.disputedAt),
+              arbitrationDeadline: Number(onChainTask.arbitrationDeadline),
+              arbitrationClock: onChainTask.arbitrationClock,
               specHash: onChainTask.specHash,
               evidenceHash: onChainTask.evidenceHash,
               verdictHash: onChainTask.verdictHash,

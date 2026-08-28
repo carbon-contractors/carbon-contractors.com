@@ -151,6 +151,16 @@ exists rather than reasoning from this file.**
   **reverts** (A1.4), so the deadline binds the owner too and the only remaining route pays the
   worker. Silence at every stage now costs the silent party.
   → `ADR-0006` D3/A1.1–A1.4, `CC-034` · `npm run test:contracts`
+- **The app reads an escrow older than its own ABI, on purpose.** `escrow-abi.ts` is generated from
+  `contracts/` and `NEXT_PUBLIC_ESCROW_CONTRACT` is an env var, so "new code against an old address"
+  is a normal state at every redeploy. Adding `disputedAt` made `getTask` return 12 words against a
+  13-word ABI; viem **threw**, `/api/tasks` swallowed it into `on_chain: null`, and the dashboard —
+  which gates every worker action on `task.on_chain` — silently dropped the submit button, the claim
+  button and the on-chain badge, with no error anywhere. `escrow.ts` now keeps a frozen
+  `LEGACY_GET_TASK_ABI` and falls back **only** on a decode-width mismatch, setting
+  `arbitrationClock: false` so the UI does not offer a claim the deployment cannot honour. Never
+  broaden that matcher: retrying on any read failure would invent a task from a wrong address or an
+  RPC fault. → `escrow-abi-drift.test.ts`
 - **Silence favoured the agent, and v2 inverts it.** v1 had one clock, so an agent that did nothing
   after delivery got refunded at expiry. v2 has two: the delivery deadline and an agent-set review
   window (12h–14d, bounded by the contract). Once `Delivered`, `expireTask` is unreachable and the

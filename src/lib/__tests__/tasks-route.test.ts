@@ -200,6 +200,11 @@ describe("GET /api/tasks on-chain enrichment (CC-092 v2 fields)", () => {
     evidenceHash: "0x" + "bb".repeat(32),
     verdictHash: "0x" + "00".repeat(32),
     verdictPassed: false,
+    // ADR-0006 D3. Delivered, never disputed, so the stamp is 0 and the deadline
+    // lands in 1970 — the state check is what keeps that from meaning "claimable".
+    disputedAt: BigInt(0),
+    arbitrationDeadline: BigInt(7 * 24 * 60 * 60),
+    arbitrationClock: true,
     attestationUid: "0x" + "00".repeat(32),
   };
 
@@ -230,6 +235,9 @@ describe("GET /api/tasks on-chain enrichment (CC-092 v2 fields)", () => {
       evidenceHash: "0x" + "bb".repeat(32),
       verdictHash: "0x" + "00".repeat(32),
       verdictPassed: false,
+      disputedAt: 0,
+      arbitrationDeadline: 7 * 24 * 60 * 60,
+      arbitrationClock: true,
       worker: WORKER_WALLET,
       agent: AGENT_WALLET,
     });
