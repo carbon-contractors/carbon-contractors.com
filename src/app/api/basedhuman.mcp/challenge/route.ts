@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 import { randomBytes } from "crypto";
 import { getSupabaseAdmin } from "@/lib/db/client";
 import { isValidWalletAddress } from "@/lib/validation";
+import { buildChallengeMessage } from "@/lib/auth/wallet-challenge";
 import { log } from "@/lib/logging";
 
 const CHALLENGE_TTL_S = 60; // 60 seconds
@@ -40,14 +41,24 @@ export async function POST(req: NextRequest): Promise<Response> {
     .delete()
     .lt("expires_at", new Date().toISOString());
 
-  const { error } = await supabase.from("mcp_challenges").insert({
-    wallet_address: walletAddress.toLowerCase(),
-    nonce,
-    expires_at: expiresAt.toISOString(),
-  });
+  // `created_at` is read BACK from the row rather than assumed, because it is the
+  // timestamp the verifier rebuilds the message from — it is Postgres `now()`, not this
+  // process's clock. Issuing a message stamped with `Date.now()` and verifying one
+  // stamped with `created_at` is what made signature checks fail intermittently.
+  const { data: row, error } = await supabase
+    .from("mcp_challenges")
+    .insert({
+      wallet_address: walletAddress.toLowerCase(),
+      nonce,
+      expires_at: expiresAt.toISOString(),
+    })
+    .select("created_at")
+    .single();
 
-  if (error) {
-    log("error", "challenge_create_failed", { error: error.message });
+  if (error || !row?.created_at) {
+    log("error", "challenge_create_failed", {
+      error: error?.message ?? "insert returned no created_at",
+    });
     return Response.json({ error: "Failed to create challenge" }, { status: 500 });
   }
 
@@ -56,6 +67,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   return Response.json({
     nonce,
     expiresAt: Math.floor(expiresAt.getTime() / 1000),
-    message: `carbon-contractors.com wants to verify wallet ownership\nNonce: ${nonce}\nTimestamp: ${Math.floor(Date.now() / 1000)}`,
+    message: buildChallengeMessage(nonce, row.created_at),
   });
 }

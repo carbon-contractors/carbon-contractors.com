@@ -10,6 +10,28 @@ import { verifyWalletSignature } from "@/lib/wallet/verify";
 import { getSupabaseAdmin } from "@/lib/db/client";
 
 /**
+ * The exact bytes a caller signs. **Both sides must call this — never inline it.**
+ *
+ * Until 2026-08-28 this string was built in two places from two different clocks: the
+ * challenge route stamped `Date.now()` on the message it handed the client, and this
+ * module rebuilt it from the row's Postgres `created_at`. Those are different machines
+ * and different moments, and `Math.floor(ms / 1000)` only agrees when both land inside
+ * the same whole second. Insert latency plus host skew therefore produced an
+ * intermittent, unattributable "Signature does not match claimed wallet" — a server
+ * clock problem wearing a wallet problem's error message.
+ *
+ * The fix is not a tolerance window, it is a single source: the row's `created_at` is
+ * the only timestamp, and one function turns it into the message. A tolerance would have
+ * left two constructions that merely usually agree.
+ *
+ * @param createdAt The `mcp_challenges.created_at` value, verbatim from Postgres.
+ */
+export function buildChallengeMessage(nonce: string, createdAt: string): string {
+  const timestamp = Math.floor(new Date(createdAt).getTime() / 1000);
+  return `carbon-contractors.com wants to verify wallet ownership\nNonce: ${nonce}\nTimestamp: ${timestamp}`;
+}
+
+/**
  * Verify a challenge-response signature.
  * Returns the verified wallet address on success, throws on failure.
  */
@@ -42,8 +64,7 @@ export async function verifyChallengeSignature(
     throw new Error("Challenge was issued for a different wallet");
   }
 
-  const timestamp = Math.floor(new Date(challenge.created_at).getTime() / 1000);
-  const challengeMessage = `carbon-contractors.com wants to verify wallet ownership\nNonce: ${nonce}\nTimestamp: ${timestamp}`;
+  const challengeMessage = buildChallengeMessage(nonce, challenge.created_at);
 
   // Must go through a public client (ERC-6492/1271-aware) rather than pure
   // offline ecrecover -- Base Account / Coinbase Smart Wallet is a contract

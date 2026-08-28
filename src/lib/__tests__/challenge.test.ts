@@ -56,11 +56,22 @@ describe("MCP challenge-response auth", () => {
     });
 
     it("issues challenge for valid wallet", async () => {
+      // The insert now reads `created_at` back, because that row value — not this
+      // process's clock — is what the verifier rebuilds the message from. See
+      // challenge-roundtrip.test.ts for why that matters.
       mockFrom.mockReturnValue({
         delete: () => ({
           lt: () => Promise.resolve({ error: null }),
         }),
-        insert: () => Promise.resolve({ error: null }),
+        insert: () => ({
+          select: () => ({
+            single: () =>
+              Promise.resolve({
+                data: { created_at: "2026-08-28T04:17:09.482Z" },
+                error: null,
+              }),
+          }),
+        }),
       });
 
       const { POST } = await import(
