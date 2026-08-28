@@ -52,6 +52,9 @@ const CLOSED = new Set(["done", "wontfix"]);
 /** A sha-shaped token that contains at least one digit, so prose like "faceted" cannot match. */
 const COMMIT_REF = /#\d+|\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/;
 
+/** Set by the blocked-status rule below; read by skip() and by the final exit. */
+let blockedFailed = false;
+
 const argv = process.argv.slice(2);
 const AUDIT_ALL = argv.includes("--all");
 const baseArg = argv.includes("--base") ? argv[argv.indexOf("--base") + 1] : null;
@@ -65,9 +68,14 @@ function git(args, { allowFail = false } = {}) {
   }
 }
 
+/**
+ * Exit without running the diff-scoped closure rule. The blocked-status rule needs no
+ * git and has already run by the time skip() is reachable, so its verdict still decides
+ * the exit code — a skipped closure check must not silently pass a stale blocker.
+ */
 function skip(why) {
-  console.log(`SKIP — ${why}`);
-  process.exit(0);
+  console.log(`SKIP — ${why} (closure rule only; the blocked-status rule still ran)`);
+  process.exit(blockedFailed ? 1 : 0);
 }
 
 /** Parse the leading `---` frontmatter block. Same shape as backlog.mjs. */
@@ -176,6 +184,98 @@ function validateClosure(id, oldText, newText, fm) {
   return { problems, warnings };
 }
 
+// ── Rule 2: a `blocked` status must have a live blocker ─────────────────────
+//
+// The closure rule above is transactional — it fires on the diff that closes an issue.
+// This one is **temporal**, and that difference is the whole design. An issue does not
+// change when its blocker closes, so a diff-scoped check would never fire. It therefore
+// runs over every issue, every time, regardless of base ref.
+//
+// The failure it catches, measured 2026-08-28: `CC-077`, `CC-078` and `CC-079` were all
+// `status: blocked`. `CC-078` said in its own body "do not attempt until CC-080 is done"
+// — CC-080 had been done for a week. `CC-077` carried no recorded blocker at all, just a
+// status, while its instructions described a funding flow that had been removed as unsafe.
+// Three P1s parked on conditions that were already met. Same drift as a closed-but-
+// unfinished issue, running the other way.
+//
+// Deliberately forgiving: one open blocker is enough to pass, so historical "was blocked
+// by X" prose does not trip it. It only complains when *every* named blocker is closed,
+// or when nothing is named and no `## Blocked` section explains why.
+
+/** Words that mark a line as declaring a dependency rather than merely mentioning an id. */
+const BLOCKING_PHRASE = /block(?:ed|s|ing)?\b|behind\b|waiting on\b|depends on\b|gated (?:on|by)\b/i;
+
+/** Ticket ids named on a line that also reads as a blocker declaration. */
+function declaredBlockers(id, text) {
+  const found = new Set();
+  for (const line of body(text).split("\n")) {
+    if (!BLOCKING_PHRASE.test(line)) continue;
+    for (const m of line.matchAll(/\bCC-(\d{3})\b/g)) {
+      const other = `CC-${m[1]}`;
+      if (other !== id) found.add(other); // a self-reference is not a blocker
+    }
+  }
+  return [...found].sort();
+}
+
+function hasBlockedSection(text) {
+  return body(text)
+    .split("\n")
+    .some((l) => /^#{2,3}\s+Blocked\b/i.test(l));
+}
+
+function checkBlockedStatuses() {
+  const statuses = new Map();
+  for (const f of readdirSync(DIR).filter((f) => /^CC-\d+\.md$/.test(f))) {
+    const fm = parseFrontmatter(readFileSync(join(DIR, f), "utf8"));
+    if (fm) statuses.set(f.replace(/\.md$/, ""), fm.status);
+  }
+
+  const problems = [];
+  for (const [id, status] of statuses) {
+    if (status !== "blocked") continue;
+    const text = readFileSync(join(DIR, `${id}.md`), "utf8");
+    const blockers = declaredBlockers(id, text);
+
+    if (blockers.length === 0) {
+      if (hasBlockedSection(text)) continue; // explained in prose, nothing to verify
+      problems.push({
+        id,
+        why:
+          "is `blocked` but names no blocker. Either reference the issue it waits on, or " +
+          "add a `## Blocked` section saying what it waits on. A status with no recorded " +
+          "reason is how CC-077 sat blocked while its own instructions had become unsafe.",
+      });
+      continue;
+    }
+
+    const live = blockers.filter((b) => !CLOSED.has(statuses.get(b) ?? "todo"));
+    if (live.length === 0) {
+      problems.push({
+        id,
+        why:
+          `is \`blocked\` behind ${blockers.join(", ")} — and ${blockers.length === 1 ? "it is" : "all of them are"} ` +
+          `closed. Re-open the status, or record what it is actually waiting on now.`,
+      });
+    }
+  }
+  return problems;
+}
+
+const blockedProblems = checkBlockedStatuses();
+if (blockedProblems.length > 0) {
+  blockedFailed = !AUDIT_ALL; // --all is advisory for both rules
+  console.error("\nIssues marked `blocked` without a live blocker:\n");
+  for (const p of blockedProblems) console.error(`  ${p.id} ${p.why}`);
+  console.error(
+    "\nA blocked status is a claim that work cannot proceed. When it goes stale the issue\n" +
+      "stops being scheduled and nobody notices, because nothing about it changes on the day\n" +
+      "its blocker closes.\n",
+  );
+} else {
+  console.log("OK - every `blocked` issue names a blocker that is still open.");
+}
+
 // ── Gather the issues to check ───────────────────────────────────────────────
 
 /** [{ id, path, oldText|null, newText, fm }] */
@@ -244,7 +344,7 @@ if (AUDIT_ALL) {
 
 if (closing.length === 0) {
   console.log("OK - no backlog issue is being closed in this diff.");
-  process.exit(0);
+  process.exit(blockedFailed ? 1 : 0);
 }
 
 let failed = 0;
@@ -267,7 +367,7 @@ for (const issue of closing) {
 
 if (failed === 0) {
   console.log(`\nOK - ${closing.length} issue closure(s) carry a record.`);
-  process.exit(0);
+  process.exit(blockedFailed ? 1 : 0);
 }
 
 if (advisory) {

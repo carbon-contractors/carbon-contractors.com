@@ -92,9 +92,12 @@ jobs:
       # naming a monitor that does not exist. Only checks issues transitioning INTO a
       # closed state, so the 66 already-closed ones are untouched.
       #
-      # pull_request only: on a push to master the base is the branch itself, so the
-      # diff is empty and the step would be a silent no-op rather than a check.
-      - name: Closed backlog issues carry a record
+      # Two rules, and they differ in kind. The closure rule is transactional and needs a
+      # base diff, so this step is pull_request only — on a push to master the base is the
+      # branch itself and it would be a silent no-op. The blocked-status rule is temporal:
+      # an issue does not change on the day its blocker closes, so it runs repo-wide on
+      # every invocation regardless of the diff.
+      - name: Backlog statuses are honest
         if: github.event_name == 'pull_request'
         run: node scripts/check-closure.mjs
 
