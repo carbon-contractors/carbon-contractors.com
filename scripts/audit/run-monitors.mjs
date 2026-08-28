@@ -109,7 +109,7 @@ const MONITORS = [
     name: "verify-unclaimed",
     script: "verify-unclaimed.mjs",
     tier: "normal",
-    invariant: "no Delivered task claimable for more than N days",
+    invariant: "nothing claimable by a worker unclaimed for more than N days",
     requires: ["NEXT_PUBLIC_ESCROW_CONTRACT", "ESCROW_DEPLOY_BLOCK"],
   },
   {

@@ -45,6 +45,38 @@ export const CARBON_ESCROW_ABI = [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "ARBITRATION_WINDOW",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "arbitrationDeadline",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "bytes32",
@@ -355,6 +387,11 @@ export const CARBON_ESCROW_ABI = [
             "type": "bool"
           },
           {
+            "internalType": "uint64",
+            "name": "disputedAt",
+            "type": "uint64"
+          },
+          {
             "internalType": "uint256",
             "name": "amount",
             "type": "uint256"
@@ -425,6 +462,19 @@ export const CARBON_ESCROW_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "releaseAfterArbitration",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -587,6 +637,11 @@ export const CARBON_ESCROW_ABI = [
         "internalType": "bool",
         "name": "verdictPassed",
         "type": "bool"
+      },
+      {
+        "internalType": "uint64",
+        "name": "disputedAt",
+        "type": "uint64"
       },
       {
         "internalType": "uint256",
@@ -1018,6 +1073,16 @@ export const CARBON_ESCROW_ABI = [
   },
   {
     "inputs": [],
+    "name": "ArbitrationWindowClosed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ArbitrationWindowOpen",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "DeadlinePassed",
     "type": "error"
   },
@@ -1082,6 +1147,11 @@ export const CARBON_ESCROW_ABI = [
   {
     "inputs": [],
     "name": "NotAgent",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotDisputed",
     "type": "error"
   },
   {

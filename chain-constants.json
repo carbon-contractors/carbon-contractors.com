@@ -34,7 +34,7 @@
     },
 
     "arbitrationWindowSeconds": 604800,
-    "arbitrationWindowNote": "7 days. ADR-0006 D3 + Amendment 1, set 2026-08-26. A CONSTANT, not a settable window: the arbitrator must not choose its own deadline. The clock runs from disputeTask - NOT from beginArbitration, which is onlyOwner and optional, so a deadline set there could be withheld indefinitely by never calling it. An unresolved arbitration defaults to the WORKER via pull payment. Worst-case post-delivery wait is MAX_REVIEW_WINDOW + this = 21 days. Not in the deployed Sepolia bytecode; lands with CC-034.",
+    "arbitrationWindowNote": "7 days. ADR-0006 D3 + Amendment 1, set 2026-08-26. A CONSTANT, not a settable window: the arbitrator must not choose its own deadline. The clock runs from disputeTask - NOT from beginArbitration, which is onlyOwner and optional, so a deadline set there could be withheld indefinitely by never calling it. An unresolved arbitration defaults to the WORKER via pull payment, claimed with releaseAfterArbitration. Worst-case post-delivery wait is MAX_REVIEW_WINDOW + this = 21 days. Past the deadline resolveDispute REVERTS, so the deadline binds the arbitrator too (A1.4). IN THE SOURCE TREE as of 2026-08-28, DEPLOYED NOWHERE: the live Sepolia contract at escrow.address predates it and a disputed task there still has no clock. Deploys with CC-034.",
 
 
     "checker": {

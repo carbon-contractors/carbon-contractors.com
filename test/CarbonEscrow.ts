@@ -37,6 +37,7 @@ type DeployedContract = any;
 const USDC_DECIMALS = 6;
 const AMOUNT = 25_000_000n; // 25 USDC
 const REVIEW_WINDOW = 72 * 60 * 60; // 72h, comfortably inside MIN..MAX
+const ARBITRATION_WINDOW = 7 * 24 * 60 * 60; // ADR-0006 A1.3, a contract constant
 const DEADLINE_OFFSET = 7 * 24 * 60 * 60; // 7 days
 
 const TASK_ID = ethers.keccak256(ethers.toUtf8Bytes("payment-request-1"));
@@ -58,7 +59,12 @@ const State = {
   Expired: 7n,
 } as const;
 
-const Route = { AgentConfirmed: 0n, ReviewElapsed: 1n, PassingVerdict: 2n } as const;
+const Route = {
+  AgentConfirmed: 0n,
+  ReviewElapsed: 1n,
+  PassingVerdict: 2n,
+  ArbitrationTimeout: 3n,
+} as const;
 
 const VERDICT_TYPES = {
   Verdict: [
@@ -211,6 +217,15 @@ describe("CarbonEscrow — deployment", () => {
     const { escrow, verdictSigner, outsider } = await loadFixture(deployFixture);
     expect(await escrow.acceptedSigners(verdictSigner.address)).to.equal(true);
     expect(await escrow.acceptedSigners(outsider.address)).to.equal(false);
+  });
+
+  it("exposes the arbitration window it enforces", async () => {
+    // A constant, not a settable window: ADR-0006 A1.2. If this ever gains a setter, the
+    // arbitrator is choosing its own deadline, which is the defect ADR-0001 D2 removed.
+    const { escrow } = await loadFixture(deployFixture);
+    expect(await escrow.ARBITRATION_WINDOW()).to.equal(ARBITRATION_WINDOW);
+    expect(escrow.interface.fragments.some((f: { name?: string }) => f.name === "setArbitrationWindow"))
+      .to.equal(false);
   });
 
   it("exposes the review-window bounds it enforces", async () => {
@@ -947,6 +962,197 @@ describe("CarbonEscrow — arbitration", () => {
     await expect(
       escrow.connect(deployer).resolveDispute(TASK_ID, true),
     ).to.be.revertedWithCustomError(escrow, "InvalidState");
+  });
+});
+
+// ── The arbitration clock ─────────────────────────────────────────────────────
+
+/**
+ * ADR-0006 D3 + Amendment 1. v2 shipped with two clocks and one hole: a Disputed task had
+ * none, so an owner who never ruled held the escrow forever. That is the stranding case
+ * ADR-0006 exists to close, and it is not hypothetical — an owner who dies is an owner who
+ * never rules.
+ *
+ * The property this block defends is that **no party's inaction can hold the funds**, and
+ * it needs testing from three directions, because each one is a different way of failing:
+ *
+ *  - the arbitrator never rules            -> worker claims at the deadline
+ *  - the arbitrator never even acknowledges -> same, because the clock does not start at
+ *                                              beginArbitration (A1.1)
+ *  - the arbitrator rules late              -> reverts; the deadline binds the owner too
+ */
+describe("CarbonEscrow — an arbitrator that does nothing cannot hold the funds", () => {
+  /** A disputed task, with the timestamp disputeTask stamped. */
+  async function disputed(overrides: { begin?: boolean } = {}) {
+    const ctx = await loadFixture(deployFixture);
+    await fundAndSubmit(ctx.escrow, ctx.agent, ctx.worker);
+    const verdict = buildVerdict({ passed: false });
+    const sig = await signVerdict(ctx.escrow, ctx.verdictSigner, verdict);
+    await ctx.escrow.connect(ctx.agent).disputeTask(TASK_ID, asTuple(verdict), sig);
+    if (overrides.begin) await ctx.escrow.connect(ctx.deployer).beginArbitration(TASK_ID);
+    const disputedAt = Number((await ctx.escrow.getTask(TASK_ID)).disputedAt);
+    return { ...ctx, disputedAt };
+  }
+
+  it("stamps disputedAt on the dispute, not on the acknowledgement", async () => {
+    // A1.1 in one assertion. disputeTask is callable by either party; beginArbitration is
+    // onlyOwner and optional. Reading the clock off the latter would let the owner
+    // withhold it forever by simply never calling it.
+    const { escrow, disputedAt } = await disputed();
+    expect(disputedAt).to.be.greaterThan(0);
+    expect(await escrow.arbitrationDeadline(TASK_ID)).to.equal(
+      BigInt(disputedAt + ARBITRATION_WINDOW),
+    );
+  });
+
+  it("pays the worker when the window closes with no ruling at all", async () => {
+    const { escrow, usdc, worker, disputedAt } = await disputed();
+    const before = await usdc.balanceOf(worker.address);
+
+    await time.increaseTo(disputedAt + ARBITRATION_WINDOW);
+    await expect(escrow.connect(worker).releaseAfterArbitration(TASK_ID))
+      .to.emit(escrow, "TaskCompleted")
+      .withArgs(TASK_ID, worker.address, AMOUNT, Route.ArbitrationTimeout);
+
+    expect(await usdc.balanceOf(worker.address)).to.equal(before + AMOUNT);
+    expect((await escrow.getTask(TASK_ID)).state).to.equal(State.Completed);
+    expect(await escrow.totalLocked()).to.equal(0n);
+  });
+
+  it("times out even though beginArbitration was never called", async () => {
+    // THE case A1.1 exists to prevent. D3 as originally accepted started the clock at
+    // beginArbitration, which is onlyOwner and documented as "a marker, not a gate" —
+    // so an owner who never called it never started a clock, and the task sat Disputed
+    // with the escrow held. If this test ever fails, that hole is back.
+    const { escrow, worker, disputedAt } = await disputed();
+    expect((await escrow.getTask(TASK_ID)).state).to.equal(State.Disputed);
+
+    await time.increaseTo(disputedAt + ARBITRATION_WINDOW);
+    await escrow.connect(worker).releaseAfterArbitration(TASK_ID);
+    expect((await escrow.getTask(TASK_ID)).state).to.equal(State.Completed);
+  });
+
+  it("times out from Arbitrating too", async () => {
+    const { escrow, worker, disputedAt } = await disputed({ begin: true });
+    expect((await escrow.getTask(TASK_ID)).state).to.equal(State.Arbitrating);
+    await time.increaseTo(disputedAt + ARBITRATION_WINDOW);
+    await escrow.connect(worker).releaseAfterArbitration(TASK_ID);
+    expect((await escrow.getTask(TASK_ID)).state).to.equal(State.Completed);
+  });
+
+  // The four boundary tests below use setNextBlockTimestamp, not increaseTo, for the
+  // reason the review-window block above already records: increaseTo mines a block AT
+  // that time and the transaction lands in the next one, a second later. Writing these
+  // with increaseTo first is how you get a green "one second before" test that is really
+  // asserting on the second after.
+
+  it("keeps the worker out one second before the window closes", async () => {
+    const { escrow, worker } = await disputed();
+    const closesAt = await escrow.arbitrationDeadline(TASK_ID);
+
+    await time.setNextBlockTimestamp(closesAt - 1n);
+    await expect(
+      escrow.connect(worker).releaseAfterArbitration(TASK_ID),
+    ).to.be.revertedWithCustomError(escrow, "ArbitrationWindowOpen");
+  });
+
+  it("lets the worker claim on the exact second the window closes", async () => {
+    const { escrow, worker } = await disputed();
+    const closesAt = await escrow.arbitrationDeadline(TASK_ID);
+
+    await time.setNextBlockTimestamp(closesAt);
+    await expect(escrow.connect(worker).releaseAfterArbitration(TASK_ID)).to.emit(
+      escrow,
+      "TaskCompleted",
+    );
+  });
+
+  it("closes the owner's route on that same second", async () => {
+    // Exact complements, the way disputeTask and releaseAfterReview already are: at any
+    // timestamp exactly one of resolveDispute and releaseAfterArbitration is available.
+    // Without this, an owner sitting on a dispute could wait for the worker to claim and
+    // refund the agent first, and the deadline would constrain nobody.
+    const { escrow, deployer } = await disputed();
+    const closesAt = await escrow.arbitrationDeadline(TASK_ID);
+
+    await time.setNextBlockTimestamp(closesAt);
+    await expect(
+      escrow.connect(deployer).resolveDispute(TASK_ID, false),
+    ).to.be.revertedWithCustomError(escrow, "ArbitrationWindowClosed");
+  });
+
+  it("still lets the owner rule one second earlier", async () => {
+    const { escrow, usdc, agent, deployer } = await disputed();
+    const before = await usdc.balanceOf(agent.address);
+    const closesAt = await escrow.arbitrationDeadline(TASK_ID);
+
+    await time.setNextBlockTimestamp(closesAt - 1n);
+    await escrow.connect(deployer).resolveDispute(TASK_ID, false);
+    expect(await usdc.balanceOf(agent.address)).to.equal(before + AMOUNT);
+  });
+
+  it("refuses to acknowledge a dispute that has already timed out", async () => {
+    // beginArbitration's only product is the ArbitrationBegun event. Emitting it past the
+    // deadline would tell an observer "being worked on" about a task past being worked on.
+    const { escrow, deployer } = await disputed();
+    const closesAt = await escrow.arbitrationDeadline(TASK_ID);
+
+    await time.setNextBlockTimestamp(closesAt);
+    await expect(
+      escrow.connect(deployer).beginArbitration(TASK_ID),
+    ).to.be.revertedWithCustomError(escrow, "ArbitrationWindowClosed");
+  });
+
+  it("is worker-only — neither the agent, the owner, nor a stranger may claim it", async () => {
+    const { escrow, agent, deployer, outsider, disputedAt } = await disputed();
+    await time.increaseTo(disputedAt + ARBITRATION_WINDOW);
+    for (const caller of [agent, deployer, outsider]) {
+      await expect(
+        escrow.connect(caller).releaseAfterArbitration(TASK_ID),
+      ).to.be.revertedWithCustomError(escrow, "NotWorker");
+    }
+  });
+
+  it("is unreachable on a task that was never disputed", async () => {
+    // The guard that matters most, because arbitrationDeadline() on an undisputed task
+    // returns ARBITRATION_WINDOW seconds past the epoch — a 1970 timestamp, always in the
+    // past. State is what gates this; the clock alone would open every funded task.
+    const { escrow, agent, worker } = await loadFixture(deployFixture);
+    await fundAndSubmit(escrow, agent, worker);
+    expect(await escrow.arbitrationDeadline(TASK_ID)).to.equal(BigInt(ARBITRATION_WINDOW));
+    expect(await time.latest()).to.be.greaterThan(ARBITRATION_WINDOW);
+
+    await expect(
+      escrow.connect(worker).releaseAfterArbitration(TASK_ID),
+    ).to.be.revertedWithCustomError(escrow, "InvalidState");
+  });
+
+  it("cannot be claimed twice", async () => {
+    const { escrow, worker, disputedAt } = await disputed();
+    await time.increaseTo(disputedAt + ARBITRATION_WINDOW);
+    await escrow.connect(worker).releaseAfterArbitration(TASK_ID);
+    await expect(
+      escrow.connect(worker).releaseAfterArbitration(TASK_ID),
+    ).to.be.revertedWithCustomError(escrow, "InvalidState");
+  });
+
+  it("bounds the worst-case post-delivery wait at 21 days", async () => {
+    // The number ADR-0006 A1.3 actually chose on: not the window, but what stacking the
+    // clocks does to a worker who delivered. MAX_REVIEW_WINDOW + ARBITRATION_WINDOW, with
+    // the platform deliberately held to half the agent's allowance.
+    const { escrow } = await loadFixture(deployFixture);
+    const maxReview = Number(await escrow.MAX_REVIEW_WINDOW());
+    const arbitration = Number(await escrow.ARBITRATION_WINDOW());
+    expect(maxReview + arbitration).to.equal(21 * 24 * 60 * 60);
+    expect(arbitration * 2).to.equal(maxReview);
+  });
+
+  it("holds the solvency invariant across the timeout route", async () => {
+    const { escrow, usdc, worker, disputedAt } = await disputed();
+    const escrowAddress = await escrow.getAddress();
+    await time.increaseTo(disputedAt + ARBITRATION_WINDOW);
+    await escrow.connect(worker).releaseAfterArbitration(TASK_ID);
+    expect(await usdc.balanceOf(escrowAddress)).to.equal(await escrow.totalLocked());
   });
 });
 

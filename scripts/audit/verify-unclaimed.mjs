@@ -1,7 +1,9 @@
 /**
  * verify-unclaimed.mjs — READ-ONLY. CC-085, ADR-0003 D2.
  *
- * Invariant: no `Delivered` task whose review window closed more than N days ago.
+ * Invariant: no task claimable by its worker, unclaimed for more than N days. Two routes
+ * reach claimable — a closed review window (`Delivered`) and a timed-out arbitration
+ * (`Disputed`/`Arbitrating`, ADR-0006 D3) — and both are checked.
  *
  * Amendment 1 A1.2 made settlement pull-payment — the worker calls releaseAfterReview and
  * claims their own money. Nobody pushes it to them. So a worker who does not know to
@@ -20,6 +22,13 @@
  * Primary (decides the exit code): every WorkSubmitted event over the deployed block
  * range, each task's current state read from getTask(), and of those still `Delivered`,
  * how long ago `submittedAt + reviewWindow` passed.
+ *
+ * Also primary: tasks still `Disputed` or `Arbitrating` past `disputedAt +
+ * ARBITRATION_WINDOW`. ADR-0006 D3 added a third pull-payment — an arbitration that runs
+ * out of time defaults to the worker, who claims via releaseAfterArbitration. Same failure
+ * mode as the review-window case and a worse one to sit in, because by then the worker has
+ * delivered, waited out a review window, *and* been through a dispute. Asserted on for the
+ * same reason: it is the worker case, which is the case CC-085 specifies.
  *
  * Secondary (informational only): tasks still `Funded` past their delivery deadline. The
  * agent's refund is a pull-payment too (A1.2 made expireTask agent-only), so the same UX
@@ -76,6 +85,9 @@ const GET_TASK_ABI = [
           { name: "submittedAt", type: "uint64" },
           { name: "state", type: "uint8" },
           { name: "verdictPassed", type: "bool" },
+          // Positional. Omitting this shifts every field after it, so `amount` would
+          // decode out of `specHash` and this monitor would report nonsense confidently.
+          { name: "disputedAt", type: "uint64" },
           { name: "amount", type: "uint256" },
           { name: "specHash", type: "bytes32" },
           { name: "evidenceHash", type: "bytes32" },
@@ -89,6 +101,15 @@ const GET_TASK_ABI = [
 
 /** v2 numbering (CC-082). Renumbered from v1 — Completed was 2, it is now 3. */
 const STATE = { None: 0, Funded: 1, Delivered: 2, Completed: 3, Disputed: 4, Arbitrating: 5, Resolved: 6, Expired: 7 };
+
+/**
+ * ADR-0006 A1.3. A contract *constant*, so it is safe to mirror here rather than spend an
+ * RPC call on it — but it is mirrored, not derived, so it is exactly the kind of number
+ * CC-070 is about. If ARBITRATION_WINDOW ever changes in the bytecode, this is wrong and
+ * fails quietly by measuring the wrong deadline.
+ *   node --env-file=.env.local -e "..." // or verify-escrow-deployment.mjs
+ */
+const ARBITRATION_WINDOW = 7 * 86_400;
 
 const usdcFmt = (v) => `${formatUnits(v, 6)} USDC`;
 const short = (id) => `${id.slice(0, 10)}…${id.slice(-6)}`;
@@ -226,6 +247,8 @@ async function main() {
   const claimable = []; // Delivered, review window closed
   const inReview = []; // Delivered, window still open
   const staleFunded = []; // Funded, past the delivery deadline — agent's refund unclaimed
+  const timedOutArbitration = []; // Disputed/Arbitrating, arbitration window closed
+  const liveArbitration = []; // Disputed/Arbitrating, still inside the window
 
   for (let i = 0; i < allIds.length; i++) {
     const t = tasks[i];
@@ -240,6 +263,21 @@ async function main() {
         age: asOf - reviewDeadline,
       };
       (asOf >= reviewDeadline ? claimable : inReview).push(row);
+    } else if (state === STATE.Disputed || state === STATE.Arbitrating) {
+      // disputedAt is stamped by disputeTask, so it is non-zero in both these states. If
+      // it ever reads zero here the deadline lands in 1970 and every disputed task looks
+      // timed out — report that as its own thing rather than as a breach.
+      const stamped = Number(t.disputedAt);
+      const arbDeadline = stamped + ARBITRATION_WINDOW;
+      const row = {
+        taskId: allIds[i],
+        worker: t.worker,
+        amount: t.amount,
+        arbDeadline,
+        age: asOf - arbDeadline,
+        unstamped: stamped === 0,
+      };
+      (!row.unstamped && asOf >= arbDeadline ? timedOutArbitration : liveArbitration).push(row);
     } else if (state === STATE.Funded && asOf >= Number(t.deadline)) {
       staleFunded.push({
         taskId: allIds[i],
@@ -251,12 +289,19 @@ async function main() {
   }
 
   claimable.sort((a, b) => b.age - a.age);
+  timedOutArbitration.sort((a, b) => b.age - a.age);
   const breaches = claimable.filter((c) => c.age > maxAgeDays * 86_400);
+  const arbBreaches = timedOutArbitration.filter((c) => c.age > maxAgeDays * 86_400);
   const heldClaimable = claimable.reduce((s, c) => s + c.amount, 0n);
+  const heldArb = timedOutArbitration.reduce((s, c) => s + c.amount, 0n);
+  const unstamped = liveArbitration.filter((c) => c.unstamped);
 
   console.log(`Delivered, window still open      ${inReview.length}`);
   console.log(`Delivered, claimable now          ${claimable.length}   ${usdcFmt(heldClaimable)}`);
   console.log(`  of those, older than ${String(maxAgeDays).padEnd(4)} day(s) ${breaches.length}`);
+  console.log(`Arbitration running               ${liveArbitration.length}`);
+  console.log(`Arbitration timed out, claimable  ${timedOutArbitration.length}   ${usdcFmt(heldArb)}`);
+  console.log(`  of those, older than ${String(maxAgeDays).padEnd(4)} day(s) ${arbBreaches.length}`);
   console.log("");
 
   for (const c of claimable.slice(0, 20)) {
@@ -268,6 +313,29 @@ async function main() {
   if (claimable.length > 20) console.log(`  … and ${claimable.length - 20} more`);
   if (claimable.length > 0) console.log("");
 
+  for (const c of timedOutArbitration.slice(0, 20)) {
+    const flag = c.age > maxAgeDays * 86_400 ? "BREACH" : "  ok  ";
+    console.log(
+      `  ${flag}  ${short(c.taskId)}  ${usdcFmt(c.amount).padStart(14)}  arbitration timed out ${days(c.age).padStart(7)} d ago  worker ${c.worker}`,
+    );
+  }
+  if (timedOutArbitration.length > 20) {
+    console.log(`  … and ${timedOutArbitration.length - 20} more`);
+  }
+  if (timedOutArbitration.length > 0) console.log("");
+
+  // A zero disputedAt in a disputed state should be unreachable: disputeTask always
+  // stamps it. Surfaced rather than swallowed, because the alternative reading is that the
+  // deployed bytecode is not the bytecode this monitor thinks it is.
+  if (unstamped.length > 0) {
+    console.log(`ANOMALY — ${unstamped.length} disputed task(s) with disputedAt == 0.`);
+    console.log("disputeTask stamps that field unconditionally, so this should be unreachable.");
+    console.log("Either the deployed contract predates ADR-0006 D3 — in which case a disputed");
+    console.log("task has no clock at all and this monitor cannot see the timeout — or the ABI");
+    console.log("tuple in this file has drifted from the struct. Check both before dismissing.");
+    console.log("");
+  }
+
   // ── Informational: the agent side of the same pull-payment ────────────────
   if (staleFunded.length > 0) {
     const heldStale = staleFunded.reduce((s, c) => s + c.amount, 0n);
@@ -278,17 +346,23 @@ async function main() {
     console.log("");
   }
 
-  if (breaches.length === 0) {
-    console.log("CLEAN — no Delivered task has been claimable for longer than the threshold.");
-    if (claimable.length === 0 && inReview.length === 0) {
+  if (breaches.length === 0 && arbBreaches.length === 0) {
+    console.log("CLEAN — nothing claimable by a worker has gone unclaimed past the threshold.");
+    if (claimable.length === 0 && inReview.length === 0 && liveArbitration.length === 0) {
       console.log("");
-      console.log("Caveat, stated plainly: no task is currently Delivered, so this run proves");
-      console.log("the query works and proves nothing about the claim UX.");
+      console.log("Caveat, stated plainly: no task is currently Delivered or disputed, so this");
+      console.log("run proves the query works and proves nothing about the claim UX.");
     }
     return 0;
   }
 
-  console.log(`VIOLATION — ${breaches.length} task(s) claimable for more than ${maxAgeDays} day(s).`);
+  const total = breaches.length + arbBreaches.length;
+  console.log(`VIOLATION — ${total} task(s) claimable for more than ${maxAgeDays} day(s).`);
+  if (arbBreaches.length > 0) {
+    console.log(`  ${breaches.length} via a closed review window, ${arbBreaches.length} via a timed-out arbitration.`);
+    console.log("  The second group waited a review window and a dispute before this clock even");
+    console.log("  started, so treat it as the more urgent of the two.");
+  }
   console.log("");
   console.log("The money is not lost and nobody has taken it: it sits in the escrow until the");
   console.log("worker calls releaseAfterReview. That is the problem. Check, in order:");
@@ -296,8 +370,11 @@ async function main() {
   console.log("  2. does the dashboard claim button exist, and does it reach the right chain?");
   console.log("  3. does the claim revert — wrong sender, review window arithmetic, gas?");
   console.log("  4. does the worker have any ETH on Base to pay for the claim?");
-  console.log("Do NOT respond by claiming on their behalf. releaseAfterReview is worker-only by");
-  console.log("design (A1.2), and the platform having a push path is the thing it does not want.");
+  console.log("For the arbitration group the claim is releaseAfterArbitration, not");
+  console.log("releaseAfterReview, and the dashboard has to offer the right one — a button that");
+  console.log("calls the wrong function reverts and looks to the worker like being refused.");
+  console.log("Do NOT respond by claiming on their behalf. Both are worker-only by design");
+  console.log("(A1.2, ADR-0006 D3), and the platform having a push path is what it does not want.");
   return 1;
 }
 
