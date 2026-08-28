@@ -98,16 +98,21 @@ async function main() {
   //
   // If this still fails, the deployment is very likely fine — confirm with
   // `scripts/audit/verify-escrow-deployment.mjs <address>` rather than redeploying.
-  const [owner, usdc, signerAccepted, minWindow, maxWindow, domain] = await withRpcLagRetry(() =>
-    Promise.all([
-      escrow.owner(),
-      escrow.usdc(),
-      escrow.acceptedSigners(VERDICT_SIGNER),
-      escrow.MIN_REVIEW_WINDOW(),
-      escrow.MAX_REVIEW_WINDOW(),
-      escrow.domainSeparator(),
-    ]),
-  );
+  const [owner, usdc, signerAccepted, minWindow, maxWindow, arbWindow, domain] =
+    await withRpcLagRetry(() =>
+      Promise.all([
+        escrow.owner(),
+        escrow.usdc(),
+        escrow.acceptedSigners(VERDICT_SIGNER),
+        escrow.MIN_REVIEW_WINDOW(),
+        escrow.MAX_REVIEW_WINDOW(),
+        // ADR-0006 A1.3. Read back for the same reason as the others: this one is
+        // bytecode-or-never, so a deploy from a stale artifact would produce a contract
+        // whose disputes can strand and which looks fine from every other angle.
+        escrow.ARBITRATION_WINDOW(),
+        escrow.domainSeparator(),
+      ]),
+    );
 
   console.log("\nVerification");
   console.log("  usdc()                 ", usdc, usdc.toLowerCase() === USDC_ADDRESS.toLowerCase() ? "✓" : "✗ MISMATCH");
@@ -115,9 +120,25 @@ async function main() {
   console.log("  acceptedSigners(signer)", signerAccepted, signerAccepted ? "✓" : "✗ NOT SEEDED");
   console.log("  MIN_REVIEW_WINDOW      ", `${minWindow}s`);
   console.log("  MAX_REVIEW_WINDOW      ", `${maxWindow}s`);
+  console.log(
+    "  ARBITRATION_WINDOW     ",
+    `${arbWindow}s`,
+    arbWindow === 604800n ? "✓" : "✗ EXPECTED 604800 (7 days, ADR-0006 A1.3)",
+  );
   console.log("  EIP-712 domain         ", domain);
 
   const ownerIsHsm = owner.toLowerCase() === HSM_OWNER.toLowerCase();
+
+  // Refuse rather than warn. ADR-0006 makes the arbitration clock bytecode-or-never, so
+  // the only fix after funding is a second deploy with a migration — which is the thing
+  // ADR-0001 spent itself avoiding. Better to fail here, where it costs one more run.
+  if (arbWindow !== 604800n) {
+    throw new Error(
+      `ARBITRATION_WINDOW is ${arbWindow}s, expected 604800 (ADR-0006 A1.3). This contract ` +
+        `is deployed at ${address} — do NOT point any env var at it and do not fund it. ` +
+        `Recompile (npm run compile) and deploy again.`,
+    );
+  }
 
   console.log("\n" + "─".repeat(72));
   console.log("NEXT STEPS — none of these are optional");
@@ -142,8 +163,19 @@ async function main() {
   }
 
   console.log("\n3. Verify against the live chain, do not trust this output:");
+  console.log("     node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs");
   console.log("     node --env-file=.env.local scripts/audit/verify-contract-owner.mjs");
   console.log("     node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs");
+  console.log("\n4. Update chain-constants.json — address, deployBlock, and the note on");
+  console.log("   arbitrationWindowSeconds, which currently says the clock is deployed");
+  console.log("   nowhere. That file is the record of what is actually on chain, and it is");
+  console.log("   what the next session will believe over CLAUDE.md.");
+  console.log("\n5. The old deployment does not disappear. Any task still in flight on it");
+  console.log("   stays there, reachable only by its own parties calling it directly — this");
+  console.log("   script does not and cannot migrate them. Check before repointing:");
+  console.log("     node --env-file=.env.local scripts/audit/verify-unclaimed.mjs");
+  console.log("   run against the OLD address, and settle anything outstanding first.");
+  console.log("\n   Full sequence and the trip hazards: docs/runbooks/ESCROW-REDEPLOY.md");
   console.log();
 }
 

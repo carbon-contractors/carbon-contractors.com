@@ -23,7 +23,7 @@
  * checklist actually happens in.
  */
 
-import { createPublicClient, http, getAddress } from "viem";
+import { createPublicClient, http, getAddress, toFunctionSelector } from "viem";
 import { baseSepolia, base } from "viem/chains";
 
 /** CC-059 — the HSM key that must own the contract and whose verdicts it must accept. */
@@ -35,6 +35,7 @@ const ABI = [
   { type: "function", name: "totalLocked", inputs: [], outputs: [{ type: "uint256" }], stateMutability: "view" },
   { type: "function", name: "MIN_REVIEW_WINDOW", inputs: [], outputs: [{ type: "uint32" }], stateMutability: "view" },
   { type: "function", name: "MAX_REVIEW_WINDOW", inputs: [], outputs: [{ type: "uint32" }], stateMutability: "view" },
+  { type: "function", name: "ARBITRATION_WINDOW", inputs: [], outputs: [{ type: "uint32" }], stateMutability: "view" },
   { type: "function", name: "domainSeparator", inputs: [], outputs: [{ type: "bytes32" }], stateMutability: "view" },
   { type: "function", name: "VERDICT_TYPEHASH", inputs: [], outputs: [{ type: "bytes32" }], stateMutability: "view" },
   {
@@ -112,6 +113,30 @@ async function main() {
 
   const [owner, usdc, locked] = await Promise.all([call("owner"), call("usdc"), call("totalLocked")]);
 
+  // ── The ADR-0006 D3 arbitration clock ─────────────────────────────────────
+  //
+  // Probed separately from the v2 surface above, and NOT fatal by default, because its
+  // absence is a legitimate state: every escrow deployed before 2026-08-28 lacks it, and
+  // the app is built to read those (see LEGACY_GET_TASK_ABI). What is not legitimate is
+  // shipping mainnet without it — ADR-0006 makes it bytecode-or-never, and a mainnet v1
+  // with no arbitration clock has disputes that can strand permanently. So: informational
+  // on testnet, fatal on mainnet.
+  let arbitrationWindow = null;
+  try {
+    arbitrationWindow = Number(await call("ARBITRATION_WINDOW"));
+  } catch {
+    arbitrationWindow = null;
+  }
+
+  // Corroborating signal only. Solidity embeds each external function's 4-byte selector
+  // in its dispatcher, so the selector appearing in the code is good evidence the
+  // function is there — but 4 bytes in ~10KB can collide, which is why ARBITRATION_WINDOW
+  // above is the primary check and this is a cross-check on it.
+  const RELEASE_AFTER_ARBITRATION_SELECTOR = toFunctionSelector(
+    "releaseAfterArbitration(bytes32)",
+  ).slice(2);
+  const claimPathPresent = code.toLowerCase().includes(RELEASE_AFTER_ARBITRATION_SELECTOR);
+
   const expectedUsdc = process.env.NEXT_PUBLIC_USDC_ADDRESS;
   const ownerIsHsm = owner.toLowerCase() === HSM.toLowerCase();
   const usdcOk = !expectedUsdc || usdc.toLowerCase() === expectedUsdc.toLowerCase();
@@ -119,6 +144,18 @@ async function main() {
   console.log(`is v2 (verdict surface)  ${mark(true)}`);
   console.log(`MIN_REVIEW_WINDOW        ${mark(min === 43200)}  ${min}s (${min / 3600}h)`);
   console.log(`MAX_REVIEW_WINDOW        ${mark(max === 1209600)}  ${max}s (${max / 86400}d)`);
+  if (arbitrationWindow === null) {
+    console.log(
+      `ARBITRATION_WINDOW       ${mark(false)}  ABSENT — this deployment predates ADR-0006 D3`,
+    );
+  } else {
+    console.log(
+      `ARBITRATION_WINDOW       ${mark(arbitrationWindow === 604800)}  ${arbitrationWindow}s (${arbitrationWindow / 86400}d)`,
+    );
+  }
+  console.log(
+    `releaseAfterArbitration  ${mark(claimPathPresent)}  ${claimPathPresent ? "selector present in bytecode" : "selector ABSENT"}`,
+  );
   console.log(`usdc()                   ${mark(usdcOk)}  ${usdc}`);
   // Informational, not a pass/fail. This started life marking non-zero with ✗, which was
   // right for a fresh deployment and wrong the moment a task was funded — it flagged a
@@ -129,6 +166,33 @@ async function main() {
   console.log(`acceptedSigners(HSM)     ${mark(signerAccepted)}  ${signerAccepted}`);
   console.log(`VERDICT_TYPEHASH         ${typehash}`);
   console.log(`domainSeparator()        ${domain}`);
+
+  // ── What the arbitration clock's absence means, per network ───────────────
+  if (arbitrationWindow === null || !claimPathPresent) {
+    console.log("");
+    console.log("The arbitration clock (ADR-0006 D3) is NOT in this deployment.");
+    console.log("On-chain consequence: a Disputed task has no deadline. Only the owner can");
+    console.log("end it, and if the owner never acts the escrow is held indefinitely — which");
+    console.log("is the stranding case ADR-0006 exists to close.");
+    console.log("");
+    if (mainnet) {
+      console.log("This is MAINNET, so it is fatal. ADR-0006 makes the clock bytecode-or-never:");
+      console.log("the only way to add it later is a second mainnet deploy with a migration.");
+      console.log("Redeploy from a build that includes it before anything is funded.");
+      process.exit(1);
+    }
+    console.log("This is testnet, so it is reported and not fatal — the app reads a pre-clock");
+    console.log("deployment deliberately (escrow.ts LEGACY_GET_TASK_ABI). But the Sepolia");
+    console.log("dispute lifecycle CANNOT be exercised against this contract: there is no");
+    console.log("timeout to test. Redeploy before running the dispute stage.");
+    console.log("");
+  } else if (arbitrationWindow !== 604800) {
+    console.log("");
+    console.log(`ARBITRATION_WINDOW is ${arbitrationWindow}s, not the 604800s (7 days) ADR-0006 A1.3`);
+    console.log("sets. It is a contract constant, so this cannot be corrected without a");
+    console.log("redeploy. chain-constants.json records 604800; one of the two is wrong.");
+    process.exit(1);
+  }
 
   // Binary search for the deploy block, so ESCROW_DEPLOY_BLOCK never has to be guessed.
   let lo = 0n;

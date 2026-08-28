@@ -317,6 +317,7 @@ exists rather than reasoning from this file.**
 | Design decisions and rejected alternatives | `docs/adr/` — **read `README.md` first** |
 | Addresses, deploy blocks, hashes, rule versions | `chain-constants.json` — a *record*, verify with the audit scripts it names |
 | Continuity, custody, renewals, what breaks if it lapses | `docs/BCP-DR.md` |
+| How to redeploy the escrow without breaking six things silently | `docs/runbooks/ESCROW-REDEPLOY.md` |
 | What needs doing | `docs/backlog/` |
 | Product narrative, MCP tool list, stack | `README.md` |
 | Security findings AUD-001..010 | `AUDIT-2026-03-25.md` |
