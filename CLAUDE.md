@@ -136,13 +136,21 @@ exists rather than reasoning from this file.**
   "Agent resolves its own dispute" was explicitly rejected.
   **Arbitration now has no app or MCP surface at all**, deliberately: the owner resolves via
   `scripts/admin/verify-escrow-lifecycle.ts` with the KMS key until the adjudication tier exists.
-  A disputed task therefore has no clock **yet**: `ADR-0006` D3 + Amendment 1 (2026-08-26) put a
-  **fixed 7-day** arbitration window in the bytecode, running from `disputeTask` — **not** from
-  `beginArbitration`, which is `onlyOwner` and optional, so a clock started there could be withheld
-  forever by never calling it. An unresolved arbitration defaults to the **worker** via pull payment.
-  It lands with `CC-034` or not at all for v1 — until it ships, a dispute can sit indefinitely and
-  only the owner can end it.
   → `ADR-0001` D2, `ADR-0007` (proposed), `CC-081` Defect 2
+- **The arbitration clock is written but deployed nowhere — and the difference matters.**
+  `CarbonEscrow.sol` now carries `ARBITRATION_WINDOW = 7 days` (`ADR-0006` D3 + Amendment 1),
+  stamped by `disputeTask` and claimed by the worker through `releaseAfterArbitration`. **The live
+  Sepolia contract predates it**, so on-chain today a disputed task still has no clock at all and
+  only the owner can end it. `chain-constants.json` says the same thing; believe the deployment, not
+  the source. Deploys with `CC-034`, which is a **redeploy** — new address, new
+  `ESCROW_DEPLOY_BLOCK`, and ownership resets to the deployer.
+  Three properties are load-bearing and each has a mutation-tested guard:
+  the clock starts at `disputeTask` (either party) and **not** at `beginArbitration` (`onlyOwner`,
+  optional — a clock started there could be withheld forever by never calling it); the window is a
+  **constant**, so the arbitrator cannot set its own deadline; and past the deadline `resolveDispute`
+  **reverts** (A1.4), so the deadline binds the owner too and the only remaining route pays the
+  worker. Silence at every stage now costs the silent party.
+  → `ADR-0006` D3/A1.1–A1.4, `CC-034` · `npm run test:contracts`
 - **Silence favoured the agent, and v2 inverts it.** v1 had one clock, so an agent that did nothing
   after delivery got refunded at expiry. v2 has two: the delivery deadline and an agent-set review
   window (12h–14d, bounded by the contract). Once `Delivered`, `expireTask` is unreachable and the

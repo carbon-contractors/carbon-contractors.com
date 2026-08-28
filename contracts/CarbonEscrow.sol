@@ -29,12 +29,41 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *              |          |            +-- releaseAfterReview (window elapsed, worker claims)
  *              |          |            +-- claimWithVerdict   (passing verdict presented)
  *              |          |            +-- completeTask       (agent pays, any time)
+ *              |          |            +-- releaseAfterArbitration (arbitration timed out)
  *              |          +-------> Disputed -> Arbitrating -> Resolved
  *              +--> Expired (deadline passed with no submission, agent claims refund)
  *
- * Two clocks, so silence resolves in favour of whichever party last took a verifiable
+ * Three clocks, so silence resolves in favour of whichever party last took a verifiable
  * action. The worker who never submits loses to the deadline; the agent who ignores a
- * submission loses to the review window.
+ * submission loses to the review window; the arbitrator who never rules loses to the
+ * arbitration window.
+ *
+ * ## The arbitration clock (ADR-0006 D3, Amendment 1)
+ *
+ * v2 shipped with two clocks and one hole: a Disputed task had no clock at all, so the
+ * escrow was held until the owner chose to act, and an owner who never acted — through
+ * malice, incapacity, or death — stranded the funds permanently. That is the exact case
+ * ADR-0006 exists to close, and closing it in a scheduled job rather than in bytecode
+ * would have put platform liveness back into settlement one function after A1.1 removed
+ * it.
+ *
+ * So the clock is a constant, it starts at disputeTask, and it binds the arbitrator:
+ *
+ *  - ARBITRATION_WINDOW is a constant, not an argument. A settable window would let the
+ *    arbitrator choose its own deadline, which is structurally the defect ADR-0001 D2
+ *    removed — one party holding both sides of a decision.
+ *  - It runs from disputeTask, which either party may call, not from beginArbitration,
+ *    which is onlyOwner and optional. A deadline whose start the constrained party
+ *    controls is not a deadline; an owner would simply never call beginArbitration.
+ *  - Past the deadline resolveDispute reverts and releaseAfterArbitration opens. The two
+ *    are exact complements, the same way disputeTask and releaseAfterReview are: exactly
+ *    one of them is available at any timestamp. A deadline the constrained party may
+ *    ignore is not a deadline either.
+ *
+ * The default is the worker, on the same pull-payment mechanism as releaseAfterReview:
+ * the worker claims, the platform transacts nowhere. Refund-default would mean the
+ * operator's death pays the agent, and would hand the platform a griefing lever it
+ * exercises by doing nothing.
  *
  * ## Verdicts are signatures, not transactions (Amendment 1 A1.1)
  *
@@ -62,6 +91,15 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
     uint32 public constant MIN_REVIEW_WINDOW = 12 hours;
     uint32 public constant MAX_REVIEW_WINDOW = 14 days;
 
+    /// @notice How long an arbitration may run before the worker may claim by default
+    ///         (ADR-0006 A1.3). Deliberately half of MAX_REVIEW_WINDOW: the clocks stack,
+    ///         so the worst-case post-delivery wait is 14 + 7 = 21 days, and the platform
+    ///         is held to a tighter clock than the agent. That asymmetry is the right way
+    ///         round — the platform chose to run a dispute mechanism, and by the time
+    ///         arbitration starts the worker has already delivered and waited out a full
+    ///         review window.
+    uint32 public constant ARBITRATION_WINDOW = 7 days;
+
     enum TaskState {
         None, // 0
         Funded, // 1
@@ -79,15 +117,19 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
     enum CompletionRoute {
         AgentConfirmed, // 0 — completeTask
         ReviewElapsed, // 1 — releaseAfterReview
-        PassingVerdict // 2 — claimWithVerdict
+        PassingVerdict, // 2 — claimWithVerdict
+        ArbitrationTimeout // 3 — releaseAfterArbitration
     }
 
     /**
      * @dev Field order is chosen for storage packing, not readability:
      *      slot 0: agent(20) + deadline(8) + reviewWindow(4)  = 32 bytes
      *      slot 1: worker(20) + submittedAt(8) + state(1) + verdictPassed(1) = 30 bytes
-     *      slot 2: amount
-     *      slots 3-6: the four commitment hashes
+     *      slot 2: disputedAt(8), alone — 2 bytes free in slot 1 will not hold a uint64
+     *              and every remaining field is a full word. It costs a zero-write at
+     *              funding and a real write only on the disputed path (ADR-0006 A1.3).
+     *      slot 3: amount
+     *      slots 4-7: the four commitment hashes
      */
     struct Task {
         address agent;
@@ -97,6 +139,7 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
         uint64 submittedAt; // 0 until submitWork; starts the review clock
         TaskState state;
         bool verdictPassed; // meaningful only when verdictHash != 0
+        uint64 disputedAt; // 0 until disputeTask; starts the arbitration clock
         uint256 amount;
         bytes32 specHash; // acceptance criteria, committed by the agent at funding
         bytes32 evidenceHash; // the submission, committed by the worker at delivery
@@ -191,6 +234,9 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
     error SpecAckMismatch();
     error ReviewWindowOpen();
     error ReviewWindowClosed();
+    error ArbitrationWindowOpen();
+    error ArbitrationWindowClosed();
+    error NotDisputed();
     error VerdictTaskMismatch();
     error VerdictCommitmentMismatch();
     error VerdictExpiredError();
@@ -256,6 +302,7 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
             submittedAt: 0,
             state: TaskState.Funded,
             verdictPassed: false,
+            disputedAt: 0,
             amount: amount,
             specHash: specHash,
             evidenceHash: bytes32(0),
@@ -407,6 +454,12 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
         task.verdictHash = digest;
         task.verdictPassed = false;
         task.state = TaskState.Disputed;
+        // Starts the arbitration clock (ADR-0006 A1.1). Deliberately here and not in
+        // beginArbitration: this function is callable by *either* party, so no single
+        // party can withhold the clock by inaction. beginArbitration is onlyOwner and
+        // optional, so a clock started there could be withheld forever by never calling
+        // it - which is the stranding case ADR-0006 D3 exists to close.
+        task.disputedAt = uint64(block.timestamp);
 
         emit TaskDisputed(taskId, msg.sender, digest);
     }
@@ -417,20 +470,37 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
      *      either state. It exists so the D8 jury tier has a state to occupy without a
      *      further redeploy, and so an off-chain observer can tell "raised" from "being
      *      worked on".
+     *
+     *      Gated on the arbitration window because that event is the whole point of the
+     *      function: emitting ArbitrationBegun on a task that has already timed out would
+     *      tell an observer "being worked on" about a task that is past being worked on.
      */
     function beginArbitration(bytes32 taskId) external onlyOwner {
         Task storage task = tasks[taskId];
         if (task.state != TaskState.Disputed) {
             revert InvalidState(task.state, TaskState.Disputed);
         }
+        if (block.timestamp >= arbitrationDeadline(taskId)) revert ArbitrationWindowClosed();
         task.state = TaskState.Arbitrating;
         emit ArbitrationBegun(taskId);
     }
 
     /**
-     * @notice Owner arbitrates a dispute.
+     * @notice Owner arbitrates a dispute, within the arbitration window.
      * @dev The only two reachable destinations are task.worker and task.agent, both fixed
      *      at funding (ADR-0001 D9). The owner directs which of the two, and nothing else.
+     *
+     *      Reverts once ARBITRATION_WINDOW has elapsed. That bound is what makes the
+     *      window a deadline rather than a suggestion: if the owner could still rule at
+     *      any later time, an owner sitting on a dispute could wait for the worker to
+     *      claim and refund the agent first, and the clock would constrain nobody. Past
+     *      the deadline releaseAfterArbitration is the only route, and it pays the worker.
+     *
+     *      The complementary risk - an arbitration decided at day 6 and 23 hours, then
+     *      mined at day 7 - resolves the same way the worker's claim does, because both
+     *      routes past the deadline pay the worker. A ruling *for* the worker that lands
+     *      late is therefore not lost, only re-routed. A ruling for the agent that lands
+     *      late is lost, deliberately: seven days was the whole allowance.
      * @param releaseToWorker If true, worker gets paid. If false, agent is refunded.
      */
     function resolveDispute(
@@ -441,6 +511,7 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
         if (task.state != TaskState.Disputed && task.state != TaskState.Arbitrating) {
             revert InvalidState(task.state, TaskState.Disputed);
         }
+        if (block.timestamp >= arbitrationDeadline(taskId)) revert ArbitrationWindowClosed();
 
         uint256 amount = task.amount;
         address recipient = releaseToWorker ? task.worker : task.agent;
@@ -451,6 +522,40 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
         usdc.safeTransfer(recipient, amount);
 
         emit TaskResolved(taskId, releaseToWorker, amount);
+    }
+
+    /**
+     * @notice Worker claims payment when an arbitration ran out of time without a ruling
+     *         (ADR-0006 D3, Amendment 1).
+     *
+     * @dev This is the function that makes *arbitrator* silence lose, and it is the
+     *      counterpart to releaseAfterReview one state along. Same shape for the same
+     *      reasons: pull-payment, worker-only, no dependency on the platform signing,
+     *      transacting, or existing.
+     *
+     *      Worker-default rather than refund-default, per ADR-0001 D6 carried forward: the
+     *      alternative means the operator's death pays the agent, and hands the platform a
+     *      griefing lever it exercises by doing nothing at all.
+     *
+     *      Reachable from Disputed as well as Arbitrating. That is the case A1.1 exists to
+     *      prevent, and it is the one worth stating out loud: beginArbitration is onlyOwner
+     *      and optional, so an owner who never calls it must not thereby escape the clock.
+     */
+    function releaseAfterArbitration(bytes32 taskId) external nonReentrant {
+        Task storage task = tasks[taskId];
+        if (task.state != TaskState.Disputed && task.state != TaskState.Arbitrating) {
+            revert InvalidState(task.state, TaskState.Disputed);
+        }
+        if (msg.sender != task.worker) revert NotWorker();
+        // Belt and braces. The two states above are only reachable through disputeTask,
+        // which always stamps disputedAt, so this cannot fire today. It is here because
+        // arbitrationDeadline() on a zero disputedAt returns a timestamp in 1970 - if a
+        // future state ever joins the set above without setting the stamp, the failure
+        // would be a drained task rather than a revert.
+        if (task.disputedAt == 0) revert NotDisputed();
+        if (block.timestamp < arbitrationDeadline(taskId)) revert ArbitrationWindowOpen();
+
+        _payOut(taskId, task, task.worker, CompletionRoute.ArbitrationTimeout);
     }
 
     /**
@@ -571,6 +676,18 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
     function reviewDeadline(bytes32 taskId) public view returns (uint256) {
         Task storage task = tasks[taskId];
         return uint256(task.submittedAt) + uint256(task.reviewWindow);
+    }
+
+    /**
+     * @notice Timestamp at which the arbitration window closes: the owner can no longer
+     *         rule, and the worker may claim.
+     * @dev Same caveat as reviewDeadline, and it matters more here. For a task that was
+     *      never disputed, disputedAt is 0 and this returns ARBITRATION_WINDOW seconds
+     *      past the epoch - a timestamp in 1970, which is always in the past. Every caller
+     *      gates on state first; do not use this as a liveness test on its own.
+     */
+    function arbitrationDeadline(bytes32 taskId) public view returns (uint256) {
+        return uint256(tasks[taskId].disputedAt) + uint256(ARBITRATION_WINDOW);
     }
 
     /**

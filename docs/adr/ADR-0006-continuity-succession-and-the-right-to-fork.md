@@ -456,6 +456,32 @@ full length.
   and by the time arbitration starts the worker has already delivered *and* waited out a full review
   window.
 
+### A1.4 — The deadline binds the arbitrator, not only the worker
+
+*Added 2026-08-28, during implementation. A1.1–A1.3 specified when the clock starts, that it is a
+constant, and how long it runs. They did not say what happens to `resolveDispute` after it expires,
+and the answer is not free — leaving it callable would have undone most of A1.1.*
+
+An owner who can still rule at any later time is not constrained by a deadline. Worse, the two
+routes would be live simultaneously, and the owner would hold the faster one: watch for the worker's
+`releaseAfterArbitration`, and front-run it with `resolveDispute(false)` to refund the agent. The
+clock would then constrain nobody and would read, from the outside, as though it did.
+
+So `resolveDispute` reverts `ArbitrationWindowClosed` once the window has elapsed. The two routes
+are **exact complements** — precisely one of them is available at any timestamp — which is the same
+shape `disputeTask` and `releaseAfterReview` already have either side of the review deadline, and
+for the same reason.
+
+`beginArbitration` is gated the same way. Its only product is the `ArbitrationBegun` event, and
+emitting that on a task which has already timed out would tell an observer "being worked on" about
+a task past being worked on.
+
+**What this costs the owner**, stated plainly rather than buried: an arbitration decided at day 6
+and 23 hours but *mined* at day 7 fails. If the ruling was for the worker nothing is lost, because
+the timeout route pays the worker too — it is re-routed, not reversed. If the ruling was for the
+agent, it is lost. That is deliberate; seven days was the whole allowance, and an arbitrator who
+needs a 169th hour has a scheduling problem, not a rights problem.
+
 **What this costs to build** (scoped into `CC-034`, since it is bytecode):
 
 - A `uint64 disputedAt` field. Slot 1 is 30 of 32 bytes used, so it takes a new slot — but it is only
@@ -524,8 +550,14 @@ full length.
    its reader to ignore it.
 10. **The estate packet** (D2) — outside the repo, and the only item here that cannot be done by
    writing code.
-5. **Arbitration clock in the contract** (D3 + Amendment 1) — in the mainnet deploy, with tests.
-   Scoped into `CC-034` 2026-08-26. **Unblocked**: fixed 7-day window from `disputeTask`.
+5. ~~**Arbitration clock in the contract** (D3 + Amendment 1) — in the mainnet deploy, with tests.~~
+   **Written 2026-08-28**: `ARBITRATION_WINDOW`, `Task.disputedAt`, `releaseAfterArbitration`,
+   `arbitrationDeadline`, the `resolveDispute`/`beginArbitration` gates from A1.4, and 15 contract
+   tests — including the one A1.1 exists for: *a dispute where `beginArbitration` is never called
+   must still time out*. Six mutations of the guards were checked and all six fail a named test.
+   **Deployed nowhere.** It is bytecode, so it reaches Sepolia and then mainnet only through
+   `CC-034`'s redeploy; until then the live contract has no arbitration clock and
+   `chain-constants.json` records that.
 6. **Profile signing** (D9) — before the registry holds real workers.
 7. **ENS record and the announcement channel** (D6), folded into `CC-044`'s rewrite.
 8. **Protocol spec** (D7) — after `CC-092`, when the surface it describes exists.
