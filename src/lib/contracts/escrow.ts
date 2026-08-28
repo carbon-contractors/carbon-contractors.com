@@ -176,6 +176,16 @@ export const TaskStateEnum = {
 export type OnChainTaskState =
   (typeof TaskStateEnum)[keyof typeof TaskStateEnum];
 
+/**
+ * `CarbonEscrow.ARBITRATION_WINDOW` — 7 days (ADR-0006 A1.3).
+ *
+ * A contract **constant**, which is what makes mirroring it here safe rather than a
+ * guess: there is no setter, so it cannot drift within a deployment. It can still drift
+ * *across* deployments, and `arbitrationClock` on the read below is what tells you the
+ * deployed contract has the clock at all.
+ */
+export const ARBITRATION_WINDOW_SECONDS = 7 * 24 * 60 * 60;
+
 export interface OnChainTask {
   agent: Address;
   worker: Address;
@@ -197,8 +207,169 @@ export interface OnChainTask {
   verdictHash: `0x${string}`;
   /** Only meaningful when `verdictHash` is non-zero. */
   verdictPassed: boolean;
+  /** Unix seconds of `disputeTask`, or 0 if the task was never disputed. */
+  disputedAt: bigint;
+  /**
+   * When the worker may call `releaseAfterArbitration`. Meaningless while `disputedAt`
+   * is 0 — it lands in 1970, i.e. always in the past. Gate on `state` first.
+   */
+  arbitrationDeadline: bigint;
+  /**
+   * Whether the **deployed** contract has the ADR-0006 D3 arbitration clock at all.
+   *
+   * False against any escrow deployed before 2026-08-28, where a disputed task has no
+   * clock and only the owner can end it. The dashboard must not offer a timeout claim
+   * in that case: the function does not exist and the call would revert, which to a
+   * worker reads as being refused their money.
+   */
+  arbitrationClock: boolean;
   /** CC-036 slot — EAS attestation UID. Zero until EAS lands. */
   attestationUid: `0x${string}`;
+}
+
+// ── Reading an escrow older than this ABI ───────────────────────────────────
+
+/**
+ * `getTask` as it returns from every escrow deployed **before** the ADR-0006 D3
+ * arbitration clock — twelve fields, no `disputedAt`.
+ *
+ * **A historical record. Never edit it.** It exists because the app's ABI and the
+ * deployed bytecode are separate pieces of config, so "new code against an old address"
+ * is a normal intermediate state at every redeploy, not an error. Without this the
+ * mismatch surfaced as a decode throw, `/api/tasks` swallowed it into `on_chain: null`,
+ * and the dashboard silently dropped every worker action — a blank panel where the
+ * claim button used to be, with nothing anywhere saying why.
+ *
+ * Positional, like all tuple ABIs: the field order is the storage-packing order in
+ * `CarbonEscrow.sol`, not the readable one.
+ */
+const LEGACY_GET_TASK_ABI = [
+  {
+    type: "function",
+    name: "getTask",
+    stateMutability: "view",
+    inputs: [{ name: "taskId", type: "bytes32" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "agent", type: "address" },
+          { name: "deadline", type: "uint64" },
+          { name: "reviewWindow", type: "uint32" },
+          { name: "worker", type: "address" },
+          { name: "submittedAt", type: "uint64" },
+          { name: "state", type: "uint8" },
+          { name: "verdictPassed", type: "bool" },
+          { name: "amount", type: "uint256" },
+          { name: "specHash", type: "bytes32" },
+          { name: "evidenceHash", type: "bytes32" },
+          { name: "verdictHash", type: "bytes32" },
+          { name: "attestationUid", type: "bytes32" },
+        ],
+      },
+    ],
+  },
+] as const;
+
+/**
+ * viem's decode errors for "the returndata is narrower than the ABI says".
+ *
+ * Deliberately narrow. Retrying on *any* read failure would mask a wrong address, a
+ * reverting call or an RPC fault as "old deployment" and then quietly report the legacy
+ * shape for something that is not an escrow at all. Measured against a stubbed transport
+ * returning twelve words: `ContractFunctionExecutionError -> PositionOutOfBoundsError`.
+ */
+const WIDTH_MISMATCH_ERRORS = new Set([
+  "PositionOutOfBoundsError",
+  "AbiDecodingDataSizeTooSmallError",
+  "SliceOffsetOutOfBoundsError",
+]);
+
+function isAbiWidthMismatch(err: unknown): boolean {
+  let cursor: unknown = err;
+  for (let depth = 0; cursor && depth < 8; depth++) {
+    const name = (cursor as { name?: string }).name;
+    if (name && WIDTH_MISMATCH_ERRORS.has(name)) return true;
+    cursor = (cursor as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** The decoded struct, plus whether it came from a contract that has the clock. */
+interface RawTaskRead {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  result: any;
+  arbitrationClock: boolean;
+}
+
+/**
+ * Read one task, tolerating an escrow deployed before the arbitration clock.
+ *
+ * The happy path costs nothing extra — current ABI, one batched `readContract`. The
+ * fallback only fires on a decode-width mismatch, and concurrent callers still batch,
+ * so a worker with twenty tasks against a legacy deployment costs two multicalls rather
+ * than twenty-one.
+ */
+async function readTaskStruct(taskId: `0x${string}`, escrow: Address): Promise<RawTaskRead> {
+  const pub = getPublicClient();
+  try {
+    return {
+      result: await pub.readContract({
+        address: escrow,
+        abi: CARBON_ESCROW_ABI,
+        functionName: "getTask",
+        args: [taskId],
+      }),
+      arbitrationClock: true,
+    };
+  } catch (err) {
+    if (!isAbiWidthMismatch(err)) throw err;
+    // Loud, because the two readings are very different: either a redeploy is mid-flight
+    // and this is expected for a few minutes, or NEXT_PUBLIC_ESCROW_CONTRACT is pointing
+    // at a contract nobody meant it to point at.
+    log("warn", "escrow_abi_predates_deployment", {
+      escrow,
+      detail: "getTask returned the pre-ADR-0006 tuple; reading without disputedAt",
+    });
+    return {
+      result: await pub.readContract({
+        address: escrow,
+        abi: LEGACY_GET_TASK_ABI,
+        functionName: "getTask",
+        args: [taskId],
+      }),
+      arbitrationClock: false,
+    };
+  }
+}
+
+/** Shared shaping, so the two getTask call sites cannot drift. */
+function toOnChainTask(read: RawTaskRead): OnChainTask {
+  const { result, arbitrationClock } = read;
+  const stateRaw = Number(result.state);
+  const submittedAt = BigInt(result.submittedAt);
+  const reviewWindow = Number(result.reviewWindow);
+  const disputedAt = BigInt(result.disputedAt ?? 0);
+
+  return {
+    agent: result.agent as Address,
+    worker: result.worker as Address,
+    amount: result.amount as bigint,
+    deadline: BigInt(result.deadline),
+    state: TaskStateEnum[stateRaw as keyof typeof TaskStateEnum] ?? "None",
+    stateRaw,
+    reviewWindow,
+    submittedAt,
+    reviewDeadline: submittedAt + BigInt(reviewWindow),
+    specHash: result.specHash as `0x${string}`,
+    evidenceHash: result.evidenceHash as `0x${string}`,
+    verdictHash: result.verdictHash as `0x${string}`,
+    verdictPassed: Boolean(result.verdictPassed),
+    disputedAt,
+    arbitrationDeadline: disputedAt + BigInt(ARBITRATION_WINDOW_SECONDS),
+    arbitrationClock,
+    attestationUid: result.attestationUid as `0x${string}`,
+  };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -229,33 +400,7 @@ export async function getOnChainTask(
   paymentRequestId: string
 ): Promise<OnChainTask> {
   const taskId = toTaskId(paymentRequestId);
-  const result = await getPublicClient().readContract({
-    address: getEscrowAddress(),
-    abi: CARBON_ESCROW_ABI,
-    functionName: "getTask",
-    args: [taskId],
-  });
-
-  const stateRaw = Number(result.state);
-  const submittedAt = BigInt(result.submittedAt);
-  const reviewWindow = Number(result.reviewWindow);
-
-  return {
-    agent: result.agent as Address,
-    worker: result.worker as Address,
-    amount: result.amount as bigint,
-    deadline: BigInt(result.deadline),
-    state: TaskStateEnum[stateRaw as keyof typeof TaskStateEnum] ?? "None",
-    stateRaw,
-    reviewWindow,
-    submittedAt,
-    reviewDeadline: submittedAt + BigInt(reviewWindow),
-    specHash: result.specHash as `0x${string}`,
-    evidenceHash: result.evidenceHash as `0x${string}`,
-    verdictHash: result.verdictHash as `0x${string}`,
-    verdictPassed: Boolean(result.verdictPassed),
-    attestationUid: result.attestationUid as `0x${string}`,
-  };
+  return toOnChainTask(await readTaskStruct(taskId, getEscrowAddress()));
 }
 
 /**
@@ -445,20 +590,15 @@ export async function getOnChainReputationSummary(
   if (paymentRequestIds.length === 0) return empty;
 
   const escrow = getEscrowAddress();
-  const pub = getPublicClient();
   const workerLower = wallet.toLowerCase();
 
-  // One multicall3 round trip — the client is configured with batch.multicall.
-  const states = await Promise.all(
-    paymentRequestIds.map((id) =>
-      pub.readContract({
-        address: escrow,
-        abi: CARBON_ESCROW_ABI,
-        functionName: "getTask",
-        args: [toTaskId(id)],
-      }),
-    ),
-  );
+  // One multicall3 round trip — the client is configured with batch.multicall. Routed
+  // through readTaskStruct so an escrow older than this ABI degrades the way it does on
+  // the dashboard instead of throwing, which here would zero a worker's whole reputation
+  // and read to them as having never worked.
+  const states = (
+    await Promise.all(paymentRequestIds.map((id) => readTaskStruct(toTaskId(id), escrow)))
+  ).map((read) => read.result);
 
   const summary: OnChainReputationSummary = { ...empty };
 

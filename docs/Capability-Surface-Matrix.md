@@ -34,6 +34,11 @@ thin wrapper. Nothing in the money path depends on MCP existing.
 | `v2` | designed, not scheduled |
 | `—` | not applicable to this surface by design |
 
+**The Contract column means the source tree, not the chain.** They are usually the same and are not
+right now: the arbitration clock is `built` in `CarbonEscrow.sol` and absent from the live Sepolia
+deployment until `CC-034` redeploys. Where the two differ the row says so. `chain-constants.json` is
+the record of what is actually deployed.
+
 ## The matrix
 
 | Capability | Contract | Scripts | App | MCP | DoD surface |
@@ -48,7 +53,8 @@ thin wrapper. Nothing in the money path depends on MCP existing.
 | Claim early (`claimWithVerdict`) | `built` | `built` | `next: CC-092` | `deferred: CC-044` | app |
 | Pay early (`completeTask`) | `live` | `live` | — | `broken: CC-080` (`confirm_task_completion` sends as the platform, always reverts) | MCP |
 | Dispute (signed failing verdict) | `live` | `deferred` (dispute phase unticked in `CC-082`) | `broken: CC-092` (`/api/dispute` carries no verdict) | `broken: CC-092`/`CC-081 D2` (agent-only, no verdict) | app + MCP |
-| Arbitrate (`resolveDispute`) | `live` (`onlyOwner`) | `live` (KMS path, `CC-059`) | — | — (`resolve_dispute` removed 2026-08-26, `ADR-0001` D2) | scripts/owner only, pending `ADR-0007` |
+| Arbitrate (`resolveDispute`) | `live` (`onlyOwner`, now window-bounded) | `live` (KMS path, `CC-059`) | — | — (`resolve_dispute` removed 2026-08-26, `ADR-0001` D2) | scripts/owner only, pending `ADR-0007` |
+| Claim after arbitration timeout (`releaseAfterArbitration`) | `built` — **source only, deployed nowhere** (`ADR-0006` D3, `CC-034`) | `deferred` | `built` (dashboard, gated on `arbitrationClock`) | — (read-only: `get_task_status`, `dispute_task` report the deadline) | app (worker is a human) |
 | Expire / refund (`expireTask`) | `live` | `live` | `deferred` | — | **the agent's own wallet** (pull payment, `ADR-0001` A1.2) |
 | Reputation read | — | — | `live` (`/api/reputation`) | `live` (`get_reputation`) | both |
 | Stake / unstake | `live` | — | `live` (dashboard, wagmi `writeContract`) | — | app |

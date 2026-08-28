@@ -31,6 +31,7 @@ import { notifyContractor } from "@/lib/notifications/dispatch";
 import { toolError } from "@/lib/mcp/errors";
 import {
   getOnChainTask,
+  ARBITRATION_WINDOW_SECONDS,
   getEscrowConfig,
   toTaskId,
 } from "@/lib/contracts/escrow";
@@ -526,6 +527,11 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
               reviewWindow: onChainTask.reviewWindow,
               submittedAt: Number(onChainTask.submittedAt),
               reviewDeadline: Number(onChainTask.reviewDeadline),
+              // ADR-0006 D3. Material to a disputing agent, not just to the worker: a
+              // dispute the agent then leaves alone pays the worker at this timestamp.
+              disputedAt: Number(onChainTask.disputedAt),
+              arbitrationDeadline: Number(onChainTask.arbitrationDeadline),
+              arbitrationClock: onChainTask.arbitrationClock,
               specHash: onChainTask.specHash,
               evidenceHash: onChainTask.evidenceHash,
               verdictHash: onChainTask.verdictHash,
@@ -996,6 +1002,17 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                   checks: computed.checks,
                   on_chain_submitted: false,
                   note: "Database updated. Present the verdict on-chain from your own wallet — escrow.disputeTask(taskId, verdict, signature) — before the review window closes.",
+                  // ADR-0006 D3. Stated up front rather than discovered at day seven:
+                  // disputing starts a clock that runs against whoever is silent, and
+                  // for an agent that means silence pays the worker.
+                  arbitration: {
+                    window_seconds: ARBITRATION_WINDOW_SECONDS,
+                    starts_at: "the block that mines disputeTask",
+                    default_outcome:
+                      "the worker claims the full amount via escrow.releaseAfterArbitration(taskId)",
+                    note:
+                      "Arbitration is owner-only and has no agent-facing surface. Once the window elapses the owner can no longer rule and the payment defaults to the worker, so a dispute you do not follow up on pays out in full.",
+                  },
                 }),
               },
             ],
@@ -1005,9 +1022,18 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // Without a bundle: the only disputable state is one that already
         // happened on-chain.
         let onChainState: string | null = null;
+        let arbitrationDeadline: number | null = null;
+        let arbitrationClock = false;
         if (escrowConfig.address) {
           try {
-            onChainState = (await getOnChainTask(payment_request_id)).state;
+            const chainTask = await getOnChainTask(payment_request_id);
+            onChainState = chainTask.state;
+            arbitrationClock = chainTask.arbitrationClock;
+            // 0 on a task that was never disputed; the caller only sees this on a
+            // Disputed/Arbitrating/Resolved state, where disputeTask has stamped it.
+            arbitrationDeadline = chainTask.disputedAt
+              ? Number(chainTask.arbitrationDeadline)
+              : null;
           } catch {
             onChainState = null;
           }
@@ -1039,6 +1065,21 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                   on_chain_state: onChainState,
                   on_chain_submitted: true,
                   note: "The dispute is already on-chain; the database now reflects it.",
+                  // Read off the chain rather than computed, so it is right even against
+                  // a contract whose window differs from this build's constant.
+                  arbitration:
+                    onChainState === "Resolved"
+                      ? { resolved: true }
+                      : arbitrationClock && arbitrationDeadline !== null
+                        ? {
+                            deadline_unix: arbitrationDeadline,
+                            default_outcome:
+                              "the worker claims the full amount via escrow.releaseAfterArbitration(taskId)",
+                          }
+                        : {
+                            deadline_unix: null,
+                            note: "This escrow deployment has no arbitration deadline — the dispute can only be ended by the platform.",
+                          },
                 }),
               },
             ],

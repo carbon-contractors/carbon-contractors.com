@@ -16,6 +16,9 @@ vi.mock("@/lib/contracts/escrow", () => ({
     chainName: "Base Sepolia",
   }),
   toTaskId: (paymentRequestId: string) => `0xtaskid-${paymentRequestId}`,
+  // ADR-0006 D3. Vitest throws on a missing export from a mocked module rather than
+  // handing back undefined, so this is load-bearing, not decoration.
+  ARBITRATION_WINDOW_SECONDS: 7 * 24 * 60 * 60,
 }));
 
 const mockComputeAndSignVerdict = vi.fn();
