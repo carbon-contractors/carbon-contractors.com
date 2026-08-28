@@ -136,10 +136,12 @@ exists rather than reasoning from this file.**
   "Agent resolves its own dispute" was explicitly rejected.
   **Arbitration now has no app or MCP surface at all**, deliberately: the owner resolves via
   `scripts/admin/verify-escrow-lifecycle.ts` with the KMS key until the adjudication tier exists.
-  A disputed task therefore has no clock **yet**: `ADR-0006` D3 was **accepted 2026-08-26** and puts
-  a bounded arbitration deadline in the bytecode, defaulting an unresolved arbitration to the
-  **worker** via pull payment. It lands with `CC-034` or not at all for v1 — until it ships, a
-  dispute can sit indefinitely and only the owner can end it.
+  A disputed task therefore has no clock **yet**: `ADR-0006` D3 + Amendment 1 (2026-08-26) put a
+  **fixed 7-day** arbitration window in the bytecode, running from `disputeTask` — **not** from
+  `beginArbitration`, which is `onlyOwner` and optional, so a clock started there could be withheld
+  forever by never calling it. An unresolved arbitration defaults to the **worker** via pull payment.
+  It lands with `CC-034` or not at all for v1 — until it ships, a dispute can sit indefinitely and
+  only the owner can end it.
   → `ADR-0001` D2, `ADR-0007` (proposed), `CC-081` Defect 2
 - **Silence favoured the agent, and v2 inverts it.** v1 had one clock, so an agent that did nothing
   after delivery got refunded at expiry. v2 has two: the delivery deadline and an agent-set review

@@ -4,6 +4,7 @@ title: Continuity, succession, and the right to fork
 status: accepted
 date: 2026-08-19
 accepted: 2026-08-26 - execution parameters set, see Status
+amended: 2026-08-26 - D3's mechanism corrected, see Amendment 1
 deciders: Aaron Clifft
 depends-on: ADR-0001 (D6, D9, A1.2 — why funds already survive the founder), ADR-0002 (D4/D5/D9 — retention vs recoverability)
 resolves: CC-091, funds_control_aml_gating.md Track C
@@ -27,7 +28,7 @@ does.
 | **D1** copyright | **Aaron James Clifft, personally.** AGPL-3.0-or-later at the repository root; `contracts/` MIT. |
 | **D2** ownership | **2-of-4 Safe**, four hardware-isolated keys — Tangem cards bought separately and initialised as **distinct standalone wallets**. Owner separate from the automated HSM verdict signer, confirmed. **Custody: Aaron holds two, in two separate buildings; two family members hold one each.** |
 | **D11** custody escalation | Custody escalates on **measured adoption**, not intent, by **rotating the two family slots** to professional or partner holders. Thresholds keyed to the limbs `verify-concurrent-escrow.mjs` already measures. |
-| **D3** arbitration clock | **Bounded arbitration deadline in the contract bytecode, before the mainnet deploy.** An unresolved arbitration defaults to the **worker**, claimed as a pull payment. |
+| **D3** arbitration clock | **A fixed 7-day arbitration window in the contract bytecode, before the mainnet deploy, running from the moment the task is disputed.** An unresolved arbitration defaults to the **worker**, claimed as a pull payment. Mechanism corrected by **Amendment 1** — D3 as written could not start its own clock. |
 | **D5 / D7** continuity | `docs/BCP-DR.md` and `chain-constants.json` live **in-repo**. No dependency on any private workspace. |
 | **D8** backups | The DB backup posture **excludes task content and evidence**, so `privacy.md`'s deletion guarantee survives a restore. |
 
@@ -215,7 +216,10 @@ and an unresolved arbitration defaults to the worker via pull payment.** Both ha
   would mean the operator's death pays the agent, and would hand the platform a griefing lever it
   exercises by doing nothing.
 
-Still to choose: the **bound values**, in the same `MIN`/`MAX` shape as the review window. Open item.
+**Amendment 1 (2026-08-26) changes how this is built.** Two things in the paragraphs above do not
+survive contact with the state machine: the clock cannot start at `beginArbitration`, and it must not
+be a window the arbitrator sets for itself. The *decision* — a bytecode clock defaulting to the
+worker — stands unchanged. Read A1.1–A1.3 before implementing.
 
 This is a contract change. It lands with the mainnet deploy (`CC-034`) or it does not land in v1.
 
@@ -394,6 +398,73 @@ fail, because a monitor that goes red on commercial success trains its reader to
 | Task content included in backups "for safety" | Directly falsifies a published deletion claim; DR must not become a retention exception |
 | DR plan lives in the founder's private workspace | The document describing how to re-host from the public repo must be reachable from the public repo |
 
+## Amendment 1 — 2026-08-26 — the arbitration clock starts at the dispute, and is a constant
+
+D3 was accepted with its mechanism borrowed from the review window: *"`beginArbitration` sets an
+arbitration deadline, bounded by the contract in the same way the review window is."* Setting the
+bound values exposed two problems with that sentence. The decision is unaffected; the mechanism is
+replaced.
+
+### A1.1 — The clock starts at `disputeTask`, not at `beginArbitration`
+
+`beginArbitration` is `onlyOwner`, and `CarbonEscrow.sol` documents `Disputed → Arbitrating` as
+**"a marker, not a gate: resolveDispute works from either state"**. So it is optional. An owner who
+simply never calls it never starts a clock, and the task sits `Disputed` indefinitely with the escrow
+held — **which is the exact stranding case D3 exists to close.** A deadline whose start is controlled
+by the party it constrains is not a deadline.
+
+So the clock starts when the task *becomes* disputed:
+
+- `disputeTask` records `disputedAt`. It is callable by **either party** (`ADR-0001` D2), so no single
+  party can withhold the clock by inaction.
+- `beginArbitration` keeps its marker role for observability — an off-chain observer can still tell
+  "raised" from "being worked on" — but stops being load-bearing.
+
+### A1.2 — It is a constant, not a window the arbitrator sets
+
+The review window is agent-set within bounds because a $5 photo task and a multi-day job do not want
+the same number, and because the agent is not the party the clock protects against. Neither holds
+here. The arbitrator would be choosing **its own deadline**, which is the same structure as the
+defect `ADR-0001` D2 removed — one party holding both sides of a decision.
+
+`ARBITRATION_WINDOW` is therefore a contract constant. No discretion, nothing to stall with, and one
+fewer argument to get wrong at a moment when a dispute is already live.
+
+`ADR-0007`'s tiers may eventually want a tier-dependent window — a T2 panel needs longer than a T1
+single reviewer. That is a contract change whichever shape is chosen today, so nothing is foreclosed.
+
+### A1.3 — Seven days
+
+**`ARBITRATION_WINDOW = 7 days`.**
+
+The number that matters is not the window, it is what a worker experiences, because the clocks stack:
+
+| | Post-delivery wait, worst case |
+| :-- | :-- |
+| `MAX_REVIEW_WINDOW` (14d) + **7d** | **21 days** |
+| `MAX_REVIEW_WINDOW` (14d) + 14d | 28 days |
+
+Twenty-one days is already a long time to be unpaid for a small job, and that is the *ceiling* — it
+requires an agent that chose the maximum review window, disputed, and then an arbitration that ran
+full length.
+
+- **Long enough** for the arbitration that actually exists: the owner reading evidence and running
+  `scripts/admin/verify-escrow-lifecycle.ts`, or `ADR-0007`'s T1 single reviewer.
+- **Short enough** that stalling is not a strategy and the tail stays proportionate to the work.
+- **Deliberately half of `MAX_REVIEW_WINDOW`.** The platform is held to a tighter clock than the
+  agent, and that asymmetry is the right way round: the platform chose to run a dispute mechanism,
+  and by the time arbitration starts the worker has already delivered *and* waited out a full review
+  window.
+
+**What this costs to build** (scoped into `CC-034`, since it is bytecode):
+
+- A `uint64 disputedAt` field. Slot 1 is 30 of 32 bytes used, so it takes a new slot — but it is only
+  written by `disputeTask`, so `createTask` never pays for it.
+- A worker-claim path for the timeout, reusing `_payOut` with a new `CompletionRoute` member appended
+  (appending is safe; the enum is only ever read from events).
+- Tests for the boundary in both directions, and for the case A1.1 exists to prevent: **a dispute
+  where `beginArbitration` is never called must still time out.**
+
 ## Consequences
 
 - `CC-090` re-rates P2 → P1 and merges with D2.
@@ -423,8 +494,10 @@ fail, because a monitor that goes red on commercial success trains its reader to
     it. A deliverable, not a decision, and it does not live in this repo.
   - **The legal instrument.** Succession runs to a minor with a proxy; that is a will, not a repo
     artefact, and it is the live half of the "law rather than code" item below.
-- **Arbitration deadline bounds** — the D3 numbers, in the same shape as `MIN`/`MAX_REVIEW_WINDOW`.
-  Needed before the `CC-034` bytecode is frozen, because D3 is now a bytecode commitment.
+- ~~**Arbitration deadline bounds.**~~ → **Set 2026-08-26** by Amendment 1: a fixed
+  `ARBITRATION_WINDOW` of **7 days**, running from `disputeTask` rather than `beginArbitration`, and
+  a constant rather than a settable window. The `MIN`/`MAX` shape was abandoned with the reasoning in
+  A1.2 — the arbitrator must not set its own deadline.
 - **Backup mechanism for the D8 split** — which Supabase facility (or replacement) can back up
   registration data while excluding the task-content columns. D8 states the requirement; nothing yet
   implements it, and a backup configured wrong is indistinguishable from one configured right until a
@@ -451,8 +524,8 @@ fail, because a monitor that goes red on commercial success trains its reader to
    its reader to ignore it.
 10. **The estate packet** (D2) — outside the repo, and the only item here that cannot be done by
    writing code.
-5. **Arbitration deadline in the contract** (D3) — in the mainnet deploy, with tests. Scoped into
-   `CC-034` 2026-08-26. **Blocked on the bound values.**
+5. **Arbitration clock in the contract** (D3 + Amendment 1) — in the mainnet deploy, with tests.
+   Scoped into `CC-034` 2026-08-26. **Unblocked**: fixed 7-day window from `disputeTask`.
 6. **Profile signing** (D9) — before the registry holds real workers.
 7. **ENS record and the announcement channel** (D6), folded into `CC-044`'s rewrite.
 8. **Protocol spec** (D7) — after `CC-092`, when the surface it describes exists.
