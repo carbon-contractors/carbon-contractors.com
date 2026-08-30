@@ -264,6 +264,14 @@ over a claim.
 Linear was retired in July 2026. `NOR-xxx` in code comments maps to `CC-xxx` via the `linear:`
 frontmatter field.
 
+> **Note (2026-08-30):** Linear has been reinstated as the canonical product/task layer for the
+> *Allogaia* operating model (ADR-015), and the shared "North Metro Tech" workspace now carries
+> both Allogaia and Carbon Contractors work. This repo's internal tracking (`docs/backlog/`,
+> `CC-###` ids, `scripts/backlog.mjs`) remains the source of truth **for Carbon Contractors
+> itself** and is unaffected — the reinstatement is an organisation-level decision, not a change to
+> how this repo is managed. If a task spans orgs or needs a human-facing tracker, use Linear;
+> otherwise continue using the backlog as described above.
+
 ## Layout
 
 ```
