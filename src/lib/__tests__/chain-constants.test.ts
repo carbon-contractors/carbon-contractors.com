@@ -69,6 +69,25 @@ describe("chain-constants.json", () => {
     }
   });
 
+  it("keeps the EAS EIP-712 envelope per-network, because it genuinely differs", () => {
+    // Measured 2026-08-31: Base Sepolia runs EAS 1.2.0 and Base mainnet 1.0.1, at the SAME
+    // predeploy address, with DIFFERENT getAttestTypeHash() values. A hard-coded envelope
+    // therefore signs correctly on one network and is rejected by the other — and the
+    // failure would surface at the mainnet migration, on the first attestation.
+    //
+    // Pinned so nobody collapses these into one value on the reasonable-looking grounds
+    // that the addresses are identical. They are; the code behind them is not.
+    const { attestTypeHash, domainSeparator, easVersion } = constants.protocol.attestations;
+    expect(attestTypeHash["base-sepolia"]).not.toBe(attestTypeHash["base-mainnet"]);
+    expect(domainSeparator["base-sepolia"]).not.toBe(domainSeparator["base-mainnet"]);
+    expect(easVersion["base-sepolia"]).not.toBe(easVersion["base-mainnet"]);
+    for (const map of [attestTypeHash, domainSeparator]) {
+      for (const [network, value] of Object.entries(map)) {
+        expect(value, network).toMatch(/^0x[0-9a-f]{64}$/);
+      }
+    }
+  });
+
   it("does not claim a registration that has not happened", () => {
     // registered flips to true only once verify-eas-schema.mjs passes against that network.
     // Asserted so it cannot be set optimistically ahead of the transaction.

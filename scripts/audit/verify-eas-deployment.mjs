@@ -50,6 +50,12 @@ const EAS_ABI = [
     inputs: [],
     outputs: [{ type: "address" }],
   },
+  { type: "function", name: "getName", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
+  // The EIP-712 envelope for a DELEGATED attestation, read off the chain rather than
+  // transcribed from documentation. See the report at the end of main() for why that
+  // distinction is the whole point of this addition.
+  { type: "function", name: "getDomainSeparator", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
+  { type: "function", name: "getAttestTypeHash", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
 ];
 
 const REGISTRY_ABI = [
@@ -106,7 +112,7 @@ async function main() {
   console.log(`rpc        ${rpcUrl ? "dedicated endpoint" : "PUBLIC FALLBACK — rate limited, CC-048"}`);
   console.log("");
 
-  let easVersion, registryRaw;
+  let easVersion, easName, registryRaw;
   try {
     const code = await withRpcRetry("getCode", () => client.getCode({ address: eas }));
     if (!code || code === "0x") {
@@ -119,6 +125,9 @@ async function main() {
 
     easVersion = await withRpcRetry("version", () =>
       client.readContract({ address: eas, abi: EAS_ABI, functionName: "version" }),
+    );
+    easName = await withRpcRetry("getName", () =>
+      client.readContract({ address: eas, abi: EAS_ABI, functionName: "getName" }),
     );
     registryRaw = await withRpcRetry("getSchemaRegistry", () =>
       client.readContract({ address: eas, abi: EAS_ABI, functionName: "getSchemaRegistry" }),
@@ -137,6 +146,7 @@ async function main() {
   }
 
   console.log(`EAS.version()         ${mark(true)}  ${easVersion}`);
+  console.log(`EAS.getName()         ${mark(easName === "EAS")}  ${easName}`);
 
   if (!isAddress(registryRaw) || registryRaw === "0x0000000000000000000000000000000000000000") {
     console.error(`FAIL  getSchemaRegistry() returned ${registryRaw}.`);
@@ -187,6 +197,41 @@ async function main() {
     return 1;
   }
 
+  // ── The EIP-712 envelope, read rather than assumed ────────────────────────
+  //
+  // Measured 2026-08-31: Base Sepolia runs EAS 1.2.0 and Base mainnet runs 1.0.1, and their
+  // getAttestTypeHash() values DIFFER. So the typed-data envelope for a delegated
+  // attestation is not one fact, it is a per-network fact — and a build that hard-codes it
+  // signs correctly on one network and produces signatures the other rejects.
+  //
+  // These are view functions, so nothing needs transcribing from documentation. That is
+  // what removed ADR-0008's "the envelope is an external fact we cannot obtain" blocker.
+  let domainSeparator = null;
+  let attestTypeHash = null;
+  try {
+    [domainSeparator, attestTypeHash] = await Promise.all([
+      withRpcRetry("getDomainSeparator", () =>
+        client.readContract({ address: eas, abi: EAS_ABI, functionName: "getDomainSeparator" }),
+      ),
+      withRpcRetry("getAttestTypeHash", () =>
+        client.readContract({ address: eas, abi: EAS_ABI, functionName: "getAttestTypeHash" }),
+      ),
+    ]);
+  } catch (err) {
+    if (isTransient(err)) {
+      console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(err)}`);
+      return 3;
+    }
+    // Not fatal to the corroboration — the pair is still EAS — but it is fatal to signing.
+    console.log(`EIP-712 envelope      ${mark(false)}  could not read: ${shortError(err)}`);
+    console.log("Delegated attestations need these. Without them, signing is guesswork.");
+    return 1;
+  }
+
+  console.log(`getDomainSeparator()  ${mark(true)}  ${domainSeparator}`);
+  console.log(`getAttestTypeHash()   ${mark(true)}  ${attestTypeHash}`);
+  console.log("");
+
   const key = mainnet ? "base-mainnet" : "base-sepolia";
   console.log("CORROBORATED — the pair behave like EAS and its SchemaRegistry.");
   console.log("");
@@ -194,6 +239,14 @@ async function main() {
   console.log("");
   console.log(`  "easAddress":            { "${key}": "${eas}" }`);
   console.log(`  "schemaRegistryAddress": { "${key}": "${registry}" }`);
+  console.log(`  "easVersion":            { "${key}": "${easVersion}" }`);
+  console.log(`  "domainSeparator":       { "${key}": "${domainSeparator}" }`);
+  console.log(`  "attestTypeHash":        { "${key}": "${attestTypeHash}" }`);
+  console.log("");
+  console.log("The last three are PER-NETWORK and not interchangeable. Base Sepolia and Base");
+  console.log("mainnet run different EAS versions with different Attest typehashes, so a");
+  console.log("hard-coded envelope signs correctly on one and is rejected by the other. Read");
+  console.log("them at runtime; the values above are for cross-checking, not for embedding.");
   console.log("");
   console.log("Then confirm the schema itself:");
   console.log(`  node scripts/audit/verify-eas-schema.mjs --registry=${registry} --network=${network}`);
