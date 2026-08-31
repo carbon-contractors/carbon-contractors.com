@@ -7,7 +7,7 @@
  * the ABI encoding of one attestation's data. That is deliberate — the schema UID is
  * **permanent**, and pinning it as a computed constant means the on-chain registration can
  * be checked against an expected value rather than trusted
- * (`scripts/audit/verify-eas-deployment.mjs`).
+ * (`scripts/audit/verify-eas-schema.mjs`).
  *
  * The three facts that are *not* here, because they are external and must not be guessed:
  * the EAS address, the SchemaRegistry address, and the off-chain EIP-712 envelope for the
@@ -21,6 +21,10 @@ import { encodeAbiParameters, encodePacked, keccak256, type Address, type Hex } 
  * The schema, exactly as it is registered. **Changing any character forks the reputation
  * history**, because the UID below is derived from these bytes — read ADR-0008 D4 before
  * touching it.
+ *
+ * **Do not reformat it.** No space after a comma, no line wrapping, no `+` concatenation.
+ * The string is the identity, not a description of it, so a cosmetic edit is a schema fork.
+ * `github-code-quality` has already flagged the comma spacing once, reading it as prose.
  *
  * The worker is the EAS `recipient`, not a field here. That is where EAS puts the subject,
  * and carrying it twice invites the two disagreeing.

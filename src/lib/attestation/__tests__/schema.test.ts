@@ -38,14 +38,32 @@ const SAMPLE: CompletionAttestationData = {
 };
 
 describe("ADR-0008 completion schema", () => {
-  it("pins the schema string", () => {
-    // A tripwire, not a tautology. If this fails, someone changed the schema — which forks
-    // every attestation already issued. Read ADR-0008 D4 before updating the expectation.
-    expect(COMPLETION_SCHEMA).toBe(
-      "bytes32 taskId,address escrow,uint256 chainId,address agent,uint256 amountUsdc," +
-        "uint8 route,uint64 completedAt,bytes32 specHash,bytes32 evidenceHash," +
-        "bytes32 verdictHash,bytes32 checkerHash",
+  it("pins the schema identity to a single unwrappable literal", () => {
+    // THE tripwire. If this fails, the schema changed — which forks every attestation
+    // already issued. Read ADR-0008 D4 before updating the expectation.
+    //
+    // Deliberately the UID and not a restatement of the schema string. An earlier version
+    // asserted the string via a three-line `+` concatenation, and github-code-quality
+    // flagged it as "missing space after 'amountUsdc,'" — reading the schema as prose.
+    // It is not prose: the string IS the identity, `keccak256(encodePacked(schema,
+    // resolver, revocable))`, so inserting that space would have forked the schema while
+    // looking like a formatting tidy-up. A single hex literal cannot be line-wrapped, so
+    // it cannot be "helpfully" reflowed by a formatter, a bot, or a person.
+    expect(completionSchemaUid()).toBe(
+      "0x990663e1a6e37950b4d1b3eb6d2685dc36115d6d1fbc789902268ef1d594380e",
     );
+  });
+
+  it("has no whitespace around its separators", () => {
+    // The specific edit the concatenation invited, blocked directly. Any space after a
+    // comma is a different schema and therefore a different UID.
+    expect(COMPLETION_SCHEMA).not.toMatch(/,\s/);
+    expect(COMPLETION_SCHEMA).not.toMatch(/\s,/);
+    expect(COMPLETION_SCHEMA.trim()).toBe(COMPLETION_SCHEMA);
+    // Exactly one space per field, between type and name.
+    for (const field of COMPLETION_SCHEMA.split(",")) {
+      expect(field.split(" ")).toHaveLength(2);
+    }
   });
 
   it("pins the two other UID inputs", () => {
