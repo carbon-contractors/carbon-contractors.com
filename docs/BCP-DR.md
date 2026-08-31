@@ -168,20 +168,19 @@ Retention itself now runs: `/api/cron/retention` fires daily at 03:17 UTC (`CC-0
 | :-- | :-- |
 | **What it is** | **Linear**, reinstated 2026-08-30 as the canonical product/task layer for the *Allogaia* operating model (ADR-015, Allogaia). The shared "North Metro Tech" workspace carries both Allogaia and Carbon Contractors work. |
 | **What it is *not*** | The source of truth for this repo. `docs/backlog/`, the `CC-###` ids and `scripts/backlog.mjs` remain that, and are unaffected — the reinstatement is organisation-level. See the dated note at the end of `CLAUDE.md`. |
-| **Who controls it** | Aaron, via the North Metro Tech workspace. |
-| **Cost / renewal** | **TO FILL** — plan tier and billing cycle. Recorded as a gap because the previous Linear arrangement was abandoned in July 2026 *for cost*: the free plan was outgrown. That is a known failure mode for this dependency, not a hypothetical. |
-| **What breaks first if it lapses** | Cross-org product context — sequencing, priorities, anything spanning Allogaia and Carbon Contractors. **This repo keeps working**, which is the mitigation and is worth being deliberate about: `docs/backlog/` is in git, is public, and survives any SaaS. The exposure is decisions and discussion that exist *only* in Linear and nowhere in the repo. |
-| **Export posture** | **TO FILL** — whether anything Carbon-Contractors-specific lives only in Linear, and whether it is exported anywhere. A decision recorded in Linear and not in an ADR is a decision this repo cannot see. |
+| **Who controls it** | Aaron, via the North Metro Tech workspace. **Whether a second person can administer it is the question that matters here**, and it is the same question this file asks of Vercel, Supabase and GCP below. |
+| **Cost / renewal** | **TO FILL** — plan tier and billing cycle. Worth recording because the tier was the reason the *previous* arrangement was dropped in July 2026, which is what produced `docs/backlog/`. |
+| **Export / backup** | Linear has a first-party Google Sheets integration for export, tracking and dashboards, and supports automated backups. So this is **configuration, not a capability gap**: record what is configured and where the export lands. **TO FILL.** |
+| **What breaks first if it lapses** | Not vendor exit — the realistic failure is a **billing or access lapse**, the same class as the domain and Basename rows above. Cross-org product context goes: sequencing, priorities, anything spanning Allogaia and Carbon Contractors. **This repo keeps working**, because `docs/backlog/` is in git and public. The exposure is decisions that exist *only* in Linear. |
 
-**The 2026-08-30 reinstatement is the second arrangement, not a return to the first.** The July 2026
-retirement moved tracking into the repo, which is why `docs/backlog/` exists at all and why the
-`linear:` frontmatter field maps historical `NOR-###` ids. Those ids belong to the **old** workspace.
-New Linear ids come from a different workspace and a different sequence, so an id encountered in
-future work is not comparable to a `NOR-###` in a code comment.
+**`NOR-###` ids do not line up.** They belong to the workspace retired in July 2026 and map to
+`CC-###` through the `linear:` frontmatter field. The reinstated workspace has its own sequence, so a
+Linear id met in future work has no relationship to a `NOR-###` in a code comment.
 
-**The standing rule is unchanged and this does not relax it.** An out-of-scope problem noticed during
-work goes in a one-line *Observations* note; Aaron decides what becomes a `CC-###` — or now, what
-becomes a Linear issue instead. Neither tracker changes who triages.
+**Work can now originate inside Linear.** It carries in-platform coding agents, so a change can be
+initiated there rather than from a checkout. That does not alter who triages — an out-of-scope problem
+still goes in a one-line *Observations* note and Aaron decides where it lands — but it does mean a
+commit's motivating context may live in Linear and not in an ADR or an issue file.
 
 ---
 

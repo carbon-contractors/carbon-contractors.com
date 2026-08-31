@@ -348,10 +348,10 @@ frontmatter field.
 > otherwise continue using the backlog as described above.
 >
 > **The id sequences are not comparable.** `NOR-###` ids belong to the *retired* workspace and map to
-> `CC-###` through the `linear:` frontmatter field. The reinstated workspace is a different one with
-> its own sequence, so a Linear id met in future work has no relationship to a `NOR-###` in a code
-> comment. Continuity posture for Linear as a dependency: `docs/BCP-DR.md` § *Product and task
-> tracking*.
+> `CC-###` through the `linear:` frontmatter field. The reinstated workspace has its own sequence, so
+> a Linear id met in future work has no relationship to a `NOR-###` in a code comment. Linear also
+> carries in-platform coding agents, so a commit's motivating context may live there rather than in
+> an ADR or an issue file. → `docs/BCP-DR.md` § *Product and task tracking*
 
 ## Layout
 
