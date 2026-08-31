@@ -390,10 +390,12 @@ the ABI drift check, `test:contracts`, `monitors:list`, test, build. The audit s
 on high-severity findings, so a stale dependency tree breaks CI rather than merging quietly.
 
 **The invariant monitors run on a schedule, not in CI** — `.github/workflows/monitors.yml`, hourly.
-They read the live chain, so no `pull_request` trigger may ever run them. Alerting has two paths and
-**path 2 is not live until `MONITOR_WEBHOOK_URL` and `MONITOR_HEARTBEAT_URL` are set as repository
-secrets**; without the heartbeat, the schedule silently stopping is indistinguishable from
-everything passing. → `CC-085`, `ADR-0003` D3/D5
+They read the live chain, so no `pull_request` trigger may ever run them. **Both alerting paths are
+live** — `MONITOR_WEBHOOK_URL` and `MONITOR_HEARTBEAT_URL` have been repository secrets since
+2026-08-15, and this entry claimed otherwise until 2026-08-31. They work: a three-day
+`verify-unclaimed` failure was reported hourly (webhook `204`, heartbeat `/fail` `200`) and the
+staleness was in this file, not the pipeline. **A red monitor schedule is a real finding — check
+`gh run list --workflow=monitors.yml` before assuming green.** → `CC-085`, `ADR-0003` D3/D5
 
 ## Conventions
 

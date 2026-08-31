@@ -99,6 +99,50 @@ const GET_TASK_ABI = [
   },
 ];
 
+/**
+ * `getTask` as it returns from every escrow deployed **before** the ADR-0006 D3 arbitration
+ * clock — twelve fields, no `disputedAt`. A historical record; never edit it.
+ *
+ * This monitor failed hourly from 2026-08-28 to 2026-08-31 without it. The tuple above
+ * gained `disputedAt` when the contract source did, the deployed Sepolia contract still
+ * returns twelve words, and viem threw `Position 415 is out of bounds` — reported as
+ * MISCONFIGURED, which is the right exit code and a misleading word: the configuration was
+ * fine, the ABI was ahead of the chain. `src/lib/contracts/escrow.ts` got this fallback in
+ * the same week and this file did not.
+ */
+const LEGACY_GET_TASK_ABI = [
+  {
+    type: "function",
+    name: "getTask",
+    stateMutability: "view",
+    inputs: [{ name: "taskId", type: "bytes32" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: GET_TASK_ABI[0].outputs[0].components.filter((c) => c.name !== "disputedAt"),
+      },
+    ],
+  },
+];
+
+/**
+ * viem's decode errors for "the returndata is narrower than the ABI says". Deliberately
+ * narrow: retrying on any read failure would report a task shape for a wrong address or an
+ * RPC fault, inventing a task rather than failing.
+ */
+const WIDTH_MISMATCH_ERRORS = new Set([
+  "PositionOutOfBoundsError",
+  "AbiDecodingDataSizeTooSmallError",
+  "SliceOffsetOutOfBoundsError",
+]);
+
+function isAbiWidthMismatch(err) {
+  for (let cursor = err, depth = 0; cursor && depth < 8; cursor = cursor.cause, depth++) {
+    if (cursor.name && WIDTH_MISMATCH_ERRORS.has(cursor.name)) return true;
+  }
+  return false;
+}
+
 /** v2 numbering (CC-082). Renumbered from v1 — Completed was 2, it is now 3. */
 const STATE = { None: 0, Funded: 1, Delivered: 2, Completed: 3, Disputed: 4, Arbitrating: 5, Resolved: 6, Expired: 7 };
 
@@ -226,22 +270,42 @@ async function main() {
     return 0;
   }
 
-  let tasks;
-  try {
-    tasks = await withRpcRetry("getTask", () =>
+  const readAll = (abi) =>
+    withRpcRetry("getTask", () =>
       Promise.all(
         allIds.map((taskId) =>
-          client.readContract({ address: escrow, abi: GET_TASK_ABI, functionName: "getTask", args: [taskId] }),
+          client.readContract({ address: escrow, abi, functionName: "getTask", args: [taskId] }),
         ),
       ),
     );
+
+  let tasks;
+  // True once the deployed contract is confirmed to carry the arbitration clock. Drives
+  // the timeout check below: against a pre-clock deployment there is no timeout to check,
+  // and asserting on one would be inventing a deadline the bytecode cannot honour.
+  let hasArbitrationClock = true;
+  try {
+    tasks = await readAll(GET_TASK_ABI);
   } catch (err) {
     if (isTransient(err)) {
       console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(err)}`);
       return 3;
     }
-    console.error(`MISCONFIGURED: getTask read failed: ${shortError(err)}`);
-    return 2;
+    if (!isAbiWidthMismatch(err)) {
+      console.error(`MISCONFIGURED: getTask read failed: ${shortError(err)}`);
+      return 2;
+    }
+    hasArbitrationClock = false;
+    try {
+      tasks = await readAll(LEGACY_GET_TASK_ABI);
+    } catch (retryErr) {
+      if (isTransient(retryErr)) {
+        console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(retryErr)}`);
+        return 3;
+      }
+      console.error(`MISCONFIGURED: getTask read failed on both ABIs: ${shortError(retryErr)}`);
+      return 2;
+    }
   }
 
   const claimable = []; // Delivered, review window closed
@@ -264,10 +328,11 @@ async function main() {
       };
       (asOf >= reviewDeadline ? claimable : inReview).push(row);
     } else if (state === STATE.Disputed || state === STATE.Arbitrating) {
-      // disputedAt is stamped by disputeTask, so it is non-zero in both these states. If
-      // it ever reads zero here the deadline lands in 1970 and every disputed task looks
-      // timed out — report that as its own thing rather than as a breach.
-      const stamped = Number(t.disputedAt);
+      // disputedAt is stamped by disputeTask, so it is non-zero in both these states —
+      // on a deployment that HAS the field. On one that does not it reads undefined, and
+      // `unstamped` below is what keeps that out of the breach list: a 1970 deadline would
+      // otherwise make every disputed task look timed out.
+      const stamped = Number(t.disputedAt ?? 0);
       const arbDeadline = stamped + ARBITRATION_WINDOW;
       const row = {
         taskId: allIds[i],
@@ -299,6 +364,9 @@ async function main() {
   console.log(`Delivered, window still open      ${inReview.length}`);
   console.log(`Delivered, claimable now          ${claimable.length}   ${usdcFmt(heldClaimable)}`);
   console.log(`  of those, older than ${String(maxAgeDays).padEnd(4)} day(s) ${breaches.length}`);
+  if (!hasArbitrationClock) {
+    console.log("Arbitration clock                 ABSENT from this deployment (pre-ADR-0006 D3)");
+  }
   console.log(`Arbitration running               ${liveArbitration.length}`);
   console.log(`Arbitration timed out, claimable  ${timedOutArbitration.length}   ${usdcFmt(heldArb)}`);
   console.log(`  of those, older than ${String(maxAgeDays).padEnd(4)} day(s) ${arbBreaches.length}`);
@@ -324,15 +392,23 @@ async function main() {
   }
   if (timedOutArbitration.length > 0) console.log("");
 
-  // A zero disputedAt in a disputed state should be unreachable: disputeTask always
-  // stamps it. Surfaced rather than swallowed, because the alternative reading is that the
-  // deployed bytecode is not the bytecode this monitor thinks it is.
-  if (unstamped.length > 0) {
+  // The arbitration half of this monitor is inert against a pre-clock deployment. Said
+  // out loud, because a check that silently cannot fire is worse than one that is absent:
+  // it reports CLEAN and reads as coverage.
+  if (!hasArbitrationClock) {
+    console.log("NOTE — the deployed escrow has no arbitration clock, so the timeout check");
+    console.log("above cannot fire. A disputed task there has no deadline and only the owner");
+    console.log("can end it. This is the expected state until CC-034 redeploys; it is reported");
+    console.log("rather than asserted on, because there is no invariant to assert yet.");
+    console.log("");
+  } else if (unstamped.length > 0) {
+    // Only reachable on a deployment that HAS the field, where disputeTask stamps it
+    // unconditionally — so this really should be impossible, and the honest reading is
+    // that the tuple in this file has drifted from the struct.
     console.log(`ANOMALY — ${unstamped.length} disputed task(s) with disputedAt == 0.`);
-    console.log("disputeTask stamps that field unconditionally, so this should be unreachable.");
-    console.log("Either the deployed contract predates ADR-0006 D3 — in which case a disputed");
-    console.log("task has no clock at all and this monitor cannot see the timeout — or the ABI");
-    console.log("tuple in this file has drifted from the struct. Check both before dismissing.");
+    console.log("disputeTask stamps that field unconditionally, so this should be unreachable");
+    console.log("on a contract that has the clock. Check the ABI tuple in this file against");
+    console.log("contracts/CarbonEscrow.sol before dismissing it.");
     console.log("");
   }
 
