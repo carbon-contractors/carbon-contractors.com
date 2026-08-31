@@ -26,7 +26,7 @@ does.
 | Decision | Parameter |
 | :-- | :-- |
 | **D1** copyright | **Aaron James Clifft, personally.** AGPL-3.0-or-later at the repository root; `contracts/` MIT. |
-| **D2** ownership | **2-of-4 Safe**, four hardware-isolated keys — Tangem cards bought separately and initialised as **distinct standalone wallets**. Owner separate from the automated HSM verdict signer, confirmed. **Custody: Aaron holds two, in two separate buildings; two family members hold one each.** |
+| **D2** ownership | **2-of-4 Safe**, four hardware-isolated keys — Tangem cards initialised as **distinct standalone wallets** (**A2**: they arrived as multi-card packs, so this is a setup procedure with a pre-distribution test, not a property of the purchase). Owner separate from the automated HSM verdict signer, confirmed. **Custody: Aaron holds two, in two separate buildings; two family members hold one each.** |
 | **D11** custody escalation | Custody escalates on **measured adoption**, not intent, by **rotating the two family slots** to professional or partner holders. Thresholds keyed to the limbs `verify-concurrent-escrow.mjs` already measures. |
 | **D3** arbitration clock | **A fixed 7-day arbitration window in the contract bytecode, before the mainnet deploy, running from the moment the task is disputed.** An unresolved arbitration defaults to the **worker**, claimed as a pull payment. Mechanism corrected by **Amendment 1** — D3 as written could not start its own clock. |
 | **D5 / D7** continuity | `docs/BCP-DR.md` and `chain-constants.json` live **in-repo**. No dependency on any private workspace. |
@@ -131,15 +131,19 @@ same change, and it re-rates `CC-090` to P1.
   see open items.
 
 **Accepted 2026-08-26 — the architecture is a 2-of-4 Safe over four hardware-isolated keys**,
-implemented as Tangem cards **bought separately** and initialised as distinct standalone wallets.
+implemented as Tangem cards **initialised as distinct standalone wallets**. (Amended 2026-08-31: the
+original text said "bought separately and initialised as distinct standalone wallets". Only the
+second half is the requirement — see A2.)
 Separation of the contract owner from the automated HSM verdict signer is confirmed and is now a
 stated invariant rather than an aspiration: `verify-contract-owner.mjs` and `verify-signer.mjs`
 already assert each half, and together they assert the separation.
 
 **The failure mode to design against is a multisig that is not one.** A Tangem set restored from a
-single seed presents several cards and one key. Buying separately makes that impossible by
-construction; the acceptance test is still on-chain and not procedural — four Safe owners at four
-addresses with no shared derivation, checked before any value moves. `CC-090` carries it.
+single seed presents several cards and one key. **Amended 2026-08-31 — see A2: the cards were bought
+as multi-card packs, so this is a procedure to execute rather than a property of the purchase.** The
+acceptance test is on-chain and not procedural — four Safe owners at four addresses with no shared
+derivation, checked before any value moves — plus a cheaper pre-check that needs no Safe at all.
+`CC-090` carries both.
 
 **Custody, decided 2026-08-26: 2-of-4.** Recorded as roles and separation only — **never
 locations**. This file is in a public repository (`CC-056`); writing down where a key lives would
@@ -491,6 +495,86 @@ needs a 169th hour has a scheduling problem, not a rights problem.
 - Tests for the boundary in both directions, and for the case A1.1 exists to prevent: **a dispute
   where `beginArbitration` is never called must still time out.**
 
+## Amendment 2 — 2026-08-31 — the custody property is initialisation, not purchase
+
+D2 was accepted with the words "Tangem cards **bought separately**, so a shared seed is impossible by
+construction." The hardware was ordered on 2026-08-31: **four cards, as multi-card packs, not four
+separate single-card orders.** ~A$130 total, shipping from the US, expected around 2026-09-17.
+
+The decision is unaffected — still a 2-of-4 Safe over four hardware-isolated keys, same custody
+table. What changes is that the property is no longer guaranteed by the procurement, and three
+statements in this ADR, `CLAUDE.md`, `docs/BCP-DR.md` and `chain-constants.json` said it was. All four
+are corrected in the same commit as this amendment.
+
+### A2.1 — The requirement was always independent initialisation
+
+"Bought separately" was never the property. It was a **proxy** for the property, chosen because it
+was checkable at order time — before there was any hardware to test. The property is that the four
+keys derive from four independent seeds.
+
+The proxy is gone. The requirement is not:
+
+**Each card is initialised as its own standalone wallet, with the app's backup/link step skipped.**
+
+The vendor's account is that cards in a pack become linked only when a second card is registered as a
+backup, and that skipping that step leaves each card an independent wallet. That is plausible and
+consistent with how the hardware works. It is also **vendor-reported and unverified by us**, and it
+converts a fact about the boxes into a procedure a person executes once, under an app that actively
+prompts toward the backup flow. Procedures executed once by a person are exactly what this ADR
+distrusts elsewhere.
+
+So it needs a test, and it turns out to need it earlier than D2 assumed.
+
+### A2.2 — The test moves earlier and gets cheaper
+
+D2's acceptance test was on-chain: four Safe owners at four addresses. That still stands as the final
+gate — the Safe's owner set is what actually enforces the threshold, so it is the only thing that
+proves the arrangement rather than the intent.
+
+But it is no longer the *first* test, and it should not be. **Four distinct addresses can be read
+straight off the four cards** — tap each, read its address — before a Safe exists, before a
+transaction, on day one of delivery. That check costs nothing and it is available at the only moment
+when the answer is still cheap to act on.
+
+Ordering, which is the actual content of this amendment:
+
+1. Initialise each card standalone, backup/link skipped.
+2. **Read all four addresses. Four distinct values, or stop.** A repeat means two cards share a seed.
+3. Factory-reset and redo any pair that failed. Confirm the reset procedure against Tangem's own
+   documentation first — this ADR is not the authority on their hardware.
+4. Assign cards to slots per A2.3, then distribute.
+5. Create the Safe, verify four owners on-chain, transfer contract ownership, and only then fund.
+
+Steps 2 and 3 are reversible. Everything from step 4 is not, in practice: the cards are then in
+different buildings and in non-technical hands, and getting them back to redo the setup is a
+different kind of problem from tapping four cards on a desk.
+
+### A2.3 — Cross-pack slot assignment, as a free hedge
+
+Assign cards so that **no two cards from the same pack land in either load-bearing pair.**
+
+| Slot | Holder | Card from |
+| :-- | :-- | :-- |
+| 1 | Aaron — daily driver | pack A |
+| 2 | Aaron — secured, different building | pack B |
+| 3 | Family member A | pack A |
+| 4 | Family member B | pack B |
+
+Two pairs carry the arrangement: **Aaron's own two**, so he can act without coordinating, and
+**family A + family B**, which is the succession path and D2's entire reason for choosing 2-of-4 over
+2-of-3. Under this assignment both cross packs.
+
+The hedge is free. If initialisation worked, pack membership means nothing and the assignment is
+arbitrary. If it silently did not, the two pairs that matter still reach threshold and what degrades
+is loss tolerance — both cards of one pack can no longer be lost together — rather than succession.
+
+**The wrong assignment fails in precisely the case 2-of-4 exists to cover.** Two family cards from
+one pack are one signer. They can never reach threshold together, the estate-discovery dependency
+this ADR removed comes straight back, and nothing about the Safe would look wrong from outside.
+
+Recorded as a decision rather than a note because it cannot be applied retroactively, and because the
+intuitive assignment — give the family the two cards that came in the same box — is the failing one.
+
 ## Consequences
 
 - `CC-090` re-rates P2 → P1 and merges with D2.
@@ -504,6 +588,9 @@ needs a 169th hour has a scheduling problem, not a rights problem.
   record (D6). None of it blocks the Sepolia lifecycle tests.
 - **The published claim set grows.** `terms.md` now says funded tasks survive the platform; that must
   stay true, which makes D3 load-bearing on copy as well as on funds.
+- **Amendment 2 adds two `CC-090` closing conditions** that were previously implicit in the
+  procurement: the four-address pre-check before distribution, and the cross-pack slot assignment.
+  Neither is expensive; both are unrecoverable if skipped and only discovered later.
 
 ## Open items
 
@@ -512,8 +599,9 @@ needs a 169th hour has a scheduling problem, not a rights problem.
   does not.
 - ~~**Who holds the multisig keys.**~~ → **Decided 2026-08-26** (D2): 2-of-4, Aaron holding two in
   two separate buildings and two family members holding one each. The estate-discovery dependency is
-  gone, because the two family keys reach threshold alone. Three consequences remain, none of them
-  the choice itself:
+  gone, because the two family keys reach threshold alone. **Hardware ordered 2026-08-31, expected
+  ~2026-09-17** — see A2 for what the purchase structure changed. Three consequences remain, none of
+  them the choice itself:
   - **The family-only rehearsal.** A 2-of-4 signature by the two family keys and nothing else, on
     testnet. Until that exists, succession is designed and untested. `CC-090`.
   - **The estate packet** — the paper that makes the arrangement legible to people who did not build

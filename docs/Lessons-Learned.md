@@ -1369,6 +1369,80 @@ The durable fix is not another line in `CLAUDE.md`. It is
 backlog checks — all three added the same day, each after something reached master that nothing was
 looking for.
 
+## 29. "Impossible by construction" was a purchasing decision, and the purchase changed
+
+**2026-08-31, four Tangem cards ordered.**
+
+`ADR-0006` D2 chose a 2-of-4 Safe and named the hazard precisely: *"Tangem sells cards as a set that
+shares one seed by default, and a multisig built on a restored set has the security of a 1-of-1 while
+looking like a real multisig on Basescan."* Then it closed the hazard: *"Buying the cards separately
+closes that by construction."*
+
+The cards were bought as multi-card packs. Four cards, two orders, ~A$130.
+
+Nothing was compromised — the hardware has not arrived and no Safe exists. What was wrong for five
+days was the **documentation of a fund-custody control**, in four places, in the confident voice.
+
+### The actual mistake: a proxy outlived its own checkability
+
+"Bought separately" was never the property. The property is **four independent seeds**. Purchase
+structure was a *proxy* for it, and a reasonable one at the time it was written — it was the only
+thing checkable on 2026-08-26, when there was no hardware to test and no setup to observe.
+
+The failure is that the proxy was recorded **as the property**, in language that closes the question:
+
+> Buying separately makes that impossible by construction.
+
+A proxy stated that way stops being re-examined. It also stops being *attached to the thing it stands
+for*, so when the purchase changed, nothing connected the change to the property. Aaron mentioned the
+order in passing, as a cost and a delivery date. There was no reason for him to read it as touching a
+security control, because the docs had already declared that control settled.
+
+### Why every existing control missed it
+
+- **The `chain-constants.json` entry carried the same claim.** That file exists precisely so a future
+  session believes it over prose — so the error was replicated into the artefact designed to be
+  authoritative. `$comment` fields are not verified by anything; the audit scripts check *addresses*,
+  not the sentences beside them.
+- **The ADR's own acceptance test was correct and would eventually have caught it.** D2 says: *"the
+  acceptance test is still on-chain and not procedural — four Safe owners at four addresses."* That
+  test is right, and it is the reason this ends as a documentation defect rather than an incident.
+  But it fires **after the Safe is built and the cards are distributed to four holders in different
+  buildings**, which is the most expensive moment at which to learn the answer.
+- **The word "separately" appeared in four files and read as a settled fact in all four.** Grepping
+  for it finds the claim instantly — *if you already suspect it.* Nothing prompted the suspicion.
+
+### What actually changed as a result
+
+Two things, and only the second is new engineering:
+
+1. The claim is corrected everywhere and restated as a procedure with a named, unverified vendor
+   dependency. "Vendor-reported and unverified by us" is now the phrasing, because that is the truth.
+2. **The test moved earlier.** Four distinct addresses can be read straight off four cards, before a
+   Safe exists and before any transaction. That check was always available and nobody had thought to
+   specify it, because the on-chain test felt sufficient — and it *is* sufficient, in the sense of
+   never giving a wrong answer. It is just the expensive one.
+
+And a hedge that cost nothing: **assign cards to slots so no two same-pack cards land in either
+load-bearing pair** (`ADR-0006` A2.3). If initialisation worked, pack membership is meaningless and
+the assignment is arbitrary. If it silently did not, the two pairs that carry the arrangement still
+reach threshold. The intuitive assignment — give the family the two cards that came in one box — is
+the one that fails, and it fails in exactly the scenario 2-of-4 was chosen to cover.
+
+### The transferable part
+
+**A proxy for a property should be recorded as a proxy, with the property named beside it.** Not
+because the proxy is wrong, but because the proxy has a lifetime and the property does not. When the
+proxy lapses, the only thing that connects the change back to the risk is having written down what
+the proxy was standing in for.
+
+And the corollary, which is the more uncomfortable one: **"impossible by construction" is a phrase
+that should be earned by construction that cannot change.** A contract constant is impossible by
+construction. A `CHECK` in a migration is. A purchasing decision, made once, by a person, five days
+before the goods ship, is not — and dressing it in that language is what stopped anyone looking.
+
+Related: `ADR-0006` D2/A2, `CC-090`, `CC-091`, `docs/BCP-DR.md`.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.

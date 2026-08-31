@@ -78,7 +78,8 @@ and the mainnet block — because an absent field reads as "fine".
 | | |
 | :-- | :-- |
 | **What it is today** | A single GCP Cloud KMS / HSM key, `0xa893…3e4b`, which owns `CarbonEscrow` **and** is its only accepted verdict signer. |
-| **What it becomes** | A **2-of-4 Safe** over four hardware-isolated keys — Tangem cards bought **separately**, so a shared seed is impossible — with the verdict signer separated onto its own HSM key. `ADR-0006` D2, accepted 2026-08-26. Lands before the mainnet deploy (`CC-034`), tracked by `CC-090`. |
+| **What it becomes** | A **2-of-4 Safe** over four **independently initialised** hardware keys, with the verdict signer separated onto its own HSM key. `ADR-0006` D2, accepted 2026-08-26. Lands before the mainnet deploy (`CC-034`), tracked by `CC-090`. |
+| **Procurement** | Four Tangem cards ordered **2026-08-31**, ~A$130 total, shipping from the US, **expected ~2026-09-17**. Supplied as multi-card packs rather than four separate single-card orders — see the failure mode below, which this changes. |
 | **Who can reach it** | **Aaron: two keys, in two separate buildings. Two family members: one key each.** Roles only — locations are deliberately **not** recorded here, see below. The two family keys reach threshold alone, which is what makes succession work. |
 | **What breaks first if it is lost** | Arbitration only. Funds are not stranded: `ADR-0001` A1.2 made every settlement path a pull payment the parties claim themselves, and D3's arbitration clock (accepted, not yet built) will default an unresolved dispute to the worker. The owner key cannot move money to any address other than the two fixed at funding (`ADR-0001` D9). |
 
@@ -86,11 +87,51 @@ and the mainnet block — because an absent field reads as "fine".
 building holds which card would publish a burglary map for a wallet with arbitration authority over
 live escrow. Locations belong with the estate documents; this register carries roles and separation.
 
-**The failure mode to design against is a multisig that is not one.** Tangem sells cards as a set that
-shares one seed by default, and a multisig built on a restored set has the security of a 1-of-1 while
-looking like a real multisig on Basescan. Buying the cards separately closes that by construction.
-The acceptance test is still on-chain — four Safe owners at four addresses with no shared derivation
-— because "bought separately" is a claim and the chain is evidence.
+**The failure mode to design against is a multisig that is not one.** A multisig built over cards
+that share a seed has the security of a 1-of-1 while looking like a real multisig on Basescan.
+
+**This section changed on 2026-08-31 and the change matters.** It previously said the cards were
+bought separately, "so a shared seed is impossible by construction." They were not — they were bought
+as multi-card packs. So:
+
+- **The property was never the purchase.** It is **independent initialisation**. Purchase structure
+  was a proxy for it, chosen because it was checkable at order time, and that proxy is now gone.
+- **The vendor's account** is that cards in a pack become linked only when the second is registered
+  as a backup through the app, and that skipping that step leaves each card an independent wallet.
+  Plausible, and consistent with how the hardware works, but **vendor-reported and unverified by
+  us.** It is now a setup *procedure* to execute correctly rather than a fact about the boxes.
+- **The test moved earlier and got cheaper.** Four distinct addresses can be read straight off the
+  four cards, before a Safe exists and before any transaction: tap each, read its address. That is
+  the first gate, on day one of delivery. The on-chain four-owner check stays as the final gate,
+  because the Safe's owner set is what actually enforces the threshold.
+- **Getting it wrong is recoverable, but only for a while.** A Tangem card can be factory-reset, so a
+  mis-initialised pair can be redone — up until the cards are distributed to their holders and the
+  Safe is funded. Confirm the reset procedure against Tangem's own documentation before relying on
+  it; this file is not the authority on their hardware.
+
+### Slot assignment — a free hedge, and it cannot be applied retroactively
+
+Assign cards to slots so that **no two cards from the same pack land in either load-bearing pair.**
+
+| Slot | Holder | Take the card from |
+| :-- | :-- | :-- |
+| 1 | Aaron — daily driver | pack A |
+| 2 | Aaron — secured, different building | pack B |
+| 3 | Family member A | pack A |
+| 4 | Family member B | pack B |
+
+The two pairs that carry the arrangement are **Aaron's own two** (day-to-day operation, no
+coordination needed) and **family A + family B** (the succession path, D2's whole reason for 2-of-4).
+Under this assignment both pairs cross packs.
+
+Why do it either way: if initialisation worked, pack membership is meaningless and the assignment
+costs nothing. If it silently did not, the two pairs that matter still reach threshold, and what
+degrades is loss tolerance — you could no longer lose both cards of one pack — rather than
+succession. **The wrong assignment fails in exactly the case 2-of-4 was chosen to cover:** two family
+cards from one pack are one signer, and can never reach threshold together.
+
+Do the four-address check **before** distributing, because after distribution the cards are in
+different buildings and in non-technical hands.
 
 **Why 2-of-4 and what it buys.** It tolerates losing any two keys; Aaron can still act alone holding
 two; and critically **the two family keys reach threshold without him**, so succession does not depend
@@ -150,6 +191,29 @@ backups as one of three traps that would make the claim false; D8 turns that cau
   right until somebody restores. That belongs with the D8 restore test.
 
 Retention itself now runs: `/api/cron/retention` fires daily at 03:17 UTC (`CC-087`, PR #147).
+
+---
+
+## Product and task tracking
+
+| | |
+| :-- | :-- |
+| **What it is** | **Linear**, reinstated 2026-08-30 as the canonical product/task layer for the *Allogaia* operating model (ADR-015, Allogaia). The shared "North Metro Tech" workspace carries both Allogaia and Carbon Contractors work. |
+| **What it is *not*** | The source of truth for this repo. `docs/backlog/`, the `CC-###` ids and `scripts/backlog.mjs` remain that, and are unaffected — the reinstatement is organisation-level. See the dated note at the end of `CLAUDE.md`. |
+| **Who controls it** | Aaron, via the North Metro Tech workspace. |
+| **Cost / renewal** | **TO FILL** — plan tier and billing cycle. Recorded as a gap because the previous Linear arrangement was abandoned in July 2026 *for cost*: the free plan was outgrown. That is a known failure mode for this dependency, not a hypothetical. |
+| **What breaks first if it lapses** | Cross-org product context — sequencing, priorities, anything spanning Allogaia and Carbon Contractors. **This repo keeps working**, which is the mitigation and is worth being deliberate about: `docs/backlog/` is in git, is public, and survives any SaaS. The exposure is decisions and discussion that exist *only* in Linear and nowhere in the repo. |
+| **Export posture** | **TO FILL** — whether anything Carbon-Contractors-specific lives only in Linear, and whether it is exported anywhere. A decision recorded in Linear and not in an ADR is a decision this repo cannot see. |
+
+**The 2026-08-30 reinstatement is the second arrangement, not a return to the first.** The July 2026
+retirement moved tracking into the repo, which is why `docs/backlog/` exists at all and why the
+`linear:` frontmatter field maps historical `NOR-###` ids. Those ids belong to the **old** workspace.
+New Linear ids come from a different workspace and a different sequence, so an id encountered in
+future work is not comparable to a `NOR-###` in a code comment.
+
+**The standing rule is unchanged and this does not relax it.** An out-of-scope problem noticed during
+work goes in a one-line *Observations* note; Aaron decides what becomes a `CC-###` — or now, what
+becomes a Linear issue instead. Neither tracker changes who triages.
 
 ---
 
