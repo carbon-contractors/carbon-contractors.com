@@ -43,6 +43,21 @@
       "$comment": "src/lib/checker/hash.ts. Pinned into every verdict, so a six-month-old verdict stays re-runnable (ADR-0001 D5). Re-derive: getCheckerHash()."
     },
 
+    "attestations": {
+      "schemaUid": "0x990663e1a6e37950b4d1b3eb6d2685dc36115d6d1fbc789902268ef1d594380e",
+      "schema": "bytes32 taskId,address escrow,uint256 chainId,address agent,uint256 amountUsdc,uint8 route,uint64 completedAt,bytes32 specHash,bytes32 evidenceHash,bytes32 verdictHash,bytes32 checkerHash",
+      "resolver": "0x0000000000000000000000000000000000000000",
+      "revocable": false,
+      "registered": { "base-sepolia": false, "base-mainnet": false },
+      "easAddress": { "base-sepolia": null, "base-mainnet": null },
+      "schemaRegistryAddress": { "base-sepolia": null, "base-mainnet": null },
+      "$comment": "ADR-0008 / CC-036. schemaUid is DERIVED, not transcribed - keccak256(encodePacked(schema, resolver, revocable)), computed by completionSchemaUid() in src/lib/attestation/schema.ts. It is the same fact as the schema stated twice, so a registration producing a different UID got one of the three inputs wrong. The EAS and SchemaRegistry addresses are per-network, not derivable, and deliberately NULL rather than guessed: a wrong EAS address produces attestations to nowhere that look correct locally, which is the same class of defect as a wrong USDC address. Source them from EAS's own deployment list, fill them in, then confirm with the verify command below. `registered` is false on both networks because no registration transaction has been sent.",
+      "verify": [
+        "node --env-file=.env.local scripts/audit/verify-eas-schema.mjs",
+        "node scripts/audit/verify-eas-schema.mjs --registry=0x... --network=testnet"
+      ]
+    },
+
     "canary": {
       "digest": "0x58cd94df32e0a4f94734df65f37e55ad511831450d0d171b8870ccb74200e9b1",
       "caseCount": 7,
