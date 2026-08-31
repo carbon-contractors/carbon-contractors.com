@@ -22,9 +22,10 @@ a private workspace, which is the flaw in the DR plan that currently lives only 
 | :-- | :-- |
 | **What it is** | The project's on-chain identity, on the same chain as the escrow and USDC. |
 | **What uses it** | Displayed in the site footer and the coming-soon page, linking to `base.org/name/carbon-contractors`. Intended as the `ADR-0006` D6 machine-readable pointer — an ENS name carrying a `url` text record, resolved at runtime by an MCP client instead of a hard-coded URL. |
+| **State, measured 2026-08-31** | **Owned, and not yet doing that job.** Every text record is empty — `url`, `description`, `avatar`, `com.github`, `com.twitter` — so D6's pointer does not exist, and nothing in the codebase resolves one (`CC-044`). The footer link resolves to a live but **blank** Basenames profile. Two separate gaps: setting the records (minutes, in the Basenames UI) and reading them at runtime (`CC-044`). |
 | **Who can reach it** | **TO FILL** — the controlling wallet address, and whether that key is covered by the succession arrangement in `ADR-0006` D1–D4. |
 | **Cost / renewal** | **TO FILL** — Basenames renew annually. Record the expiry and whether auto-renew is configured. |
-| **What breaks first if it lapses** | Today: the footer link 404s. Cosmetic. **Once D6 is implemented, this becomes the worst asset on this page to lose** — agents resolve it automatically, so a new owner silently becomes the canonical pointer for the platform, with no human in the loop to notice the handover. |
+| **What breaks first if it lapses** | Today: the footer link stops resolving. Cosmetic — nothing reads it. (This row said the link "404s"; measured 2026-08-31 it resolves to an empty profile page, which is a different and slightly worse thing.) **Once D6 is implemented, this becomes the worst asset on this page to lose** — agents resolve it automatically, so a new owner silently becomes the canonical pointer for the platform, with no human in the loop to notice the handover. |
 
 **Basenames are ENS**, deployed on Base under the `base.eth` namespace. D6's "an ENS name" is
 satisfied by this one; it does not require the L1 registration below. An agent that cannot reach Base
@@ -36,7 +37,7 @@ the *front door* being unreachable (Vercel, DNS), not the chain.
 | | |
 | :-- | :-- |
 | **What it is** | A **defensive registration**, held to stop typo- and name-squatting. |
-| **What uses it** | **Nothing, deliberately.** It is not the D6 pointer and should not become one. |
+| **What uses it** | **Nothing, deliberately.** It is not the D6 pointer and should not become one. Confirmed 2026-08-31: a resolver is set (`0xF291…AC15`) and no `url` text record exists, which is the intended state. |
 | **Who can reach it** | **TO FILL** — controlling wallet, and whether it is the same key as the Basename. |
 | **Cost / renewal** | 0.0040 ETH (~$10.01) for 2 years. **Expires 25 August 2028.** Auto-renew status **TO FILL**. |
 | **What breaks first if it lapses** | Nothing technical — and that is the trap. A defensive name that lapses hands someone the exact squat it was bought to prevent, and it is the easiest asset here to forget precisely because nothing depends on it. Three-year gap to the next action, no operational signal in between. |
