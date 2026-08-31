@@ -46,7 +46,12 @@ const DOMAIN_TYPEHASH = keccak256(
 );
 
 /** Recompute a domain separator the way EIP-712 specifies. */
-function separatorOf(name: string, version: string, chainId: number, verifying: string) {
+function separatorOf(
+  name: string,
+  version: string,
+  chainId: number,
+  verifying: `0x${string}`,
+) {
   return keccak256(
     encodeAbiParameters(
       [{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }, { type: "address" }],
