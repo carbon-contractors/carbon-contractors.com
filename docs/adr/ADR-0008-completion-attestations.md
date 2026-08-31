@@ -160,12 +160,13 @@ benefit.** Three things follow, and none of them is a reason not to do it:
 - **`CC-036` cannot close on this ADR alone.** Closing needs: the schema registered on-chain (one
   transaction, per network), the addresses verified rather than assumed, the worker-facing handover,
   and the two copy changes above.
-- **Three external facts are required and are not in this repository:** the EAS and SchemaRegistry
-  addresses on Base and Base Sepolia, and the exact off-chain attestation EIP-712 envelope for the
-  EAS version in use. `chain-constants.json` records them as `null` rather than guessed, and
-  `scripts/audit/verify-eas-deployment.mjs` is how they get verified. **A wrong EAS address produces
-  attestations to nowhere that look correct locally**, which is the same class of defect as a wrong
-  USDC address.
+- ~~**Three external facts are required and are not in this repository:** the EAS and
+  SchemaRegistry addresses on Base and Base Sepolia, and the exact off-chain attestation EIP-712
+  envelope for the EAS version in use.~~ **Superseded by A1** the same day. Both addresses are
+  verified and recorded; the envelope is a **view function**, so it is read at runtime and not
+  transcribed at all. **A wrong EAS address produces attestations to nowhere that look correct
+  locally**, which is the same class of defect as a wrong USDC address — hence
+  `scripts/audit/verify-eas-deployment.mjs` rather than trust.
 - **The schema UID is derivable offline** and is pinned in `chain-constants.json`, so the registration
   transaction can be checked against an expected value rather than trusted.
 - **No new dependency.** An off-chain EAS attestation is EIP-712 typed data, and this repo already
@@ -175,6 +176,113 @@ benefit.** Three things follow, and none of them is a reason not to do it:
   is written at `submitWork`, which is *before* completion — so it cannot hold a completion
   attestation's UID. It holds a reference the worker supplies at delivery, and the completion
   attestation is a separate object. Recorded because the field name invites the wrong assumption.
+
+## Amendment 1 — 2026-08-31 — the envelope is chain-readable, and it differs per network
+
+Written the same day as the ADR, because measuring the deployment answered a question the
+Consequences section had recorded as unanswerable.
+
+### A1.1 — Both addresses are verified, and they are predeploys
+
+`verify-eas-deployment.mjs`, against both chains:
+
+| | EAS | SchemaRegistry | `version()` |
+| :-- | :-- | :-- | :-- |
+| base-sepolia | `0x4200…0021` | `0x4200…0020` | **1.2.0** |
+| base-mainnet | `0x4200…0021` | `0x4200…0020` | **1.0.1** |
+
+They are **OP Stack predeploys**, same addresses on both networks, behind EIP-1967 proxies
+(Base Sepolia's implementation slot reads `0xc0d3c0d3…0021`). Two things follow:
+
+- **The implementation behind each address differs per network and can be upgraded by the
+  chain operator.** That is a trust assumption our attestations inherit, and it is not one we
+  can remove. Recorded rather than discovered later.
+- **Selector-scanning the bytecode does not work here.** The proxy is ~2KB and carries no
+  dispatcher, so the technique `verify-escrow-deployment.mjs` uses for
+  `releaseAfterArbitration` finds nothing. That check works only because `CarbonEscrow` is
+  not proxied.
+
+**A trap worth naming.** EAS's documentation has a page headed **"Sepolia"** — that is
+Ethereum L1 (chain 11155111), *not* Base Sepolia (84532). Its EAS address has **no bytecode**
+on Base Sepolia, confirmed. The two read as interchangeable in a docs sidebar and are entirely
+different chains; pasting the wrong one in would have produced attestations referencing
+nothing.
+
+### A1.2 — The EIP-712 envelope must be read from the chain, never hard-coded
+
+The Consequences section listed *"the exact off-chain attestation EIP-712 envelope"* among
+facts "not in this repository", to be transcribed from documentation. **That was wrong in a
+useful direction: it does not need transcribing at all.** EAS exposes both halves as view
+functions.
+
+```
+                       base-sepolia (1.2.0)   base-mainnet (1.0.1)
+getDomainSeparator()   0x64d609c0…ac68        0x441f04bd…954b
+getAttestTypeHash()    0xf83bb2b0…3d3f        0xdbfdf8dc…de61
+```
+
+**They differ.** So the envelope is not one fact, it is a per-network fact, and a build that
+hard-codes it signs correctly on one network and produces signatures the other rejects. The
+failure would surface at the mainnet migration, on the first attestation, and would look like
+a signing bug rather than a version skew.
+
+So: **read `getDomainSeparator()` and `getAttestTypeHash()` at signing time.** The values in
+`chain-constants.json` are for cross-checking, not embedding, and
+`chain-constants.test.ts` asserts the two networks' values stay different — pinned because
+the addresses being identical makes collapsing them look like a tidy-up.
+
+### A1.3 — D2's mechanism is delegated attestation
+
+D2 said the worker "registers it on-chain" without saying how, which under-specified it: you
+cannot hand an off-chain attestation to EAS and have it stored. The mechanism is
+**`attestByDelegation`** — the attester signs the EIP-712 request, and *anyone* may submit it.
+`getAttestTypeHash()` exists precisely to support that, and its presence on both networks is
+the evidence the path is available.
+
+This is better than D2 as originally written, because the on-chain `attester` field ends up
+being the platform's verdict signer while the *transaction* is the worker's. "The platform
+attested, the worker published" is recorded on-chain rather than merely intended — and the
+platform still sends nothing, which is D1.
+
+### A1.4 — `EAS.attestByDelegation`, not the `EIP712Proxy`
+
+EAS ships an `EIP712Proxy` alongside it, and finding its address in the same docs table makes it
+look like the natural home for a signature-based flow. It is not the one to use here.
+
+**It carries its own envelope**, measured 2026-08-31:
+
+| | EAS | EIP712Proxy |
+| :-- | :-- | :-- |
+| base-sepolia | `0xf83bb2b0…3d3f` (1.2.0) | `0xea02ffba…1af1` (**1.3.0**) |
+| base-mainnet | `0xdbfdf8dc…de61` (1.0.1) | `0x9d3e80e7…4567` (1.2.0) |
+
+Four typehashes across two networks, all distinct, and signing against any wrong one produces a
+signature the target rejects. `chain-constants.test.ts` asserts they stay four values.
+
+**Rejected because the proxy would become the on-chain `attester`.** Both proxies report
+`getEAS()` → the EAS predeploy, so they call EAS on the submitter's behalf — which means the
+attestation would read *"attested by `0xAd64…`"*, shared infrastructure used by everyone on the
+chain, and recovering our verdict signer's identity would depend on the proxy's own bookkeeping
+rather than on the attestation.
+
+`attestByDelegation` preserves the original attester. That is exactly the property A1.3 needs:
+the on-chain record says the platform attested and the worker paid to publish it, without the
+platform transacting.
+
+**One assumption, and it gets a test rather than a footnote.** That `attestByDelegation` records
+the *signer* as `attester` is design knowledge, not something measured here — confirming it needs
+a real attestation on chain. So the first one submitted after registration must be read back:
+
+```
+getAttestation(uid).attester == the verdict signer, not the submitter, not a proxy
+```
+
+If it comes back as the worker's address, A1.3's central claim is wrong and D2 needs rethinking
+before anything is published. Added to `CC-036`.
+
+*Unresolved, and minor: the Indexer answered `version()` and `getEAS()` on Base Sepolia and
+neither on Base mainnet, at identical bytecode length. Probably public-RPC rate limiting rather
+than a real difference. Nothing here depends on the Indexer, so it is noted and not chased.*
 
 ## Open items
 
