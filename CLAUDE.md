@@ -174,13 +174,11 @@ exists rather than reasoning from this file.**
     verdict signer split onto its own HSM key. Custody: Aaron two keys in two buildings, two family
     members one each — the two family keys reach threshold alone, which is what makes succession work
     without an estate finding anything.
-  · **Cards ordered 2026-08-31, expected ~2026-09-17 — as multi-card packs, not four separate
-    orders.** This entry said a shared seed was "impossible by construction" because they were
-    bought separately. That was **wrong**, and the required property is **independent
-    initialisation**, not the purchase. Each card standalone, backup/link step skipped; then four
-    distinct addresses read off the four cards **before** distributing them. Do not re-derive the
-    procedure from this line. → `ADR-0006` **A2**, `docs/BCP-DR.md` §*Contract ownership*,
-    `Lessons-Learned.md` §29
+  · **Cards ordered 2026-08-31, expected ~2026-09-17.** This entry claimed a shared seed was
+    "impossible by construction" because they were bought separately; they came as multi-card packs,
+    and the property is how each card is **initialised**, not how it was bought. Set each card up on
+    its own, do not run the link step, then read the four addresses and confirm they differ before
+    distributing. → `ADR-0006` **A2**
 - **The DB is not the authority on money.** Payout destinations come from the contract, never
   Supabase. Load-bearing for fund safety *and* the regulatory position. → `CC-037`, `CC-051`
 

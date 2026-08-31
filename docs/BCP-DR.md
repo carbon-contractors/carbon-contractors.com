@@ -87,51 +87,19 @@ and the mainnet block — because an absent field reads as "fine".
 building holds which card would publish a burglary map for a wallet with arbitration authority over
 live escrow. Locations belong with the estate documents; this register carries roles and separation.
 
-**The failure mode to design against is a multisig that is not one.** A multisig built over cards
-that share a seed has the security of a 1-of-1 while looking like a real multisig on Basescan.
+**Four cards must be four keys.** Cards do **not** arrive linked or pre-initialised. You set a card
+up once, which generates a key on it; linking a second card to that key is a separate, explicit
+onboarding step with its own screen. So: **set each of the four up on its own and do not run the
+link step.** Four cards, four keys.
 
-**This section changed on 2026-08-31 and the change matters.** It previously said the cards were
-bought separately, "so a shared seed is impossible by construction." They were not — they were bought
-as multi-card packs. So:
+Verify rather than assume, because it is free: **read the address off each card — four distinct
+values.** That needs no Safe and no transaction, so do it on arrival and before distributing them.
+The on-chain four-owner check on the Safe stays as the final gate (`CC-090`), since the Safe's owner
+set is what actually enforces the threshold.
 
-- **The property was never the purchase.** It is **independent initialisation**. Purchase structure
-  was a proxy for it, chosen because it was checkable at order time, and that proxy is now gone.
-- **The vendor's account** is that cards in a pack become linked only when the second is registered
-  as a backup through the app, and that skipping that step leaves each card an independent wallet.
-  Plausible, and consistent with how the hardware works, but **vendor-reported and unverified by
-  us.** It is now a setup *procedure* to execute correctly rather than a fact about the boxes.
-- **The test moved earlier and got cheaper.** Four distinct addresses can be read straight off the
-  four cards, before a Safe exists and before any transaction: tap each, read its address. That is
-  the first gate, on day one of delivery. The on-chain four-owner check stays as the final gate,
-  because the Safe's owner set is what actually enforces the threshold.
-- **Getting it wrong is recoverable, but only for a while.** A Tangem card can be factory-reset, so a
-  mis-initialised pair can be redone — up until the cards are distributed to their holders and the
-  Safe is funded. Confirm the reset procedure against Tangem's own documentation before relying on
-  it; this file is not the authority on their hardware.
-
-### Slot assignment — a free hedge, and it cannot be applied retroactively
-
-Assign cards to slots so that **no two cards from the same pack land in either load-bearing pair.**
-
-| Slot | Holder | Take the card from |
-| :-- | :-- | :-- |
-| 1 | Aaron — daily driver | pack A |
-| 2 | Aaron — secured, different building | pack B |
-| 3 | Family member A | pack A |
-| 4 | Family member B | pack B |
-
-The two pairs that carry the arrangement are **Aaron's own two** (day-to-day operation, no
-coordination needed) and **family A + family B** (the succession path, D2's whole reason for 2-of-4).
-Under this assignment both pairs cross packs.
-
-Why do it either way: if initialisation worked, pack membership is meaningless and the assignment
-costs nothing. If it silently did not, the two pairs that matter still reach threshold, and what
-degrades is loss tolerance — you could no longer lose both cards of one pack — rather than
-succession. **The wrong assignment fails in exactly the case 2-of-4 was chosen to cover:** two family
-cards from one pack are one signer, and can never reach threshold together.
-
-Do the four-address check **before** distributing, because after distribution the cards are in
-different buildings and in non-technical hands.
+An earlier version of this section said the cards were bought separately, "so a shared seed is
+impossible by construction." They were bought as multi-card packs, and the property was never the
+purchase — it is how each card is initialised. → `ADR-0006` A2
 
 **Why 2-of-4 and what it buys.** It tolerates losing any two keys; Aaron can still act alone holding
 two; and critically **the two family keys reach threshold without him**, so succession does not depend
