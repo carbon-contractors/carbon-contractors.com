@@ -30,6 +30,7 @@ made.
 | [ADR-0005](ADR-0005-worker-acceptance-and-offer-lifecycle.md) | Worker acceptance, the offer lifecycle, and concurrency limits | accepted | the worker never consented to being hired |
 | [ADR-0006](ADR-0006-continuity-succession-and-the-right-to-fork.md) | Continuity, succession, and the right to fork | accepted | `CC-091`, `funds_control_aml_gating.md` Track C |
 | [ADR-0007](ADR-0007-adjudication-tier-and-arbitrator-isolation.md) | The adjudication tier — value-weighted review, and what an arbitrator may see | accepted | `funds_control_aml_gating.md` Track D |
+| [ADR-0008](ADR-0008-completion-attestations.md) | Completion attestations — a signature the worker holds, not a transaction we send | **proposed** | `CC-036` |
 
 `ADR-0001` carries three amendments, and each changes decisions stated above it:
 
