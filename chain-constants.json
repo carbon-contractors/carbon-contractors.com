@@ -56,7 +56,7 @@
         "node scripts/audit/verify-eas-deployment.mjs --eas=0x... --network=testnet",
         "node scripts/audit/verify-eas-schema.mjs --registry=0x... --network=testnet"
       ],
-      "$howToFill": "Source ONE address - EAS - from EAS's own deployment list (docs.attest.org, or deployments/ in ethereum-attestation-service/eas-contracts; Base's docs list it too). Then verify-eas-deployment.mjs reads the SchemaRegistry address off EAS via getSchemaRegistry(), so the second address comes from the chain rather than a second transcription. It also checks both answer version() and that the registry returns the zero record for an unknown UID. Interface corroboration is not provenance - cross-check against Basescan showing a verified contract named EAS.
+      "$howToFill": "Source ONE address - EAS - from EAS's own deployment list (docs.attest.org, or deployments/ in ethereum-attestation-service/eas-contracts; Base's docs list it too). Then verify-eas-deployment.mjs reads the SchemaRegistry address off EAS via getSchemaRegistry(), so the second address comes from the chain rather than a second transcription. It also checks both answer version() and that the registry returns the zero record for an unknown UID. Interface corroboration is NOT provenance - cross-check against Basescan showing a verified contract named EAS."
     },
 
     "canary": {
