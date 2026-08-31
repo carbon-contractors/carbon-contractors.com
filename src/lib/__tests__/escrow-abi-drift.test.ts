@@ -151,15 +151,18 @@ vi.mock("viem", async (importOriginal) => {
     // so the stub would be answering a multicall with a Task struct, and the decode error
     // that produces looks exactly like the width mismatch these tests are about. Testing
     // the decoder means the call has to reach the decoder unwrapped.
-    createPublicClient: ({ batch: _batch, ...args }: Record<string, unknown>) =>
-      actual.createPublicClient({
-        ...args,
+    createPublicClient: (args: Record<string, unknown>) => {
+      const withoutBatch = { ...args };
+      delete withoutBatch.batch;
+      return actual.createPublicClient({
+        ...withoutBatch,
         // retryCount 0 is not a detail. viem's transports retry three times by default,
         // so a queued failure was silently retried into the NEXT queued answer — the
         // "unrelated read failure" test saw a success and could not tell the fallback
         // fired from the transport papering over the throw.
         transport: actual.custom({ request }, { retryCount: 0 }),
-      } as Parameters<typeof actual.createPublicClient>[0]),
+      } as Parameters<typeof actual.createPublicClient>[0]);
+    },
   };
 });
 

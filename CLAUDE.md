@@ -173,9 +173,12 @@ exists rather than reasoning from this file.**
   · **Target is a 2-of-4 Safe before mainnet** (`ADR-0006` D2, accepted; `CC-090`, now P1), with the
     verdict signer split onto its own HSM key. Custody: Aaron two keys in two buildings, two family
     members one each — the two family keys reach threshold alone, which is what makes succession work
-    without an estate finding anything. Cards are bought **separately**, so a shared seed is
-    impossible by construction; the test is still on-chain — four owner addresses, no shared
-    derivation.
+    without an estate finding anything.
+  · **Cards ordered 2026-08-31, expected ~2026-09-17.** This entry claimed a shared seed was
+    "impossible by construction" because they were bought separately; they came as multi-card packs,
+    and the property is how each card is **initialised**, not how it was bought. Set each card up on
+    its own, do not run the link step, then read the four addresses and confirm they differ before
+    distributing. → `ADR-0006` **A2**
 - **The DB is not the authority on money.** Payout destinations come from the contract, never
   Supabase. Load-bearing for fund safety *and* the regulatory position. → `CC-037`, `CC-051`
 
@@ -343,6 +346,12 @@ frontmatter field.
 > itself** and is unaffected — the reinstatement is an organisation-level decision, not a change to
 > how this repo is managed. If a task spans orgs or needs a human-facing tracker, use Linear;
 > otherwise continue using the backlog as described above.
+>
+> **The id sequences are not comparable.** `NOR-###` ids belong to the *retired* workspace and map to
+> `CC-###` through the `linear:` frontmatter field. The reinstated workspace has its own sequence, so
+> a Linear id met in future work has no relationship to a `NOR-###` in a code comment. Linear also
+> carries in-platform coding agents, so a commit's motivating context may live there rather than in
+> an ADR or an issue file. → `docs/BCP-DR.md` § *Product and task tracking*
 
 ## Layout
 

@@ -1369,6 +1369,60 @@ The durable fix is not another line in `CLAUDE.md`. It is
 backlog checks — all three added the same day, each after something reached master that nothing was
 looking for.
 
+## 29. I dressed a setup step as a product defect, and built three decisions on it
+
+**2026-08-31, four Tangem cards ordered.**
+
+`ADR-0006` D2 had said: *"Tangem sells cards as a set that shares one seed by default — buying the
+cards separately closes this by construction."* Aaron then bought two 2-card packs, so I went to
+correct the claim. Two things were wrong, and the second is mine.
+
+### The claim that was wrong
+
+"Bought separately" was never the property. The property is four keys from four independent seeds.
+Purchase structure was a **proxy**, reasonable when written — on 2026-08-26 it was the only thing
+checkable, with no hardware to test — but it was recorded **as** the property, in language that
+closes the question: *impossible by construction.*
+
+A proxy stated that way stops being re-examined, and stops being attached to what it stands for. When
+the purchase changed, nothing connected the change back to the risk. Aaron mentioned the order as a
+cost and a delivery date; there was no reason to read that as touching a security control, because
+the docs had declared the control settled. The claim had also been copied into
+`chain-constants.json`, the file that exists precisely so a future session believes it over prose.
+
+**That part stands. "Impossible by construction" should be earned by construction that cannot
+change.** A contract constant is. A `CHECK` in a migration is. A purchasing decision made once by a
+person is not, and dressing it in that language is what stopped anyone looking.
+
+### What I then got wrong, which was worse
+
+I never checked what the Tangem onboarding flow actually does. I inherited "shares one seed by
+default", added a price point (~A$130 for four cards, therefore packs, therefore shared seeds), and
+wrote it up as a **silent** trap. On that footing I produced an amendment with three sub-decisions,
+including a cross-pack card-assignment scheme designed to survive a failure I had not established
+was possible.
+
+Aaron corrected it in one message: cards arrive uninitialised, you set one up, and linking a second
+card to that key is an **explicit step with its own screen.** So a shared seed is a visible choice
+during setup, not a default of the product. The whole "silent" framing was invented, and the hedge
+was insurance against it.
+
+- **The reasoning ran the wrong way.** I started from a sentence already in the repo, found a fact
+  that seemed to corroborate it (the price), and elaborated. I did not go and look at the thing
+  itself, and Aaron could have been asked — he had the order and the app.
+- **Confident inherited prose is the easiest thing in this repo to build on top of.** `CLAUDE.md`
+  says to verify with the command rather than reason from the file. That rule bites hardest on the
+  sentences that sound settled, which are exactly the ones that do not invite a command.
+- **The correction was longer than the thing corrected.** Roughly 100 lines of ADR and 75 of this
+  file, for a change whose actual content is: *set each card up on its own, then check the four
+  addresses differ.* Volume read as rigour. It was not.
+
+What survived the correction is one line of procedure and one free check — read the four addresses
+before distributing the cards, because it costs nothing and needs no Safe. That was worth having.
+The rest was scaffolding around a hazard I had not verified.
+
+Related: `ADR-0006` D2/A2, `CC-090`.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.

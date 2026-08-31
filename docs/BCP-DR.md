@@ -78,7 +78,8 @@ and the mainnet block — because an absent field reads as "fine".
 | | |
 | :-- | :-- |
 | **What it is today** | A single GCP Cloud KMS / HSM key, `0xa893…3e4b`, which owns `CarbonEscrow` **and** is its only accepted verdict signer. |
-| **What it becomes** | A **2-of-4 Safe** over four hardware-isolated keys — Tangem cards bought **separately**, so a shared seed is impossible — with the verdict signer separated onto its own HSM key. `ADR-0006` D2, accepted 2026-08-26. Lands before the mainnet deploy (`CC-034`), tracked by `CC-090`. |
+| **What it becomes** | A **2-of-4 Safe** over four **independently initialised** hardware keys, with the verdict signer separated onto its own HSM key. `ADR-0006` D2, accepted 2026-08-26. Lands before the mainnet deploy (`CC-034`), tracked by `CC-090`. |
+| **Procurement** | Four Tangem cards ordered **2026-08-31**, ~A$130 total, shipping from the US, **expected ~2026-09-17**. Supplied as multi-card packs rather than four separate single-card orders — see the failure mode below, which this changes. |
 | **Who can reach it** | **Aaron: two keys, in two separate buildings. Two family members: one key each.** Roles only — locations are deliberately **not** recorded here, see below. The two family keys reach threshold alone, which is what makes succession work. |
 | **What breaks first if it is lost** | Arbitration only. Funds are not stranded: `ADR-0001` A1.2 made every settlement path a pull payment the parties claim themselves, and D3's arbitration clock (accepted, not yet built) will default an unresolved dispute to the worker. The owner key cannot move money to any address other than the two fixed at funding (`ADR-0001` D9). |
 
@@ -86,11 +87,19 @@ and the mainnet block — because an absent field reads as "fine".
 building holds which card would publish a burglary map for a wallet with arbitration authority over
 live escrow. Locations belong with the estate documents; this register carries roles and separation.
 
-**The failure mode to design against is a multisig that is not one.** Tangem sells cards as a set that
-shares one seed by default, and a multisig built on a restored set has the security of a 1-of-1 while
-looking like a real multisig on Basescan. Buying the cards separately closes that by construction.
-The acceptance test is still on-chain — four Safe owners at four addresses with no shared derivation
-— because "bought separately" is a claim and the chain is evidence.
+**Four cards must be four keys.** Cards do **not** arrive linked or pre-initialised. You set a card
+up once, which generates a key on it; linking a second card to that key is a separate, explicit
+onboarding step with its own screen. So: **set each of the four up on its own and do not run the
+link step.** Four cards, four keys.
+
+Verify rather than assume, because it is free: **read the address off each card — four distinct
+values.** That needs no Safe and no transaction, so do it on arrival and before distributing them.
+The on-chain four-owner check on the Safe stays as the final gate (`CC-090`), since the Safe's owner
+set is what actually enforces the threshold.
+
+An earlier version of this section said the cards were bought separately, "so a shared seed is
+impossible by construction." They were bought as multi-card packs, and the property was never the
+purchase — it is how each card is initialised. → `ADR-0006` A2
 
 **Why 2-of-4 and what it buys.** It tolerates losing any two keys; Aaron can still act alone holding
 two; and critically **the two family keys reach threshold without him**, so succession does not depend
@@ -150,6 +159,28 @@ backups as one of three traps that would make the claim false; D8 turns that cau
   right until somebody restores. That belongs with the D8 restore test.
 
 Retention itself now runs: `/api/cron/retention` fires daily at 03:17 UTC (`CC-087`, PR #147).
+
+---
+
+## Product and task tracking
+
+| | |
+| :-- | :-- |
+| **What it is** | **Linear**, reinstated 2026-08-30 as the canonical product/task layer for the *Allogaia* operating model (ADR-015, Allogaia). The shared "North Metro Tech" workspace carries both Allogaia and Carbon Contractors work. |
+| **What it is *not*** | The source of truth for this repo. `docs/backlog/`, the `CC-###` ids and `scripts/backlog.mjs` remain that, and are unaffected — the reinstatement is organisation-level. See the dated note at the end of `CLAUDE.md`. |
+| **Who controls it** | Aaron, via the North Metro Tech workspace. **Whether a second person can administer it is the question that matters here**, and it is the same question this file asks of Vercel, Supabase and GCP below. |
+| **Cost / renewal** | **TO FILL** — plan tier and billing cycle. Worth recording because the tier was the reason the *previous* arrangement was dropped in July 2026, which is what produced `docs/backlog/`. |
+| **Export / backup** | Linear has a first-party Google Sheets integration for export, tracking and dashboards, and supports automated backups. So this is **configuration, not a capability gap**: record what is configured and where the export lands. **TO FILL.** |
+| **What breaks first if it lapses** | Not vendor exit — the realistic failure is a **billing or access lapse**, the same class as the domain and Basename rows above. Cross-org product context goes: sequencing, priorities, anything spanning Allogaia and Carbon Contractors. **This repo keeps working**, because `docs/backlog/` is in git and public. The exposure is decisions that exist *only* in Linear. |
+
+**`NOR-###` ids do not line up.** They belong to the workspace retired in July 2026 and map to
+`CC-###` through the `linear:` frontmatter field. The reinstated workspace has its own sequence, so a
+Linear id met in future work has no relationship to a `NOR-###` in a code comment.
+
+**Work can now originate inside Linear.** It carries in-platform coding agents, so a change can be
+initiated there rather than from a checkout. That does not alter who triages — an out-of-scope problem
+still goes in a one-line *Observations* note and Aaron decides where it lands — but it does mean a
+commit's motivating context may live in Linear and not in an ADR or an issue file.
 
 ---
 
