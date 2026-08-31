@@ -88,6 +88,22 @@ describe("chain-constants.json", () => {
     }
   });
 
+  it("keeps four distinct EIP-712 envelopes apart", () => {
+    // Measured 2026-08-31. EAS and the EIP712Proxy each carry their own envelope, and each
+    // differs per network — four typehashes, and signing against any wrong one produces a
+    // signature the target rejects. The proxy is REJECTED (ADR-0008 A1.4) but recorded, so
+    // the choice is not re-derived by someone who finds the address in EAS's docs.
+    const a = constants.protocol.attestations;
+    const all = [
+      a.attestTypeHash["base-sepolia"],
+      a.attestTypeHash["base-mainnet"],
+      a.eip712Proxy.attestTypeHash["base-sepolia"],
+      a.eip712Proxy.attestTypeHash["base-mainnet"],
+    ];
+    expect(new Set(all).size, "four envelopes must stay four values").toBe(4);
+    expect(a.eip712Proxy.decision).toMatch(/REJECTED/);
+  });
+
   it("does not claim a registration that has not happened", () => {
     // registered flips to true only once verify-eas-schema.mjs passes against that network.
     // Asserted so it cannot be set optimistically ahead of the transaction.

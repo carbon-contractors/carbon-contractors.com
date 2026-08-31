@@ -244,6 +244,46 @@ being the platform's verdict signer while the *transaction* is the worker's. "Th
 attested, the worker published" is recorded on-chain rather than merely intended — and the
 platform still sends nothing, which is D1.
 
+### A1.4 — `EAS.attestByDelegation`, not the `EIP712Proxy`
+
+EAS ships an `EIP712Proxy` alongside it, and finding its address in the same docs table makes it
+look like the natural home for a signature-based flow. It is not the one to use here.
+
+**It carries its own envelope**, measured 2026-08-31:
+
+| | EAS | EIP712Proxy |
+| :-- | :-- | :-- |
+| base-sepolia | `0xf83bb2b0…3d3f` (1.2.0) | `0xea02ffba…1af1` (**1.3.0**) |
+| base-mainnet | `0xdbfdf8dc…de61` (1.0.1) | `0x9d3e80e7…4567` (1.2.0) |
+
+Four typehashes across two networks, all distinct, and signing against any wrong one produces a
+signature the target rejects. `chain-constants.test.ts` asserts they stay four values.
+
+**Rejected because the proxy would become the on-chain `attester`.** Both proxies report
+`getEAS()` → the EAS predeploy, so they call EAS on the submitter's behalf — which means the
+attestation would read *"attested by `0xAd64…`"*, shared infrastructure used by everyone on the
+chain, and recovering our verdict signer's identity would depend on the proxy's own bookkeeping
+rather than on the attestation.
+
+`attestByDelegation` preserves the original attester. That is exactly the property A1.3 needs:
+the on-chain record says the platform attested and the worker paid to publish it, without the
+platform transacting.
+
+**One assumption, and it gets a test rather than a footnote.** That `attestByDelegation` records
+the *signer* as `attester` is design knowledge, not something measured here — confirming it needs
+a real attestation on chain. So the first one submitted after registration must be read back:
+
+```
+getAttestation(uid).attester == the verdict signer, not the submitter, not a proxy
+```
+
+If it comes back as the worker's address, A1.3's central claim is wrong and D2 needs rethinking
+before anything is published. Added to `CC-036`.
+
+*Unresolved, and minor: the Indexer answered `version()` and `getEAS()` on Base Sepolia and
+neither on Base mainnet, at identical bytecode length. Probably public-RPC rate limiting rather
+than a real difference. Nothing here depends on the Indexer, so it is noted and not chased.*
+
 ## Open items
 
 - **Which network registers the schema first.** Sepolia, obviously, but the UID is derived from the

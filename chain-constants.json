@@ -60,6 +60,23 @@
         "base-sepolia": "0xf83bb2b0ede93a840239f7e701a54d9bc35f03701f51ae153d601c6947ff3d3f",
         "base-mainnet": "0xdbfdf8dc2b135c26253e00d5b6cbe6f20457e003fd526d97cea183883570de61"
       },
+      "eip712Proxy": {
+        "decision": "REJECTED — sign against EAS.attestByDelegation, not the proxy (ADR-0008 A1.4)",
+        "address": {
+          "base-sepolia": "0xAd64A04c20dDBbA7cBb0EcAe4823095B4adA5c57",
+          "base-mainnet": "0xF095fE4b23958b08D38e52d5d5674bBF0C03cbF6"
+        },
+        "version": { "base-sepolia": "1.3.0", "base-mainnet": "1.2.0" },
+        "domainSeparator": {
+          "base-sepolia": "0xdaacc83a3464fbd8bfc56bab200ec1d58a21789d8e7fffa04a694a1272c72dca",
+          "base-mainnet": "0xa9ce79f7229e02b54e802218552bba77c9fa6ecf321d524ae09ccaec5da3d2f5"
+        },
+        "attestTypeHash": {
+          "base-sepolia": "0xea02ffba7dcb45f6fc649714d23f315eef12e3b27f9a7735d8d8bf41eb2b1af1",
+          "base-mainnet": "0x9d3e80e7032dc16815a5f67aa94e851240ae3b24eed13a7431bdac738f814567"
+        },
+        "$comment": "Recorded BECAUSE it is rejected, so the choice is not re-derived. Measured 2026-08-31: the proxy carries its OWN EIP-712 envelope, different from EAS's on both networks, and runs a different version again (1.3.0 vs EAS 1.2.0 on Sepolia). Four typehashes are therefore in play across two networks and signing against any wrong one produces a signature the target rejects. Rejected because the proxy would become the on-chain `attester`, so an attestation would read 'attested by 0xAd64...' - shared infrastructure - and recovering our verdict signer's identity would depend on the proxy's own bookkeeping. attestByDelegation preserves the original attester, which is the property ADR-0008 A1.3 needs."
+      },
       "$comment": "ADR-0008 / CC-036. schemaUid is DERIVED, not transcribed - keccak256(encodePacked(schema, resolver, revocable)), computed by completionSchemaUid() in src/lib/attestation/schema.ts, and cross-checked by src/lib/__tests__/chain-constants.test.ts. Addresses VERIFIED against both chains 2026-08-31 with verify-eas-deployment.mjs: EAS and the SchemaRegistry are OP Stack PREDEPLOYS at the same addresses on Base and Base Sepolia, behind EIP-1967 proxies, so the implementation behind each address differs per network and can be upgraded by the chain operator - a trust assumption our attestations inherit. THE ENVELOPE VALUES BELOW ARE PER-NETWORK AND NOT INTERCHANGEABLE: Base Sepolia runs EAS 1.2.0 and Base mainnet 1.0.1, with DIFFERENT getAttestTypeHash() values, so a hard-coded EIP-712 envelope signs correctly on one network and is rejected by the other. Read domainSeparator and attestTypeHash from the chain at signing time; the recorded values are for cross-checking only. `registered` is false on both networks because no registration transaction has been sent - the expected UID is above, so a registration producing a different one got an input wrong.",
       "verify": [
         "node scripts/audit/verify-eas-deployment.mjs --eas=0x... --network=testnet",
