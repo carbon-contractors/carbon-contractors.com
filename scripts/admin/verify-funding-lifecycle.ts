@@ -66,6 +66,7 @@ import { baseSepolia } from "viem/chains";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CARBON_ESCROW_ABI } from "@/lib/contracts/escrow-abi";
+import { findShadowedVars, explainShadowing } from "@/lib/env-shadowing";
 
 const STATE_FILE = resolve(process.cwd(), ".funding-lifecycle-state.json");
 const line = () => "=".repeat(74);
@@ -121,53 +122,6 @@ function toOrigin(raw: string): string {
     console.log(`  note:      dropped "${url.pathname}${url.search}${url.hash}" — only the origin is used`);
   }
   return url.origin;
-}
-
-/**
- * Warn when the shell environment is shadowing `.env.local`.
- *
- * **`node --env-file` does not override a variable already in `process.env`.** Measured on
- * Node v24: with the file saying one thing and the shell another, the shell wins silently.
- *
- * So editing `.env.local` has no effect on a variable that is also set in the shell, a
- * PowerShell session, or the Windows user environment — and the symptom is a script that
- * keeps using a value you have just changed and triple-checked. That is twenty minutes of
- * looking in the wrong place, and nothing anywhere says so.
- *
- * Reads the file directly and compares. This is a diagnostic, not config: the values in use
- * are still whatever `process.env` holds.
- */
-function warnIfShadowed(names: string[]): void {
-  const envFile = resolve(process.cwd(), ".env.local");
-  if (!existsSync(envFile)) return;
-
-  let contents: string;
-  try {
-    contents = readFileSync(envFile, "utf8");
-  } catch {
-    return;
-  }
-
-  for (const name of names) {
-    // Deliberately loose: a quoted value, trailing whitespace or a trailing comment are all
-    // normal in a hand-edited env file, and none of them should defeat the check.
-    const match = contents.match(new RegExp(`^\s*${name}\s*=\s*(.*)$`, "m"));
-    if (!match) continue;
-    const fromFile = match[1].trim().replace(/^["']|["']$/g, "").replace(/\s+#.*$/, "");
-    const inUse = process.env[name];
-    if (!fromFile || !inUse || fromFile === inUse) continue;
-
-    // Values, not secrets: only ever reached for the variables passed in, and the caller
-    // passes non-secret ones. Never call this with a key.
-    console.log("");
-    console.log(`  WARNING — ${name} in .env.local is being IGNORED.`);
-    console.log(`    .env.local says:  ${fromFile}`);
-    console.log(`    actually in use:  ${inUse}`);
-    console.log("    node --env-file does not override a variable already in the environment,");
-    console.log("    so a shell or Windows user variable wins. Clear it and re-run:");
-    console.log(`      Remove-Item Env:\\${name}`);
-    console.log("");
-  }
 }
 
 function required(name: string): string {
@@ -479,8 +433,20 @@ async function main() {
 
   const rawBase = process.env.PREVIEW_BASE_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? "";
   if (!rawBase) throw new Error("PREVIEW_BASE_URL must be set — where the product is deployed");
-  // Only ever non-secret names here — this prints values.
-  warnIfShadowed(["PREVIEW_BASE_URL", "NEXT_PUBLIC_BASE_URL", "NEXT_PUBLIC_ESCROW_CONTRACT"]);
+  // Only ever non-secret names here — explainShadowing prints values.
+  //
+  // node --env-file does NOT override a variable already in process.env, so a stale shell or
+  // Windows user variable silently beats the file. That cost twenty minutes of looking in the
+  // wrong place on 2026-09-01; it costs one line of output now.
+  for (const shadowed of findShadowedVars(resolve(process.cwd(), ".env.local"), [
+    "PREVIEW_BASE_URL",
+    "NEXT_PUBLIC_BASE_URL",
+    "NEXT_PUBLIC_ESCROW_CONTRACT",
+  ])) {
+    console.log("");
+    console.log(explainShadowing(shadowed));
+    console.log("");
+  }
   const baseUrl = toOrigin(rawBase);
 
   if (phase === "fund") return runFund();

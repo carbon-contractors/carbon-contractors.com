@@ -221,8 +221,12 @@ exists rather than reasoning from this file.**
   Every `node --env-file=.env.local scripts/...` invocation in this repo inherits this.
   · `$env:VAR` and `[Environment]::GetEnvironmentVariable('VAR','User')` — either printing a
     value means `.env.local` is being ignored for it; `Remove-Item Env:\VAR` clears the session one
-  · `verify-funding-lifecycle.ts` reads `.env.local` back and warns when it is being shadowed;
-    worth copying into anything else that takes a URL or an address this way
+  · **`src/lib/env-shadowing.ts`** detects it — `findShadowedVars` + `explainShadowing`. Call it
+    from anything that takes a URL or an address this way. It prints values, so pass it
+    non-secret names only. Do **not** re-implement it inline: the first version did, wrote
+    `` `^\s*${name}` `` in a template literal where `\s` collapses to `s`, and silently missed
+    every indented or spaced line while claiming to be loose. CodeQL caught it; the hand-rolled
+    check that "verified" it used the one form that worked.
 - **A blank env var is not an unset one, and Zod did not save us from it.** `VAR=`, a cleared Vercel
   field and an unset Actions secret all arrive as `""`. `??` misses it, `.default()` only fires on
   `undefined`, and **`z.coerce.number()` turns `""` into `0`, not `NaN`** — so a blank
