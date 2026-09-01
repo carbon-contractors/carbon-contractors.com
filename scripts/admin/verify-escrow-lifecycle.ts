@@ -470,7 +470,15 @@ async function main() {
   const resolveReceipt = await pub.waitForTransactionReceipt({ hash: resolveHash });
   console.log(`      tx: ${resolveHash}  status: ${resolveReceipt.status}`);
 
-  await report(pub, usdc, paymentRequestId, worker.address, workerUsdcBefore, "Resolved");
+  // Report on the party the money actually reached. Reporting the worker's unchanged
+  // balance as the headline is exactly what produced a FAIL on a correct refund run.
+  if (releaseToWorker) {
+    await report(pub, usdc, paymentRequestId, worker.address, workerUsdcBefore, "Resolved");
+  } else {
+    await report(pub, usdc, paymentRequestId, agent.address, agentUsdcBefore, "Resolved", {
+      label: "agent",
+    });
+  }
 
   if (!releaseToWorker) {
     const agentAfter = await pub.readContract({
@@ -578,15 +586,32 @@ async function runResume(
   console.log(`\n  Delete ${STATE_FILE} — it holds a throwaway private key.`);
 }
 
+/**
+ * @param payee      Who the run expects the escrowed USDC to reach.
+ * @param expectPaid Whether `payee` should have gained AMOUNT. False for the refund phase,
+ *   where the worker correctly ends up with nothing.
+ *
+ * This parameter exists because the first `dispute-refund` run printed
+ * **"FAIL - the worker was NOT paid as expected"** on a run that was entirely correct: the
+ * refund had landed with the agent, exactly as intended. This function carried one
+ * hard-coded expectation - the worker gains AMOUNT - from when every phase paid the worker.
+ *
+ * A correct run that prints FAIL is worse than a silent one. It trains the reader to
+ * discount the verdict line, and anyone reading that output cold would conclude the refund
+ * path is broken when it is the only thing that has ever proved it works.
+ */
 async function report(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pub: any,
   usdc: Address,
   paymentRequestId: string,
-  worker: Address,
+  payee: Address,
   balanceBefore: bigint,
   expectedState: string,
+  opts: { label?: string; expectPaid?: boolean } = {},
 ) {
+  const label = opts.label ?? "worker";
+  const expectPaid = opts.expectPaid ?? true;
   console.log("\n" + line());
   console.log("VERIFICATION");
   console.log(line());
@@ -601,15 +626,32 @@ async function report(
     address: usdc,
     abi: ERC20_ABI,
     functionName: "balanceOf",
-    args: [worker],
+    args: [payee],
   });
   const delta = (after as bigint) - balanceBefore;
+  const pad = " ".repeat(Math.max(1, 13 - label.length));
   console.log(
-    `  worker USDC:     ${formatUnits(balanceBefore, 6)} -> ${formatUnits(after as bigint, 6)} (delta ${formatUnits(delta, 6)})`,
+    `  ${label} USDC:${pad}${formatUnits(balanceBefore, 6)} -> ${formatUnits(after as bigint, 6)} (delta ${formatUnits(delta, 6)})`,
   );
 
-  const pass = task.state === expectedState && delta === AMOUNT;
-  console.log(`\n  ${pass ? "PASS" : "FAIL"} — the worker ${pass ? "was paid" : "was NOT paid as expected"}.`);
+  // A refund is correct precisely when the payee under test gained nothing.
+  const moved = expectPaid ? delta === AMOUNT : delta === BigInt(0);
+  const pass = task.state === expectedState && moved;
+
+  if (pass) {
+    console.log(
+      `\n  PASS — ${expectPaid ? `the ${label} was paid` : `the ${label} correctly received nothing`}.`,
+    );
+  } else if (task.state !== expectedState) {
+    console.log(`\n  FAIL — on-chain state is ${task.state}, expected ${expectedState}.`);
+  } else if (expectPaid) {
+    console.log(`\n  FAIL — the ${label} was NOT paid as expected.`);
+  } else {
+    console.log(
+      `\n  FAIL — the ${label} gained ${formatUnits(delta, 6)} USDC on a run where they` +
+        " should have gained nothing.",
+    );
+  }
   process.exitCode = pass ? 0 : 1;
 }
 
