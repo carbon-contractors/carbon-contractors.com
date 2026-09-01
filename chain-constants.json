@@ -34,7 +34,7 @@
     },
 
     "arbitrationWindowSeconds": 604800,
-    "arbitrationWindowNote": "7 days. ADR-0006 D3 + Amendment 1, set 2026-08-26. A CONSTANT, not a settable window: the arbitrator must not choose its own deadline. The clock runs from disputeTask - NOT from beginArbitration, which is onlyOwner and optional, so a deadline set there could be withheld indefinitely by never calling it. An unresolved arbitration defaults to the WORKER via pull payment, claimed with releaseAfterArbitration. Worst-case post-delivery wait is MAX_REVIEW_WINDOW + this = 21 days. Past the deadline resolveDispute REVERTS, so the deadline binds the arbitrator too (A1.4). IN THE SOURCE TREE as of 2026-08-28, DEPLOYED NOWHERE: the live Sepolia contract at escrow.address predates it and a disputed task there still has no clock. Deploys with CC-034.",
+    "arbitrationWindowNote": "7 days. ADR-0006 D3 + Amendment 1, set 2026-08-26. A CONSTANT, not a settable window: the arbitrator must not choose its own deadline. The clock runs from disputeTask - NOT from beginArbitration, which is onlyOwner and optional, so a deadline set there could be withheld indefinitely by never calling it. An unresolved arbitration defaults to the WORKER via pull payment, claimed with releaseAfterArbitration. Worst-case post-delivery wait is MAX_REVIEW_WINDOW + this = 21 days. Past the deadline resolveDispute REVERTS, so the deadline binds the arbitrator too (A1.4). DEPLOYED ON BASE SEPOLIA 2026-09-01 at escrow.address, confirmed by verify-escrow-deployment.mjs: ARBITRATION_WINDOW reads 604800s and the releaseAfterArbitration selector is present in the bytecode. Base mainnet still has no deployment at all - that is CC-034.",
 
 
     "checker": {
@@ -118,10 +118,10 @@
       "chainId": 84532,
       "status": "live",
       "escrow": {
-        "address": "0xe80d03688E8fa6270668AD73191d353e522CB1b1",
+        "address": "0xc6aa99a8226b679C71945dd9545685896a91E4d3",
         "version": 2,
         "deployedAt": "2026-08-15",
-        "deployBlock": 45494043,
+        "deployBlock": 46227900,
         "$comment": "deployBlock is load-bearing for cost, not correctness: unset, every getLogs query scans from genesis (~36x the requests) and fails slowly rather than loudly (CC-070)."
       },
       "reputationStake": {
@@ -133,9 +133,10 @@
         "decimals": 6
       },
       "owner": {
-        "address": "0xa8931097540e69B474013D294d0bA6A2cC853e4b",
-        "custody": "single GCP Cloud KMS / HSM key",
-        "$comment": "ADR-0006 D2 accepted 2026-08-26: this becomes a 2-of-4 Safe over four hardware-isolated keys before the mainnet deploy. Hardware ordered 2026-08-31, expected ~2026-09-17. AMENDED 2026-08-31 (ADR-0006 A2): the property is how each card is INITIALISED, not how it was bought - set each up on its own, do not run the link step. Read the four addresses and confirm they differ before distributing. Final gate: four Safe owners on-chain. Custody: Aaron holds two, two family members hold one each; the two family keys reach threshold alone. This entry has been wrong in both directions historically — never re-derive it by reading (CC-059)."
+        "address": "0x7863A5c4396E7aaac2e99Cb649a7Aa4F6A36B91b",
+        "custody": "THE DEPLOYER - ownership transfer PENDING",
+        "expectedAddress": "0xa8931097540e69B474013D294d0bA6A2cC853e4b",
+        "$comment": "ADR-0006 D2 accepted 2026-08-26: this becomes a 2-of-4 Safe over four hardware-isolated keys before the mainnet deploy. Hardware ordered 2026-08-31, expected ~2026-09-17. AMENDED 2026-08-31 (ADR-0006 A2): the property is how each card is INITIALISED, not how it was bought - set each up on its own, do not run the link step. Read the four addresses and confirm they differ before distributing. Final gate: four Safe owners on-chain. Custody: Aaron holds two, two family members hold one each; the two family keys reach threshold alone. REDEPLOYED 2026-09-01 (CC-034 groundwork): a redeploy resets ownership to the deployer, so the address above is the DEPLOYER and not the HSM key until `npm run transfer:ownership` runs and verify-contract-owner.mjs confirms it. Recorded as it actually is rather than as it should be - an escrow holding money with the wrong owner is a live incident, and a file that says otherwise is how you fail to notice. This entry has been wrong in both directions historically — never re-derive it by reading (CC-059)."
       },
       "acceptedVerdictSigners": [
         "0xa8931097540e69B474013D294d0bA6A2cC853e4b"

@@ -165,13 +165,18 @@ on `CC-034`.
 Do not take any of the above on trust — including the dated claims, which is the lesson of the
 history box.
 
-**Live deployment, Base Sepolia:**
+**Live deployment, Base Sepolia.** Redeployed 2026-09-01 — the new address is the first to carry
+the `ADR-0006` D3 arbitration clock, so a disputed task now has a deadline rather than depending on
+the operator acting. The superseded deployments are listed because an address that stops being
+current does not stop existing: anything still held there is reachable only by its own parties
+calling it directly. Both were empty at cutover.
 
 | | Address |
 | :-- | :-- |
-| `CarbonEscrow` **v2** (deployed 2026-08-15, block `45494043`) | [`0xe80d03688E8fa6270668AD73191d353e522CB1b1`](https://sepolia.basescan.org/address/0xe80d03688E8fa6270668AD73191d353e522CB1b1) |
+| `CarbonEscrow` **v2** (redeployed 2026-09-01, block `46227900`) | [`0xc6aa99a8226b679C71945dd9545685896a91E4d3`](https://sepolia.basescan.org/address/0xc6aa99a8226b679C71945dd9545685896a91E4d3) |
 | `ReputationStake` | [`0x4cdeF542F9361201f9543512eeCd1eE834793203`](https://sepolia.basescan.org/address/0x4cdeF542F9361201f9543512eeCd1eE834793203) |
 | Expected `owner()` on both — the HSM-derived address | `0xa8931097540e69B474013D294d0bA6A2cC853e4b` |
+| `CarbonEscrow` v2, 2026-08-15 deployment — **superseded, do not use** | `0xe80d03688E8fa6270668AD73191d353e522CB1b1` |
 | `CarbonEscrow` v1 — **superseded, do not use** | `0xb9bF8dAC51f62cA237F2C439c63c9D8f16FD2ef7` |
 
 **Derive the HSM address yourself** from the committed public key
