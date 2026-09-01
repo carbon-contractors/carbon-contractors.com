@@ -120,6 +120,21 @@ const MONITORS = [
     requires: ["NEXT_PUBLIC_ESCROW_CONTRACT", "ESCROW_DEPLOY_BLOCK"],
   },
   {
+    name: "verify-eas-schema",
+    script: "verify-eas-schema.mjs",
+    tier: "normal",
+    invariant:
+      "the registered EAS completion schema is byte-identical to the one this build encodes (CC-036)",
+    // Deliberately absent from this list until 2026-08-31, because it FAILED until the
+    // schema was registered and a monitor that is red by design teaches its reader to
+    // ignore the schedule — which is exactly what three days of verify-unclaimed failures
+    // did earlier the same week. It is here now because it can pass.
+    //
+    // EAS_SCHEMA_REGISTRY_ADDRESS is required rather than defaulted: the address differs
+    // per network and is not derivable, so a default would PASS against nothing.
+    requires: ["EAS_SCHEMA_REGISTRY_ADDRESS"],
+  },
+  {
     name: "verify-checker",
     script: "verify-checker.mjs",
     exec: "tsx",
