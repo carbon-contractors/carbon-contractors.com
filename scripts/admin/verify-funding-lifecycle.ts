@@ -66,6 +66,7 @@ import { baseSepolia } from "viem/chains";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CARBON_ESCROW_ABI } from "@/lib/contracts/escrow-abi";
+import { findShadowedVars, explainShadowing } from "@/lib/env-shadowing";
 
 const STATE_FILE = resolve(process.cwd(), ".funding-lifecycle-state.json");
 const line = () => "=".repeat(74);
@@ -432,6 +433,20 @@ async function main() {
 
   const rawBase = process.env.PREVIEW_BASE_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? "";
   if (!rawBase) throw new Error("PREVIEW_BASE_URL must be set — where the product is deployed");
+  // Only ever non-secret names here — explainShadowing prints values.
+  //
+  // node --env-file does NOT override a variable already in process.env, so a stale shell or
+  // Windows user variable silently beats the file. That cost twenty minutes of looking in the
+  // wrong place on 2026-09-01; it costs one line of output now.
+  for (const shadowed of findShadowedVars(resolve(process.cwd(), ".env.local"), [
+    "PREVIEW_BASE_URL",
+    "NEXT_PUBLIC_BASE_URL",
+    "NEXT_PUBLIC_ESCROW_CONTRACT",
+  ])) {
+    console.log("");
+    console.log(explainShadowing(shadowed));
+    console.log("");
+  }
   const baseUrl = toOrigin(rawBase);
 
   if (phase === "fund") return runFund();
