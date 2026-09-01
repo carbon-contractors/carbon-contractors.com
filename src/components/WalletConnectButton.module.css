@@ -101,3 +101,13 @@
   color: var(--cc-green);
   background: var(--cc-bg-elevated);
 }
+
+/* Shown when the wallet cannot re-prompt for an account (no wallet_requestPermissions).
+   Advisory, not an error — the user has done nothing wrong and there is a way forward. */
+.walletNote {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  max-width: 34ch;
+  opacity: 0.85;
+}
