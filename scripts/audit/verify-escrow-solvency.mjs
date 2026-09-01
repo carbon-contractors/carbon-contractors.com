@@ -38,7 +38,7 @@
 
 import { createPublicClient, http, getAddress, formatUnits } from "viem";
 import { base, baseSepolia } from "viem/chains";
-import { withRpcRetry, isTransient, shortError } from "./rpc-retry.mjs";
+import { withRpcRetry, isTransient, shortError, chainIdMismatch } from "./rpc-retry.mjs";
 
 const ERC20_ABI = [
   {
@@ -88,6 +88,15 @@ async function main() {
 
   const client = createPublicClient({ chain, transport: http(rpcUrl || undefined) });
 
+  // Before any contract read: is this endpoint even on the right chain? An RPC pointed at
+  // the wrong network answers every call cheerfully, about a different chain, so a
+  // perfectly healthy contract reads back as `0x`.
+  const mismatch = await chainIdMismatch(client, chain.id, "BASE_SEPOLIA_RPC_URL");
+  if (mismatch) {
+    console.error(mismatch);
+    return 2;
+  }
+
   console.log("── CarbonEscrow solvency ────────────────────────────────────────");
   console.log(`network   ${network} (chain ${chain.id})`);
   console.log(`escrow    ${escrow}`);
@@ -117,7 +126,21 @@ async function main() {
       return 3;
     }
     console.error(`MISCONFIGURED: RPC read failed: ${shortError(err)}`);
-    console.error("If this is a rate-limit error, set BASE_SEPOLIA_RPC_URL — see CC-048.");
+    // `returned no data ("0x")` is NOT a rate-limit symptom, and calling it one sends the
+    // reader somewhere useless. It means the call reached a node that has no contract at
+    // this address — wrong address, or an endpoint on a different chain. This text used to
+    // advise setting BASE_SEPOLIA_RPC_URL even when the line above had just reported it as
+    // set, which is how it read on 2026-09-01.
+    if (/returned no data/i.test(String(err?.shortMessage ?? err?.message ?? err))) {
+      console.error("");
+      console.error('"returned no data" means there is no contract at that address on the');
+      console.error("chain this endpoint talks to. Two causes, and neither is rate limiting:");
+      console.error("  1. NEXT_PUBLIC_ESCROW_CONTRACT points somewhere with no code, or");
+      console.error("  2. the RPC endpoint is on a different network than expected.");
+      console.error("The chain-id check above rules out (2), so suspect (1) if it passed.");
+    } else if (!process.env.BASE_SEPOLIA_RPC_URL) {
+      console.error("If this is a rate-limit error, set BASE_SEPOLIA_RPC_URL — see CC-048.");
+    }
     return 2;
   }
 

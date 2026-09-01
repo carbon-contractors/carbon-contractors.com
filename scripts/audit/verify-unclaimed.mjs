@@ -59,7 +59,7 @@
 
 import { createPublicClient, http, getAddress, formatUnits, parseAbiItem } from "viem";
 import { base, baseSepolia } from "viem/chains";
-import { withRpcRetry, isTransient, shortError } from "./rpc-retry.mjs";
+import { withRpcRetry, isTransient, shortError, chainIdMismatch } from "./rpc-retry.mjs";
 
 const WORK_SUBMITTED = parseAbiItem(
   "event WorkSubmitted(bytes32 indexed taskId, address indexed worker, bytes32 evidenceHash, uint64 submittedAt, bytes32 attestationUid)",
@@ -230,6 +230,14 @@ async function main() {
     transport: http(rpcUrl || undefined),
     batch: { multicall: true },
   });
+
+  // Same guard as verify-escrow-solvency: a wrong-network endpoint returns zero events and
+  // zero tasks, which this script would report as a vacuous CLEAN rather than a fault.
+  const mismatch = await chainIdMismatch(client, chain.id, "BASE_SEPOLIA_RPC_URL");
+  if (mismatch) {
+    console.error(mismatch);
+    return 2;
+  }
 
   console.log("── Unclaimed settlements ────────────────────────────────────────");
   console.log(`network   ${network} (chain ${chain.id})`);

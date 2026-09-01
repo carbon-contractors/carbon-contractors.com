@@ -74,3 +74,49 @@ export function shortError(err) {
   const text = err instanceof Error ? err.message : String(err);
   return text.split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "unknown error";
 }
+
+/**
+ * Confirm the endpoint is on the chain the script thinks it is.
+ *
+ * ## Why this is its own check
+ *
+ * An RPC pointed at the wrong network does not error. It answers every call, cheerfully,
+ * about a different chain — so a contract read comes back `0x` and surfaces as
+ * `returned no data`, which reads as "the contract is broken" rather than "you are looking
+ * at the wrong chain". Measured 2026-09-01: the same escrow address read fine over the
+ * public gateway and returned no data over a freshly-added dedicated endpoint, and the
+ * error text at the time suggested setting the very variable that had just been set.
+ *
+ * One `eth_chainId` call converts that into a sentence naming both chains.
+ *
+ * @returns null when it matches, or a ready-to-print explanation when it does not.
+ */
+export async function chainIdMismatch(client, expected, label) {
+  let actual;
+  try {
+    actual = await client.getChainId();
+  } catch {
+    // Unreachable endpoints are the retry helper's problem, not this one.
+    return null;
+  }
+  if (actual === expected) return null;
+
+  const known = {
+    1: "Ethereum mainnet",
+    8453: "Base mainnet",
+    84532: "Base Sepolia",
+    11155111: "Ethereum Sepolia",
+  };
+  const name = (id) => (known[id] ? `${known[id]} (${id})` : `chain ${id}`);
+
+  return [
+    `MISCONFIGURED: the RPC endpoint is on ${name(actual)}, not ${name(expected)}.`,
+    "",
+    `Every read would answer about the wrong chain, so a contract that exists on`,
+    `${name(expected)} reads back as no contract at all. Nothing is broken; the`,
+    `endpoint is pointed somewhere else.`,
+    "",
+    `Check the ${label} URL — an endpoint issued for one network is not usable for`,
+    "another, and Base and Base Sepolia are easy to mix up in a provider dashboard.",
+  ].join("\n");
+}
