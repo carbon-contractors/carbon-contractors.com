@@ -13,10 +13,28 @@
  * ── Phases ──────────────────────────────────────────────────────────────────────
  *
  *   verdict    fund -> submitWork -> claimWithVerdict(passing).  One run, no waiting.
- *   dispute    fund -> submitWork -> disputeTask(failing verdict) -> resolveDisputeOnChain.
- *              One run. This is the CC-059 KMS proof.
+ *   dispute    fund -> submitWork -> disputeTask(failing verdict, AS AGENT)
+ *              -> resolveDisputeOnChain(releaseToWorker=true). One run. The CC-059 KMS proof.
+ *
+ *   The three below close CC-079's stated gaps. Each is one run, same shape as `dispute`:
+ *
+ *   dispute-by-worker   the WORKER raises it. The contract always allowed either party
+ *                       (ADR-0001 D2); nothing had ever exercised the worker side.
+ *   dispute-refund      resolved as a REFUND to the agent. CC-059 only ever tested
+ *                       release-to-worker, so this outcome has never run on any chain.
+ *   arbitration-hold    raise the dispute and STOP, writing state. Pairs with:
+ *   arbitration-claim   resume and call releaseAfterArbitration as the worker, once the
+ *                       7-day window has elapsed with no ruling.
+ *
  *   submit     fund -> submitWork, then stop and write state to a file.
  *   claim      resume from that file and call releaseAfterReview.
+ *
+ * ── Why arbitration is a split pair, like submit/claim ──────────────────────────
+ *
+ * ARBITRATION_WINDOW is 7 days and a live chain cannot be fast-forwarded. The contract
+ * tests cover the boundary in both directions and are mutation-tested; what this pair adds
+ * is the same property against real bytecode, real gas and a real week. Until the
+ * 2026-09-01 redeploy it could not be run at all — no deployment had the clock.
  *
  * `submit` and `claim` are split because MIN_REVIEW_WINDOW is 12 hours and
  * `releaseAfterReview` cannot be reached before it elapses. Run `submit`, come back
@@ -151,16 +169,34 @@ function hash32(): Hex {
 
 async function main() {
   const phase = (process.argv[2] ?? "").toLowerCase();
-  const VALID = ["verdict", "dispute", "submit", "claim"];
+  const VALID = [
+    "verdict",
+    "dispute",
+    "dispute-by-worker",
+    "dispute-refund",
+    "arbitration-hold",
+    "arbitration-claim",
+    "submit",
+    "claim",
+  ];
   if (!VALID.includes(phase)) {
     console.error(`Usage: verify-escrow-lifecycle.ts <${VALID.join("|")}>`);
-    console.error("\n  verdict   fund -> submit -> claimWithVerdict (one run)");
-    console.error("  dispute   fund -> submit -> dispute -> resolveDispute via KMS (one run)");
-    console.error("  submit    fund -> submitWork, then stop (writes state file)");
-    console.error("  claim     resume and releaseAfterReview, 12h after `submit`");
+    console.error("\n  verdict             fund -> submit -> claimWithVerdict (one run)");
+    console.error("  dispute             agent raises, owner releases to worker (CC-059 proof)");
+    console.error("  dispute-by-worker   the WORKER raises it — never exercised before");
+    console.error("  dispute-refund      owner REFUNDS the agent — never run on any chain");
+    console.error("  arbitration-hold    raise a dispute and stop (writes state file)");
+    console.error("  arbitration-claim   resume and releaseAfterArbitration, 7d after `hold`");
+    console.error("  submit              fund -> submitWork, then stop (writes state file)");
+    console.error("  claim               resume and releaseAfterReview, 12h after `submit`");
     process.exitCode = 1;
     return;
   }
+
+  // Derived once, so the branches below read as intent rather than string comparison.
+  const raisedByWorker = phase === "dispute-by-worker";
+  const releaseToWorker = phase !== "dispute-refund";
+  const holdForArbitration = phase === "arbitration-hold";
 
   const config = getConfig();
   const escrow = config.NEXT_PUBLIC_ESCROW_CONTRACT as Address;
@@ -171,8 +207,8 @@ async function main() {
   const rpcUrl = config.BASE_SEPOLIA_RPC_URL ?? baseSepolia.rpcUrls.default.http[0];
   const pub = createPublicClient({ chain: baseSepolia, transport: http(rpcUrl) });
 
-  if (phase === "claim") {
-    await runClaim(pub, rpcUrl, usdc, escrow);
+  if (phase === "claim" || phase === "arbitration-claim") {
+    await runResume(phase, pub, rpcUrl, usdc, escrow);
     return;
   }
 
@@ -358,9 +394,13 @@ async function main() {
     return;
   }
 
-  console.log("\n[5] disputeTask(taskId, failing verdict, signature) as AGENT");
+  // Either party may raise (ADR-0001 D2), and until now only the agent side had ever run.
+  const raiser = raisedByWorker ? workerWallet : agentWallet;
+  console.log(
+    `\n[5] disputeTask(taskId, failing verdict, signature) as ${raisedByWorker ? "WORKER" : "AGENT"}`,
+  );
   const disputeHash = await withRpcLagRetry("disputeTask", () =>
-    agentWallet.writeContract({
+    raiser.writeContract({
       address: escrow,
       abi: CARBON_ESCROW_ABI,
       functionName: "disputeTask",
@@ -371,26 +411,102 @@ async function main() {
   if (disputeReceipt.status !== "success") throw new Error(`disputeTask reverted: ${disputeHash}`);
   console.log(`      tx: ${disputeHash}`);
 
-  console.log("\n[6] resolveDisputeOnChain(taskId, releaseToWorker=true) via the REAL platform signer");
+  if (holdForArbitration) {
+    // Read the deadline off the contract rather than adding 7 days here. The window is a
+    // constant in the bytecode, and the whole point of this phase is to test what the
+    // deployment does — not what this script believes it does.
+    const deadline = await withRpcLagRetry("arbitrationDeadline", () =>
+      pub.readContract({
+        address: escrow,
+        abi: CARBON_ESCROW_ABI,
+        functionName: "arbitrationDeadline",
+        args: [taskId],
+      }),
+    );
+    const pending: PendingRun = {
+      phase: "arbitration-hold",
+      paymentRequestId,
+      taskId,
+      workerKey,
+      workerAddress: worker.address,
+      escrow,
+      specHash,
+      evidenceHash,
+      submittedAt: Math.floor(Date.now() / 1000),
+      claimableAt: Number(deadline),
+    };
+    writeFileSync(STATE_FILE, Buffer.from(JSON.stringify(pending, null, 2), "utf8"));
+
+    console.log("\n" + line());
+    console.log("HOLD — the task is Disputed and the owner will now do nothing at all.");
+    console.log(line());
+    console.log("\n  This is the property ADR-0006 D3 exists for: an owner who never rules");
+    console.log("  must not be able to hold the escrow forever. Nothing below this line");
+    console.log("  involves the platform, the agent, or any ruling.");
+    console.log(`\n  State written to ${STATE_FILE}`);
+    console.log(`  Claimable from ${new Date(Number(deadline) * 1000).toLocaleString()} — run:`);
+    console.log("\n    node --env-file=.env.local node_modules/tsx/dist/cli.mjs \\");
+    console.log("      scripts/admin/verify-escrow-lifecycle.ts arbitration-claim");
+    return;
+  }
+
+  const agentUsdcBefore = await pub.readContract({
+    address: usdc,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: [agent.address],
+  });
+
+  console.log(
+    `\n[6] resolveDisputeOnChain(taskId, releaseToWorker=${releaseToWorker}) via the REAL platform signer`,
+  );
   console.log("      (CC-059's proof — this is the exact function production calls, KMS-signed,");
   console.log("       and it only works because the HSM key owns the contract)");
-  const resolveHash = await resolveDisputeOnChain(taskId, true);
+  if (!releaseToWorker) {
+    console.log("      REFUND outcome — CC-059 only ever tested release-to-worker, so this");
+    console.log("      direction has never been executed against a real deployment.");
+  }
+  const resolveHash = await resolveDisputeOnChain(taskId, releaseToWorker);
   const resolveReceipt = await pub.waitForTransactionReceipt({ hash: resolveHash });
   console.log(`      tx: ${resolveHash}  status: ${resolveReceipt.status}`);
 
   await report(pub, usdc, paymentRequestId, worker.address, workerUsdcBefore, "Resolved");
+
+  if (!releaseToWorker) {
+    const agentAfter = await pub.readContract({
+      address: usdc,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [agent.address],
+    });
+    const delta = (agentAfter as bigint) - (agentUsdcBefore as bigint);
+    console.log(`\n  agent USDC delta: +${formatUnits(delta, 6)} — the refund landed with the funder.`);
+    if (delta <= BigInt(0)) {
+      throw new Error("refund resolved but the agent's USDC balance did not increase");
+    }
+  }
 }
 
 /** Phase 2: the worker claims, with no agent or platform involvement whatsoever. */
-async function runClaim(
+/**
+ * Resume a held run — either `submit` -> `claim`, or `arbitration-hold` ->
+ * `arbitration-claim`. One function because the setup, the guards and the reporting are
+ * identical; only the contract call and the reason for waiting differ.
+ */
+async function runResume(
+  phase: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pub: any,
   rpcUrl: string,
   usdc: Address,
   escrow: Address,
 ) {
+  const arbitration = phase === "arbitration-claim";
+  const expectedHold = arbitration ? "arbitration-hold" : "submit";
+  const fn = arbitration ? "releaseAfterArbitration" : "releaseAfterReview";
+
   if (!existsSync(STATE_FILE)) {
-    throw new Error(`No pending run at ${STATE_FILE} — run the \`submit\` phase first.`);
+    throw new Error(`No pending run at ${STATE_FILE} — run the \`${expectedHold}\` phase first.`);
   }
   const pending: PendingRun = JSON.parse(readFileSync(STATE_FILE, "utf8"));
 
@@ -401,9 +517,20 @@ async function runClaim(
     );
   }
 
+  // The two holds write the same file, and resuming the wrong one reverts inside the
+  // contract with a state error that says nothing about which phase you meant. Caught here
+  // instead, by name.
+  if (pending.phase !== expectedHold) {
+    throw new Error(
+      `State file holds a "${pending.phase}" run, but "${phase}" resumes "${expectedHold}". ` +
+        `Calling ${fn} on that task would revert on state, which reads as a contract fault ` +
+        "rather than the wrong command.",
+    );
+  }
+
   const now = Math.floor(Date.now() / 1000);
   console.log(line());
-  console.log("CC-082 escrow lifecycle — phase \"claim\" — Base Sepolia");
+  console.log(`CC-082 escrow lifecycle — phase "${phase}" — Base Sepolia`);
   console.log(line());
   console.log(`  taskId:       ${pending.taskId}`);
   console.log(`  worker:       ${pending.workerAddress}`);
