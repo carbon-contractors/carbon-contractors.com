@@ -99,6 +99,30 @@ interface PendingOffer {
   baseUrl: string;
 }
 
+/**
+ * Reduce whatever is in PREVIEW_BASE_URL to an origin.
+ *
+ * A pasted URL is usually a page — `https://host/dashboard` — because that is what was in
+ * the address bar. Appending `/api/...` to that produces `/dashboard/api/...`, which 404s
+ * or, worse, resolves to something unrelated. Strip to the origin and say what was dropped,
+ * rather than silently requesting a path nobody meant.
+ */
+function toOrigin(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(
+      `PREVIEW_BASE_URL is not a URL: ${JSON.stringify(raw)}. It wants an origin, ` +
+        "e.g. https://your-preview.vercel.app",
+    );
+  }
+  if (url.pathname !== "/" || url.search || url.hash) {
+    console.log(`  note:      dropped "${url.pathname}${url.search}${url.hash}" — only the origin is used`);
+  }
+  return url.origin;
+}
+
 function required(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} must be set in .env.local`);
@@ -118,6 +142,28 @@ function baseHeaders(): Record<string, string> {
  * that as JSON fails with something meaningless about `<`, so name the real cause here —
  * otherwise the first run of this script looks like a broken API.
  */
+/**
+ * `fetch` throws a bare "fetch failed" for DNS, TLS and connection errors alike, which tells
+ * the reader nothing. The likeliest cause here is a preview URL for a branch that has since
+ * been merged and deleted — the alias goes with it, so the host stops resolving.
+ */
+async function fetchOrExplain(url: string, init: RequestInit, what: string): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const cause = (err as { cause?: { code?: string } })?.cause?.code;
+    throw new Error(
+      `${what}: could not reach ${new URL(url).origin}` +
+        (cause ? ` (${cause})` : "") +
+        "." + 
+        "\n  A branch preview disappears when its branch is deleted, so a URL that " +
+        "worked before a merge often will not after." +
+        "\n  Check the deployment still exists, and prefer a stable alias over a " +
+        "per-branch preview URL.",
+    );
+  }
+}
+
 async function readJson(res: Response, what: string): Promise<Record<string, unknown>> {
   const text = await res.text();
   try {
@@ -136,11 +182,15 @@ async function readJson(res: Response, what: string): Promise<Record<string, unk
 
 /** Wallet challenge-response, the same auth the MCP transport and every write route use. */
 async function signedHeaders(baseUrl: string, account: ReturnType<typeof privateKeyToAccount>) {
-  const res = await fetch(`${baseUrl}/api/basedhuman.mcp/challenge`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...baseHeaders() },
-    body: JSON.stringify({ walletAddress: account.address }),
-  });
+  const res = await fetchOrExplain(
+    `${baseUrl}/api/basedhuman.mcp/challenge`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...baseHeaders() },
+      body: JSON.stringify({ walletAddress: account.address }),
+    },
+    "challenge",
+  );
   const body = await readJson(res, "challenge");
   const nonce = body.nonce as string | undefined;
   const message = body.message as string | undefined;
@@ -380,12 +430,9 @@ async function main() {
     return;
   }
 
-  const baseUrl = (
-    process.env.PREVIEW_BASE_URL ??
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    ""
-  ).replace(/\/$/, "");
-  if (!baseUrl) throw new Error("PREVIEW_BASE_URL must be set — where the product is deployed");
+  const rawBase = process.env.PREVIEW_BASE_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? "";
+  if (!rawBase) throw new Error("PREVIEW_BASE_URL must be set — where the product is deployed");
+  const baseUrl = toOrigin(rawBase);
 
   if (phase === "fund") return runFund();
 
