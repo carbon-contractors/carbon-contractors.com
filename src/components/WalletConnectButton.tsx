@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useResumableConnector } from "@/lib/wallet/useResumableConnector";
+import { requestAccountSwitch } from "@/lib/wallet/requestAccountSwitch";
 import styles from "./WalletConnectButton.module.css";
 
 function truncateAddress(addr: string): string {
@@ -43,6 +44,43 @@ export default function WalletConnectButton({
   const resumable = useResumableConnector();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [switchNote, setSwitchNote] = useState<string | null>(null);
+
+  /**
+   * "Use a different wallet" used to just show the connector picker — a choice between
+   * Coinbase and MetaMask, when the user is asking for a different *account*. Picking the
+   * same connector reconnected them silently to the address they were trying to leave,
+   * because the wallet's own grant survives `disconnect()` and a dapp cannot revoke it.
+   *
+   * So ask the wallet to re-prompt. Where that is not supported, say so plainly rather
+   * than falling through to a picker that will do the same thing again.
+   */
+  async function switchAccount() {
+    setSwitchNote(null);
+    if (!resumable) {
+      setShowPicker(true);
+      return;
+    }
+    setSwitching(true);
+    try {
+      const result = await requestAccountSwitch(resumable);
+      if (result === "prompted") {
+        connect({ connector: resumable });
+        onAction?.();
+        return;
+      }
+      if (result === "rejected") return; // user dismissed their wallet — not an error
+      setShowPicker(true);
+      setSwitchNote(
+        "Your wallet is still connected to this site, and it cannot be disconnected from " +
+          "here. To use a different account, switch it in your wallet — or remove this " +
+          "site from the wallet's connected sites — then connect again.",
+      );
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   const dropdownClass = `${styles.walletDropdown} ${dropdownAlign === "left" ? styles.walletDropdownLeft : ""}`;
 
@@ -90,9 +128,10 @@ export default function WalletConnectButton({
         </button>
         <button
           className={styles.walletSwitchLink}
-          onClick={() => setShowPicker(true)}
+          onClick={switchAccount}
+          disabled={switching || isPending}
         >
-          Use a different wallet
+          {switching ? "Asking your wallet..." : "Use a different wallet"}
         </button>
         {error && <p className={styles.walletError}>{error.message}</p>}
       </div>
@@ -107,6 +146,7 @@ export default function WalletConnectButton({
       >
         {isPending ? "Connecting..." : "Connect Wallet"}
       </button>
+      {switchNote && <p className={styles.walletNote}>{switchNote}</p>}
       {dropdownOpen && (
         <div className={dropdownClass}>
           {connectors.map((connector) => (
