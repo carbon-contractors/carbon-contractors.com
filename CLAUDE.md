@@ -116,8 +116,11 @@ exists rather than reasoning from this file.**
   survives its cause: nothing may ever send USDC to the escrow except `createTask`.
   → `CC-081` Defect 1, `CC-037`
   · `node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs`
-- **CarbonEscrow v2 is deployed** — `0xe80d03688E8fa6270668AD73191d353e522CB1b1` on Sepolia,
-  block `45494043`, owned by the HSM key, verdict signer seeded. Implements `ADR-0001`:
+- **CarbonEscrow v2 is deployed** — `0xc6aa99a8226b679C71945dd9545685896a91E4d3` on Sepolia,
+  block `46227900`, redeployed 2026-09-01, verdict signer seeded. **This is the first deployment
+  carrying the arbitration clock** (`ARBITRATION_WINDOW` reads 604800s on chain). The previous
+  address `0xe80d…CB1b1` is superseded and had no clock; it held nothing at cutover
+  (`totalLocked() == 0`). Implements `ADR-0001`:
   `submitWork`, pull-payment claims, EIP-712 verdicts. **The `TaskState` enum was renumbered** —
   `Completed` moved 2 → 3 and everything above `Funded` shifted, so any hard-coded state integer
   predating 2026-08-15 is wrong. → `CC-082`
@@ -137,13 +140,11 @@ exists rather than reasoning from this file.**
   **Arbitration now has no app or MCP surface at all**, deliberately: the owner resolves via
   `scripts/admin/verify-escrow-lifecycle.ts` with the KMS key until the adjudication tier exists.
   → `ADR-0001` D2, `ADR-0007` (proposed), `CC-081` Defect 2
-- **The arbitration clock is written but deployed nowhere — and the difference matters.**
-  `CarbonEscrow.sol` now carries `ARBITRATION_WINDOW = 7 days` (`ADR-0006` D3 + Amendment 1),
-  stamped by `disputeTask` and claimed by the worker through `releaseAfterArbitration`. **The live
-  Sepolia contract predates it**, so on-chain today a disputed task still has no clock at all and
-  only the owner can end it. `chain-constants.json` says the same thing; believe the deployment, not
-  the source. Deploys with `CC-034`, which is a **redeploy** — new address, new
-  `ESCROW_DEPLOY_BLOCK`, and ownership resets to the deployer.
+- **The arbitration clock is live on Sepolia, and on no other network.**
+  `ARBITRATION_WINDOW = 7 days` (`ADR-0006` D3 + Amendment 1), stamped by `disputeTask` and claimed
+  by the worker through `releaseAfterArbitration`. Deployed 2026-09-01 and confirmed on chain, not
+  merely in the source. **Base mainnet has no deployment at all** — that is `CC-034`, and the clock
+  is bytecode-or-never there too.
   Three properties are load-bearing and each has a mutation-tested guard:
   the clock starts at `disputeTask` (either party) and **not** at `beginArbitration` (`onlyOwner`,
   optional — a clock started there could be withheld forever by never calling it); the window is a
@@ -206,7 +207,8 @@ exists rather than reasoning from this file.**
 **Environment and config**
 
 - **`ESCROW_DEPLOY_BLOCK` must be set** or event queries scan from genesis — ~36× the requests.
-  Sepolia: **`45494043`**, and it moves with every redeploy — it was `39032720` until 2026-08-15,
+  Sepolia: **`46227900`**, and it moves with every redeploy — it was `45494043` until 2026-09-01 and
+  `39032720` before 2026-08-15,
   which is a valid block and therefore fails slowly rather than loudly. Not a `NEXT_PUBLIC_` var,
   so it takes effect at runtime.
   `RPC_MAX_BLOCK_RANGE` (default `10000`) is a *provider* property and has already moved once.
