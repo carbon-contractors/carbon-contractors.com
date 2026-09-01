@@ -213,6 +213,16 @@ exists rather than reasoning from this file.**
   so it takes effect at runtime.
   `RPC_MAX_BLOCK_RANGE` (default `10000`) is a *provider* property and has already moved once.
   → `CC-070` · `node --env-file=.env.local scripts/audit/find-deploy-block.mjs`
+- **`node --env-file` does not override a variable already in the environment.** Measured on
+  Node v24, 2026-09-01: with `.env.local` saying one thing and the shell another, **the shell
+  wins, silently**. So editing `.env.local` has no effect on any variable also set in the
+  PowerShell session or the Windows user environment — and the symptom is a script that keeps
+  using a value you have just changed and triple-checked, with nothing anywhere saying why.
+  Every `node --env-file=.env.local scripts/...` invocation in this repo inherits this.
+  · `$env:VAR` and `[Environment]::GetEnvironmentVariable('VAR','User')` — either printing a
+    value means `.env.local` is being ignored for it; `Remove-Item Env:\VAR` clears the session one
+  · `verify-funding-lifecycle.ts` reads `.env.local` back and warns when it is being shadowed;
+    worth copying into anything else that takes a URL or an address this way
 - **A blank env var is not an unset one, and Zod did not save us from it.** `VAR=`, a cleared Vercel
   field and an unset Actions secret all arrive as `""`. `??` misses it, `.default()` only fires on
   `undefined`, and **`z.coerce.number()` turns `""` into `0`, not `NaN`** — so a blank
