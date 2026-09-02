@@ -20,6 +20,18 @@ ask for one on connect, and otherwise only when something writes to the chain. L
 accepting a job, setting rates and skills, notification channels — should ride a persistent
 session.
 
+### Product ruling (2026-09-02, Aaron)
+
+The platform is engineered for **agents hiring humans** — the human side of the product is the
+worker side. Worker-side automation is deliberately **not engineered as a product** (no delegation
+UX; the scoped-token future needs its own ADR and a demand signal) but deliberately **not locked
+out** either: D6 keeps the per-request machine path available to any caller, which is the door a
+savvy worker points their own agent at, and D4 keeps scopes in the schema so a future A2A expansion
+is additive. The platform's answer to a misbehaving worker is reputation and the AWOL/lapse
+mechanics (`ADR-0005`), not auth. One consequence stated plainly: today, that door means the
+worker's automation holds the worker's own key, since machine callers sign wallet challenges —
+sharing it is the worker's choice, on them.
+
 ## Context
 
 `src/app/dashboard/page.tsx`'s `signedApiHeaders()` mints a fresh challenge-response signature for
