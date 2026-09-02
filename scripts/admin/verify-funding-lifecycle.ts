@@ -130,12 +130,22 @@ function required(name: string): string {
   return v;
 }
 
-/** Headers every request carries: the Vercel bypass, when one is configured. */
+/**
+ * Headers every request carries: the Vercel bypass, when one is configured.
+ *
+ * Deliberately omits `x-vercel-set-bypass-cookie`. That header tells Vercel's edge to do a
+ * browser-style handshake — set a cookie via `Set-Cookie`, then 307 back to the same URL so
+ * the follow-up request can present it. `fetch` (undici) has no cookie jar, so the redirected
+ * request never carries the cookie, Vercel sets it and redirects again, and undici's redirect
+ * cap turns that into a bare "fetch failed" with a `cause` of `Error("redirect count
+ * exceeded")` — no `.code`, so it doesn't even look like the DNS/TLS failures this file's
+ * error wrapper was written for (`Lessons-Learned.md` §30). The bypass secret alone is
+ * sufficient per-request; the cookie only matters for a browser session that needs it to
+ * persist across page loads.
+ */
 function baseHeaders(): Record<string, string> {
   const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-  return secret
-    ? { "x-vercel-protection-bypass": secret, "x-vercel-set-bypass-cookie": "true" }
-    : {};
+  return secret ? { "x-vercel-protection-bypass": secret } : {};
 }
 
 /**
@@ -263,9 +273,12 @@ async function runOffer(baseUrl: string, worker: Address) {
   if (offer.ok === false) throw new Error(`request_human_work refused: ${JSON.stringify(offer)}`);
 
   const paymentRequestId = offer.payment_request_id as string;
-  const status = offer.status as string;
+  // offer.status is x402's funding-stage wrapper — always "awaiting_funding" or
+  // "already_initiated" (src/lib/payments/x402.ts:242,285), never the offer state.
+  // worker_status carries the real thing: "pending" vs "accepted" (:255).
+  const status = offer.worker_status as string;
   console.log(`      payment_request_id: ${paymentRequestId}`);
-  console.log(`      status:             ${status}`);
+  console.log(`      worker_status:      ${status}`);
   console.log(`      task_id_bytes32:    ${offer.task_id_bytes32}`);
   console.log(`      spec_hash:          ${offer.spec_hash}`);
 

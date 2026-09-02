@@ -448,8 +448,12 @@ staleness was in this file, not the pipeline. **A red monitor schedule is a real
 - When you notice a problem outside the current task's scope, log it in a single line under "Observations" in your response instead — don't file it as a ticket.
 - I'll decide what gets promoted to a CC-### issue.
 - **Enforced, partly.** `.claude/hooks/check-backlog.ps1` is registered as a `PreToolUse`
-  hook on `Write|Edit` (`.claude/settings.json`) and denies a write to any
-  `docs/backlog/CC-###.md`. Verified firing 2026-08-26.
+  hook on `Write|Edit` (`.claude/settings.json`) and forces a permission prompt on any write to
+  `docs/backlog/CC-###.md` — it cannot see chat context, so it always asks, but an approval
+  already given in conversation can now actually be honoured at that prompt. It started as an
+  unconditional `deny` (verified firing 2026-08-26); that turned out to also block a ticket Aaron
+  had explicitly told Claude to raise, with no way to clear it, so it was changed to `ask` on
+  2026-09-01.
   **It does not cover a write driven through `Bash`** — a shell command carries no
   `file_path`, and the matcher does not include `Bash`, so a script that edits a ticket
   sidesteps it entirely. Widening the matcher would be theatre: the path usually lives
