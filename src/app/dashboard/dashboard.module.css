@@ -124,6 +124,12 @@
   color: var(--cc-yellow);
 }
 
+/* NOR-324: accepted is agreed-but-unfunded, not expired — same family as active. */
+.statusAccepted {
+  background: rgba(0, 0, 255, 0.12);
+  color: var(--cc-blue-bright);
+}
+
 .statusActive {
   background: rgba(0, 0, 255, 0.12);
   color: var(--cc-blue-bright);
@@ -488,6 +494,107 @@
 }
 
 /* ── Worker task actions (CC-092): submit, claim, dispute ────────────── */
+
+/* ── Pending offer (NOR-323/324/325): the deal, before the decision ── */
+
+.offerSection {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--cc-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.specTitle {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cc-text-muted);
+  margin: 0;
+}
+
+.specList {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.specRow {
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.specLabel {
+  color: var(--cc-text);
+}
+
+.specValue {
+  font-family: var(--cc-font-mono);
+}
+
+.specDesc {
+  margin: 0.15rem 0 0 0;
+  color: var(--cc-text-muted);
+}
+
+.specWarning {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--cc-red);
+  margin: 0;
+}
+
+.taskCardOffer {
+  border-color: rgba(251, 191, 36, 0.55);
+}
+
+.taskCardOffer:hover {
+  border-color: var(--cc-yellow);
+}
+
+.offerHeading {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--cc-yellow);
+  margin: 0;
+}
+
+.offerExpiry {
+  font-size: 0.75rem;
+  color: var(--cc-text-muted);
+  margin: 0;
+}
+
+.offerActions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.declineBtn {
+  background: none;
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--cc-text-muted);
+  cursor: pointer;
+}
+
+.declineBtn:hover:not(:disabled) {
+  color: var(--cc-text);
+  border-color: var(--cc-text-muted);
+}
+
+.declineBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .workerActionSection {
   margin-top: 0.75rem;
