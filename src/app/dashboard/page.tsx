@@ -17,6 +17,11 @@ import {
   type EvidenceArtifactDraft,
 } from "@/lib/evidence/draft";
 import {
+  loadStoredDrafts,
+  saveStoredDrafts,
+  type StoredEvidenceDrafts,
+} from "@/lib/evidence/draft-store";
+import {
   parseVerdictPayload,
   verdictTupleForContract,
 } from "@/lib/contracts/verdict-json";
@@ -340,6 +345,33 @@ export default function DashboardPage() {
   // take the same evidence-bundle textarea.
   const [actionOpen, setActionOpen] = useState<Record<string, TaskAction>>({});
   const [evidenceDrafts, setEvidenceDrafts] = useState<Record<string, EvidenceArtifactDraft[]>>({});
+  // NOR-328: the bundle hash actually committed on-chain per task, so the
+  // claim-early form can prove a match instead of hoping.
+  const [submittedHashes, setSubmittedHashes] = useState<Record<string, string>>({});
+
+  // Drafts survive reloads — they live in this browser only, keyed per wallet.
+  // The platform still stores nothing (CC-083), so there is no retention ripple.
+  useEffect(() => {
+    if (!address) return;
+    const stored = loadStoredDrafts(address);
+    const drafts: Record<string, EvidenceArtifactDraft[]> = {};
+    const hashes: Record<string, string> = {};
+    for (const [id, entry] of Object.entries(stored)) {
+      if (entry && Array.isArray(entry.artifacts)) drafts[id] = entry.artifacts;
+      if (entry && typeof entry.submittedHash === "string") hashes[id] = entry.submittedHash;
+    }
+    setEvidenceDrafts((prev) => ({ ...drafts, ...prev }));
+    setSubmittedHashes((prev) => ({ ...hashes, ...prev }));
+  }, [address]);
+
+  useEffect(() => {
+    if (!address) return;
+    const stored: Record<string, StoredEvidenceDrafts> = {};
+    for (const [id, artifacts] of Object.entries(evidenceDrafts)) {
+      stored[id] = { artifacts, submittedHash: submittedHashes[id] };
+    }
+    saveStoredDrafts(address, stored);
+  }, [address, evidenceDrafts, submittedHashes]);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<
     Record<string, { ok: boolean; text: string; checks?: CheckResult[] }>
@@ -463,6 +495,23 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.ok) {
         setTasks(data.tasks);
+        // NOR-328: drop local drafts for tasks no longer in the list — they
+        // are finished or purged, and the browser cache should follow.
+        const known = new Set(
+          (data.tasks as { payment_request_id: string }[]).map((t) => t.payment_request_id),
+        );
+        setEvidenceDrafts((prev) => {
+          const next = Object.fromEntries(
+            Object.entries(prev).filter(([id]) => known.has(id)),
+          );
+          return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+        });
+        setSubmittedHashes((prev) => {
+          const next = Object.fromEntries(
+            Object.entries(prev).filter(([id]) => known.has(id)),
+          );
+          return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+        });
       } else {
         setTasks([]);
         setErrors((prev) => ({ ...prev, tasks: "Failed to fetch tasks" }));
@@ -618,6 +667,15 @@ export default function DashboardPage() {
   function evidenceForm(task: Task, criteria: AcceptanceSpec["criteria"] | null) {
     const drafts = evidenceDrafts[task.id] ?? [];
     const minArtefacts = criteria?.min_artefacts;
+    // NOR-328: live comparison against the bundle committed on-chain, so a
+    // mismatch is a sentence on screen rather than a silent checker failure.
+    const onChainHash = task.on_chain?.evidenceHash ?? null;
+    const build = buildEvidenceBundleJson(task.payment_request_id, drafts);
+    const draftHash = build.ok ? keccak256(toHex(build.json)) : null;
+    const hashMatch =
+      onChainHash && draftHash
+        ? draftHash.toLowerCase() === onChainHash.toLowerCase()
+        : null;
     const update = (index: number, patch: Partial<EvidenceArtifactDraft>) => {
       setEvidenceDrafts((prev) => ({
         ...prev,
@@ -638,6 +696,15 @@ export default function DashboardPage() {
           <p className={styles.evidenceGuidance}>
             Add each artefact: its link, plus any details this task checks. No
             JSON needed — the bundle is built for you.
+          </p>
+        )}
+        {onChainHash && (
+          <p className={styles.evidenceGuidance}>
+            {hashMatch === null
+              ? "Add your artefacts to compare against the bundle committed on-chain."
+              : hashMatch
+                ? "Matches the bundle committed on-chain."
+                : "This doesn't match the bundle committed on-chain — your payment is bound to the committed bundle, so check the links and details."}
           </p>
         )}
         {drafts.map((d, i) => (
@@ -908,6 +975,9 @@ export default function DashboardPage() {
           ZERO_ATTESTATION_UID,
         ],
       });
+      // NOR-328: remember the committed hash so claim-early/dispute prefill
+      // from the submitted bundle and can prove a match on-screen.
+      setSubmittedHashes((prev) => ({ ...prev, [task.id]: parsed.hash }));
       setActionMsg((prev) => ({
         ...prev,
         [task.id]: { ok: true, text: "Work submitted. The review window is now running." },
@@ -994,6 +1064,21 @@ export default function DashboardPage() {
     if (!escrowContract || !address) return;
     const parsed = parseDraft(task);
     if (!parsed) return;
+    // NOR-328: claim-early claims the SUBMITTED work — a bundle differing from
+    // the on-chain commitment can only yield a failing verdict, so say so
+    // before the wallet is involved rather than after a silent checker miss.
+    const onChainHash = task.on_chain?.evidenceHash;
+    if (onChainHash && parsed.hash.toLowerCase() !== onChainHash.toLowerCase()) {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: false,
+          text:
+            "This bundle doesn't match the one committed when you submitted work (the on-chain hash differs). Claim-early claims the submitted work — fix the artefacts above, or wait out the review window and claim without a verdict.",
+        },
+      }));
+      return;
+    }
     setActionBusy(task.payment_request_id);
     try {
       const res = await fetchWithSession("/api/verdict", {
