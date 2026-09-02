@@ -85,9 +85,7 @@ describe("/api/tasks with a session (NOR-322)", () => {
     mockGetPublicTasks.mockResolvedValue([]);
 
     const { GET } = await import("@/app/api/tasks/route");
-    const res = await GET(makeRequest("/api/tasks", {
-      headers: {},
-    }) /* no auth headers */);
+    const res = await GET(makeRequest("/api/tasks"));
     const data = await res.json();
 
     expect(data.worker_concurrency).toBeUndefined();
