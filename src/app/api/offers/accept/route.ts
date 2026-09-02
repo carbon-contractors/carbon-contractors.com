@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { respondToOffer } from "@/lib/offers";
 import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
+import { sessionWalletFromRequest } from "@/lib/auth/session";
 import { isValidWalletAddress } from "@/lib/validation";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
@@ -37,18 +38,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // ADR-0009: a valid session (cookie or bearer) authenticates without a
+    // prompt; machine callers keep the challenge path (D6).
+    const sessionWallet = await sessionWalletFromRequest(request);
     let callerWallet: string;
-    try {
-      callerWallet = await verifyChallengeSignature(rawWallet, signature, nonce);
-    } catch (err) {
-      log("warn", "offer_accept_auth_failed", {
-        wallet: rawWallet,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return NextResponse.json(
-        { ok: false, error: "Signature verification failed" },
-        { status: 401 },
-      );
+    if (sessionWallet) {
+      callerWallet = sessionWallet;
+    } else {
+      try {
+        callerWallet = await verifyChallengeSignature(rawWallet, signature, nonce);
+      } catch (err) {
+        log("warn", "offer_accept_auth_failed", {
+          wallet: rawWallet,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return NextResponse.json(
+          { ok: false, error: "Signature verification failed" },
+          { status: 401 },
+        );
+      }
     }
 
     const body = await request.json();

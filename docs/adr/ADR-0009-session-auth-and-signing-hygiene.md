@@ -1,8 +1,9 @@
 ---
 id: ADR-0009
 title: Session auth and signing hygiene — sign once at connect, then only when the chain is touched
-status: proposed
+status: accepted
 date: 2026-09-02
+accepted: 2026-09-02 - accepted by Aaron in session, implementation started same day
 deciders: Aaron Clifft
 depends-on: ADR-0005 (offer acceptance semantics), ADR-0002 (privacy posture), CC-093 (wallet-ownership proof pattern)
 resolves: NOR-322 (CC-101 hub), the design question NOR-322 recorded on session lifetime and storage
@@ -14,7 +15,7 @@ epic: public-launch
 
 ## Status
 
-**Proposed, 2026-09-02.** Drafted after Aaron set the product direction during the NOR-322
+**Accepted, 2026-09-02**, by Aaron in the NOR-322 working session ("yes, ADR accepted. go build NOR-322"). Drafted the same day Drafted after Aaron set the product direction during the NOR-322
 discussion: wallet prompts are an anxiety-inducing moment for non-crypto users, so the site should
 ask for one on connect, and otherwise only when something writes to the chain. Low-stakes actions —
 accepting a job, setting rates and skills, notification channels — should ride a persistent

@@ -213,6 +213,46 @@ export interface Database {
         };
         Relationships: [];
       };
+      // NOR-322 / ADR-0009: server-side sessions minted from one successful
+      // wallet challenge. Only the SHA-256 token hash is stored; read and
+      // written exclusively by the server via the service role (RLS deny-all,
+      // migration 022).
+      sessions: {
+        Row: {
+          id: string;
+          wallet: string;
+          token_hash: string;
+          scopes: string[];
+          name: string | null;
+          created_at: string;
+          last_used_at: string;
+          expires_at: string;
+          revoked_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          wallet: string;
+          token_hash: string;
+          scopes?: string[];
+          name?: string | null;
+          created_at?: string;
+          last_used_at?: string;
+          expires_at: string;
+          revoked_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          wallet?: string;
+          token_hash?: string;
+          scopes?: string[];
+          name?: string | null;
+          created_at?: string;
+          last_used_at?: string;
+          expires_at?: string;
+          revoked_at?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       tasks_public: {

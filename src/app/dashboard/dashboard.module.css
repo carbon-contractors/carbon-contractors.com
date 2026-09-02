@@ -1201,3 +1201,52 @@
   color: var(--cc-red);
   margin-top: 0.5rem;
 }
+
+/* ── Sessions (NOR-322 / ADR-0009): one sign, 30 days, revocable ── */
+
+.sessionRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--cc-border-subtle);
+}
+
+.sessionMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.sessionName {
+  font-size: 0.8rem;
+  color: var(--cc-text);
+}
+
+.sessionDates {
+  font-size: 0.7rem;
+  color: var(--cc-text-muted);
+}
+
+.sessionRevokeBtn {
+  background: none;
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--cc-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sessionRevokeBtn:hover:not(:disabled) {
+  color: var(--cc-red);
+  border-color: var(--cc-red);
+}
+
+.sessionRevokeBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
