@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getFullReputation } from "@/lib/reputation";
+import { listSlashRecords } from "@/lib/db/slashes";
 import { safeErrorResponse } from "@/lib/errors";
 
 export async function GET(request: NextRequest) {
@@ -21,7 +22,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const reputation = await getFullReputation(wallet);
-    return NextResponse.json({ ok: true, reputation });
+    // NOR-330: the resolution-time records that explain the on-chain slashed
+    // total — the chain says how much was slashed, not why.
+    const slashes = await listSlashRecords(wallet);
+    return NextResponse.json({ ok: true, reputation, slashes });
   } catch (err: unknown) {
     return safeErrorResponse(err, "reputation_fetch_error", { wallet });
   }
