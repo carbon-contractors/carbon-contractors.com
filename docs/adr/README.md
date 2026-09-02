@@ -31,6 +31,7 @@ made.
 | [ADR-0006](ADR-0006-continuity-succession-and-the-right-to-fork.md) | Continuity, succession, and the right to fork | accepted | `CC-091`, `funds_control_aml_gating.md` Track C |
 | [ADR-0007](ADR-0007-adjudication-tier-and-arbitrator-isolation.md) | The adjudication tier — value-weighted review, and what an arbitrator may see | accepted | `funds_control_aml_gating.md` Track D |
 | [ADR-0008](ADR-0008-completion-attestations.md) | Completion attestations — a signature the worker holds, not a transaction we send | **proposed** | `CC-036` |
+| [ADR-0009](ADR-0009-session-auth-and-signing-hygiene.md) | Session auth and signing hygiene — sign once at connect, then only when the chain is touched | **proposed** | `NOR-322` (CC-101) |
 
 `ADR-0001` carries three amendments, and each changes decisions stated above it:
 
