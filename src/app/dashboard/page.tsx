@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from "wagmi";
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
@@ -229,6 +229,15 @@ interface Reputation {
   };
 }
 
+/** One row of the dashboard session list (ADR-0009 D5). */
+interface SessionInfo {
+  id: string;
+  name: string | null;
+  created_at: string;
+  last_used_at: string;
+  expires_at: string;
+}
+
 type ChannelType = "email" | "webhook" | "telegram" | "discord";
 
 interface Channel {
@@ -316,6 +325,7 @@ export default function DashboardPage() {
     tasks: null,
     reputation: null,
   });
+
   const [stakeInput, setStakeInput] = useState("");
   const [unstakeInput, setUnstakeInput] = useState("");
 
@@ -340,6 +350,11 @@ export default function DashboardPage() {
   const [stakeOpenOverride, setStakeOpenOverride] = useState<boolean | null>(null);
 
   // ── Notification channels (CC-073) ────────────────────────────────────────
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState("");
+  const [sessionBusy, setSessionBusy] = useState(false);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelsLoaded, setChannelsLoaded] = useState(false);
   const [channelsLoading, setChannelsLoading] = useState(false);
@@ -372,27 +387,73 @@ export default function DashboardPage() {
   // Tasks require proof of wallet ownership (CC-093): an unsigned fetch only
   // returns the public projection, which has no task_description. Same
   // challenge round trip the dispute flow uses.
+  // ── Session (NOR-322 / ADR-0009) ──────────────────────────────────────────
+  // One wallet signature mints a 30-day session; everything off-chain rides
+  // the httpOnly cookie after that. The only further prompts are the wallet's
+  // own native ones on actual contract writes — a session is not a wallet.
+  const sessionRef = useRef<{ minting: Promise<boolean> | null }>({ minting: null });
+
+  const ensureSession = useCallback(async (): Promise<boolean> => {
+    if (!address) return false;
+    if (sessionRef.current.minting) return sessionRef.current.minting;
+    const mint = (async () => {
+      try {
+        const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ walletAddress: address }),
+        });
+        const { nonce, message } = await challengeRes.json();
+        const signature = await signMessageAsync({ message });
+        const res = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            walletAddress: address,
+            nonce,
+            signature,
+            name: "Dashboard",
+          }),
+        });
+        return res.ok;
+      } catch {
+        // Signature declined or the round trip failed — the caller surfaces
+        // the server's own 401 copy, so nothing fails silently.
+        return false;
+      } finally {
+        sessionRef.current.minting = null;
+      }
+    })();
+    sessionRef.current.minting = mint;
+    return mint;
+  }, [address, signMessageAsync]);
+
+  const authHeaders = useCallback((): Record<string, string> => {
+    // The session rides the httpOnly SameSite=Strict cookie; this only
+    // carries the JSON content type.
+    return { "Content-Type": "application/json" };
+  }, []);
+
+  /** 401 → the session expired mid-flight; mint once and retry (NOR-322). */
+  const fetchWithSession = useCallback(
+    async (input: string, init?: RequestInit): Promise<Response> => {
+      let res = await fetch(input, init);
+      if (res.status === 401) {
+        if (await ensureSession()) {
+          res = await fetch(input, init);
+        }
+      }
+      return res;
+    },
+    [ensureSession],
+  );
   const fetchTasks = useCallback(async () => {
     if (!isConnected || !address) {
       setTasks([]);
       return;
     }
     try {
-      const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: address }),
-      });
-      const { nonce, message } = await challengeRes.json();
-      const signature = await signMessageAsync({ message });
-
-      const res = await fetch("/api/tasks", {
-        headers: {
-          "x-caller-wallet": address,
-          "x-caller-signature": signature,
-          "x-caller-nonce": nonce,
-        },
-      });
+      const res = await fetchWithSession("/api/tasks");
       const data = await res.json();
       if (data.ok) {
         setTasks(data.tasks);
@@ -406,7 +467,7 @@ export default function DashboardPage() {
       setTasks([]);
       setErrors((prev) => ({ ...prev, tasks: "Sign the verification message to view your tasks" }));
     }
-  }, [isConnected, address, signMessageAsync]);
+  }, [isConnected, address, fetchWithSession]);
 
   const fetchData = useCallback(() => {
     if (!isConnected || !address) {
@@ -574,23 +635,6 @@ export default function DashboardPage() {
     );
   }
 
-  async function signedApiHeaders(): Promise<Record<string, string>> {
-    if (!address) throw new Error("Wallet not connected");
-    const challengeRes = await fetch("/api/basedhuman.mcp/challenge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ walletAddress: address }),
-    });
-    const { nonce, message } = await challengeRes.json();
-    const signature = await signMessageAsync({ message });
-    return {
-      "Content-Type": "application/json",
-      "x-caller-wallet": address,
-      "x-caller-signature": signature,
-      "x-caller-nonce": nonce,
-    };
-  }
-
   /** Validates the textarea draft and returns its parse — or shows the error. */
   function parseDraft(taskId: string) {
     const draft = (evidenceDrafts[taskId] ?? "").trim();
@@ -626,9 +670,9 @@ export default function DashboardPage() {
     if (!address) return;
     setActionBusy(task.payment_request_id);
     try {
-      const res = await fetch(`/api/offers/${decision}`, {
+      const res = await fetchWithSession(`/api/offers/${decision}`, {
         method: "POST",
-        headers: await signedApiHeaders(),
+        headers: authHeaders(),
         body: JSON.stringify({ payment_request_id: task.payment_request_id }),
       });
       const data = await res.json();
@@ -778,9 +822,9 @@ export default function DashboardPage() {
     if (!parsed) return;
     setActionBusy(task.payment_request_id);
     try {
-      const res = await fetch("/api/verdict", {
+      const res = await fetchWithSession("/api/verdict", {
         method: "POST",
-        headers: await signedApiHeaders(),
+        headers: authHeaders(),
         body: JSON.stringify({
           payment_request_id: task.payment_request_id,
           evidence_bundle: parsed.preimage,
@@ -851,9 +895,9 @@ export default function DashboardPage() {
     if (!parsed) return;
     setActionBusy(task.payment_request_id);
     try {
-      const res = await fetch("/api/verdict", {
+      const res = await fetchWithSession("/api/verdict", {
         method: "POST",
-        headers: await signedApiHeaders(),
+        headers: authHeaders(),
         body: JSON.stringify({
           payment_request_id: task.payment_request_id,
           evidence_bundle: parsed.preimage,
@@ -895,9 +939,9 @@ export default function DashboardPage() {
       // /api/dispute's chain-first path reconciles on retry.
       let recorded = false;
       try {
-        const syncRes = await fetch("/api/dispute", {
+        const syncRes = await fetchWithSession("/api/dispute", {
           method: "POST",
-          headers: await signedApiHeaders(),
+          headers: authHeaders(),
           body: JSON.stringify({ payment_request_id: task.payment_request_id }),
         });
         recorded = (await syncRes.json()).ok === true;
@@ -936,17 +980,95 @@ export default function DashboardPage() {
   // Every channels call needs a fresh challenge-response signature (CC-004),
   // so each load/add/remove prompts one wallet signature — the same round trip
   // the task actions above use.
-  async function signedChannelHeaders(): Promise<Record<string, string>> {
-    return signedApiHeaders();
+  // ── Session list (NOR-322 / ADR-0009 D5) ──────────────────────────────
+  async function loadSessions() {
+    if (!isConnected || !address) return;
+    setSessionsLoading(true);
+    setSessionsError("");
+    try {
+      const res = await fetchWithSession("/api/auth/session");
+      const data = await res.json();
+      if (data.ok) {
+        setSessions(data.sessions ?? []);
+        setSessionsLoaded(true);
+      } else {
+        setSessionsError(data.error ?? "Failed to load sessions");
+      }
+    } catch {
+      setSessionsError("Network error");
+    } finally {
+      setSessionsLoading(false);
+    }
   }
+
+  async function handleRevokeSession(session: SessionInfo) {
+    setSessionBusy(true);
+    setSessionsError("");
+    try {
+      const res = await fetch("/api/auth/session", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: session.id }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSessions((prev) => prev.filter((s) => s.id !== session.id));
+      } else {
+        setSessionsError(data.error ?? "Failed to revoke session");
+      }
+    } catch {
+      setSessionsError("Network error");
+    } finally {
+      setSessionBusy(false);
+    }
+  }
+
+  async function handleRevokeAllSessions() {
+    setSessionBusy(true);
+    setSessionsError("");
+    try {
+      const res = await fetch("/api/auth/session", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        // This session is gone too — the next off-chain action mints a new
+        // one with a single signature.
+        setSessions([]);
+        setSessionsLoaded(true);
+      } else {
+        setSessionsError(data.error ?? "Failed to revoke sessions");
+      }
+    } catch {
+      setSessionsError("Network error");
+    } finally {
+      setSessionBusy(false);
+    }
+  }
+
+  // Load the session list whenever a wallet connects; clear it when one leaves.
+  useEffect(() => {
+    setSessions([]);
+    setSessionsLoaded(false);
+    setSessionsError("");
+  }, [address]);
+
+  useEffect(() => {
+    if (isConnected && address) {
+      loadSessions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, address]);
 
   async function loadChannels() {
     if (!address) return;
     setChannelsLoading(true);
     setChannelsError("");
     try {
-      const res = await fetch("/api/channels", {
-        headers: await signedChannelHeaders(),
+      const res = await fetchWithSession("/api/channels", {
+        headers: authHeaders(),
       });
       const data = await res.json();
       if (data.ok) {
@@ -967,9 +1089,9 @@ export default function DashboardPage() {
     setChannelBusy(true);
     setChannelsError("");
     try {
-      const res = await fetch("/api/channels", {
+      const res = await fetchWithSession("/api/channels", {
         method: "POST",
-        headers: await signedChannelHeaders(),
+        headers: authHeaders(),
         body: JSON.stringify({
           type: newChannelType,
           address: newChannelAddress,
@@ -1005,9 +1127,9 @@ export default function DashboardPage() {
     setChannelBusy(true);
     setChannelsError("");
     try {
-      const res = await fetch("/api/channels", {
+      const res = await fetchWithSession("/api/channels", {
         method: "DELETE",
-        headers: await signedChannelHeaders(),
+        headers: authHeaders(),
         body: JSON.stringify({ channel_id: channel.id }),
       });
       const data = await res.json();
@@ -1025,23 +1147,23 @@ export default function DashboardPage() {
 
   // CC-074: toggle accepts_auto_booking on one channel. Enabling is the
   // consequential direction, so it gets an explicit confirm spelling out what
-  // is being pre-authorised before the wallet signature is requested.
+  // is being pre-authorised.
   async function handleToggleAutoBooking(channel: Channel, next: boolean) {
     if (next) {
       const confirmed = window.confirm(
         `Turn on auto-booking for this ${channel.type} channel?\n\n` +
           "Hiring agents will be able to commit you directly to tasks " +
           "matching your listed categories and rate — accepted on your " +
-          "behalf, with no confirmation step. You will sign one message to confirm."
+          "behalf, with no confirmation step."
       );
       if (!confirmed) return;
     }
     setAutoBookBusy(channel.id);
     setChannelsError("");
     try {
-      const res = await fetch("/api/channels", {
+      const res = await fetchWithSession("/api/channels", {
         method: "PATCH",
-        headers: await signedChannelHeaders(),
+        headers: authHeaders(),
         body: JSON.stringify({
           channel_id: channel.id,
           accepts_auto_booking: next,
@@ -1071,8 +1193,9 @@ export default function DashboardPage() {
   }, [address]);
 
   // ── Profile editing (CC-021) ───────────────────────────────────────────────
-  // Every change is wallet-signed and sent to PATCH /api/profile, which verifies
-  // the signature server-side before writing with the service role.
+  // Changes ride the session (ADR-0009) to PATCH /api/profile, which still
+  // enforces the payload's action, wallet binding and freshness before writing
+  // with the service role. The per-save wallet signature is gone.
 
   async function submitProfileUpdate(updates: {
     availability?: string;
@@ -1083,20 +1206,20 @@ export default function DashboardPage() {
     setProfileSaving(true);
     setProfileMsg(null);
     try {
-      // The server rejects messages older than 5 minutes and requires the
-      // payload wallet to match the signer.
+      // The server still rejects messages older than 5 minutes and requires
+      // the payload wallet to match the session wallet — only the per-save
+      // signature is gone (ADR-0009).
       const message = JSON.stringify({
         action: "profile-update",
         wallet: address,
         timestamp: Math.floor(Date.now() / 1000),
         ...updates,
       });
-      const signature = await signMessageAsync({ message });
 
-      const res = await fetch("/api/profile", {
+      const res = await fetchWithSession("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: address, message, signature }),
+        body: JSON.stringify({ wallet: address, message }),
       });
       const data = await res.json();
       if (res.ok && data.ok) {
@@ -1435,8 +1558,8 @@ export default function DashboardPage() {
                       {profileSaving ? "Confirm in wallet..." : "Save changes"}
                     </button>
                     <p className={styles.profileEditNote}>
-                      Saving asks your wallet to sign the update — the server
-                      verifies the signature before applying it.
+                      Saving uses your dashboard session — profile edits
+                      need no wallet signature.
                     </p>
                   </div>
                 )}
@@ -1449,13 +1572,74 @@ export default function DashboardPage() {
               </div>
             )}
 
+            {/* ── Sessions (NOR-322 / ADR-0009) ─────────────────────── */}
+            <h2 className={styles.pageTitle}>Active sessions</h2>
+            <div className={styles.channelsCard}>
+              <p className={styles.channelsIntro}>
+                Your dashboard signs once to open a session that rides this
+                browser for 30 days. Revoke anything you do not recognise —
+                a session can never move money; on-chain actions always need
+                your wallet anyway.
+              </p>
+
+              {sessionsError && (
+                <p className={styles.channelsError}>{sessionsError}</p>
+              )}
+
+              {sessionsLoading && (
+                <p className={styles.channelsIntro}>Loading sessions…</p>
+              )}
+
+              {sessionsLoaded && sessions.length === 0 && (
+                <p className={styles.channelsIntro}>No active sessions.</p>
+              )}
+
+              {sessions.map((session) => (
+                <div key={session.id} className={styles.sessionRow}>
+                  <div className={styles.sessionMeta}>
+                    <span className={styles.sessionName}>
+                      {session.name ?? "Unnamed session"}
+                    </span>
+                    <span className={styles.sessionDates}>
+                      Last used{" "}
+                      {formatDeadline(
+                        Math.floor(new Date(session.last_used_at).getTime() / 1000),
+                      )}{" "}
+                      · expires{" "}
+                      {formatDeadline(
+                        Math.floor(new Date(session.expires_at).getTime() / 1000),
+                      )}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.sessionRevokeBtn}
+                    onClick={() => handleRevokeSession(session)}
+                    disabled={sessionBusy}
+                  >
+                    Revoke
+                  </button>
+                </div>
+              ))}
+
+              {sessions.length > 0 && (
+                <button
+                  type="button"
+                  className={styles.sessionRevokeBtn}
+                  onClick={handleRevokeAllSessions}
+                  disabled={sessionBusy}
+                >
+                  Sign out everywhere
+                </button>
+              )}
+            </div>
+
             {/* ── Notification Channels (CC-073) ────────────────────── */}
             <h2 className={styles.pageTitle}>Notification Channels</h2>
             <div className={styles.channelsCard}>
               <p className={styles.channelsIntro}>
-                Choose how agents notify you when a task is assigned. Your
-                wallet will be asked to sign a message to prove ownership —
-                channel destinations are private and never shown on your
+                Choose how agents notify you when a task is assigned.
+                Channel destinations are private and never shown on your
                 public profile.
               </p>
 
