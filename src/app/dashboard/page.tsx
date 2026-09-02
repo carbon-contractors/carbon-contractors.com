@@ -9,7 +9,13 @@ import {
   parseAndHashEvidenceBundle,
   EvidenceBundleValidationError,
 } from "@/lib/checker/evidence-hash";
-import { parseSpecForDisplay } from "@/lib/spec/display";
+import { parseSpecCriteria, parseSpecForDisplay } from "@/lib/spec/display";
+import type { AcceptanceSpec } from "@/lib/spec/schema";
+import {
+  buildEvidenceBundleJson,
+  emptyArtifactDraft,
+  type EvidenceArtifactDraft,
+} from "@/lib/evidence/draft";
 import {
   parseVerdictPayload,
   verdictTupleForContract,
@@ -333,7 +339,7 @@ export default function DashboardPage() {
   // One open action per task at a time — submit, claim-early and dispute all
   // take the same evidence-bundle textarea.
   const [actionOpen, setActionOpen] = useState<Record<string, TaskAction>>({});
-  const [evidenceDrafts, setEvidenceDrafts] = useState<Record<string, string>>({});
+  const [evidenceDrafts, setEvidenceDrafts] = useState<Record<string, EvidenceArtifactDraft[]>>({});
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<
     Record<string, { ok: boolean; text: string; checks?: CheckResult[] }>
@@ -603,19 +609,184 @@ export default function DashboardPage() {
     });
   }
 
-  /** One shared textarea for whichever action is open on this task. */
-  function evidenceTextarea(taskId: string) {
+  /**
+   * NOR-327: the structured evidence form, shared by the three evidence-bundle
+   * flows. The task's spec decides which optional fields appear — the form
+   * mirrors the deal the same way the offer card's criteria rows do, from the
+   * same validation (parseSpecCriteria). No JSON anywhere.
+   */
+  function evidenceForm(task: Task, criteria: AcceptanceSpec["criteria"] | null) {
+    const drafts = evidenceDrafts[task.id] ?? [];
+    const minArtefacts = criteria?.min_artefacts;
+    const update = (index: number, patch: Partial<EvidenceArtifactDraft>) => {
+      setEvidenceDrafts((prev) => ({
+        ...prev,
+        [task.id]: (prev[task.id] ?? []).map((d, i) =>
+          i === index ? { ...d, ...patch } : d,
+        ),
+      }));
+    };
     return (
-      <textarea
-        className={styles.evidenceTextarea}
-        rows={6}
-        spellCheck={false}
-        placeholder={'{"taskId":"<payment_request_id>","artifacts":[{"uri":"https://…"}]} — the exact bytes you will keep; their keccak256 is what gets committed.'}
-        value={evidenceDrafts[taskId] ?? ""}
-        onChange={(e) =>
-          setEvidenceDrafts((prev) => ({ ...prev, [taskId]: e.target.value }))
-        }
-      />
+      <div className={styles.evidenceForm}>
+        {typeof minArtefacts === "number" && (
+          <p className={styles.evidenceGuidance}>
+            This task requires at least {minArtefacts} artefact
+            {minArtefacts === 1 ? "" : "s"} — {drafts.length} added.
+          </p>
+        )}
+        {drafts.length === 0 && (
+          <p className={styles.evidenceGuidance}>
+            Add each artefact: its link, plus any details this task checks. No
+            JSON needed — the bundle is built for you.
+          </p>
+        )}
+        {drafts.map((d, i) => (
+          <div key={i} className={styles.artefactCard}>
+            <div className={styles.artefactHeader}>
+              <span className={styles.artefactIndex}>Artefact {i + 1}</span>
+              <button
+                type="button"
+                className={styles.artefactRemove}
+                onClick={() =>
+                  setEvidenceDrafts((prev) => ({
+                    ...prev,
+                    [task.id]: (prev[task.id] ?? []).filter((_, j) => j !== i),
+                  }))
+                }
+              >
+                Remove
+              </button>
+            </div>
+            <label className={styles.artefactLabel}>
+              Link to the artefact (URI)
+              <input
+                className={styles.artefactInput}
+                value={d.uri}
+                spellCheck={false}
+                placeholder="https://…"
+                onChange={(e) => update(i, { uri: e.target.value })}
+              />
+            </label>
+            <label className={styles.artefactLabel}>
+              File type — optional, e.g. image/jpeg
+              <input
+                className={styles.artefactInput}
+                value={d.mimeType}
+                spellCheck={false}
+                onChange={(e) => update(i, { mimeType: e.target.value })}
+              />
+            </label>
+            {criteria?.exif_gps_within_m !== undefined && (
+              <div className={styles.artefactRow}>
+                <label className={styles.artefactLabel}>
+                  Latitude — this task checks location
+                  <input
+                    className={styles.artefactInput}
+                    value={d.lat}
+                    inputMode="decimal"
+                    placeholder="-37.8136"
+                    onChange={(e) => update(i, { lat: e.target.value })}
+                  />
+                </label>
+                <label className={styles.artefactLabel}>
+                  Longitude
+                  <input
+                    className={styles.artefactInput}
+                    value={d.lon}
+                    inputMode="decimal"
+                    placeholder="144.9631"
+                    onChange={(e) => update(i, { lon: e.target.value })}
+                  />
+                </label>
+              </div>
+            )}
+            {criteria?.captured_after !== undefined && (
+              <label className={styles.artefactLabel}>
+                Capture time — as recorded by the camera, e.g. 2026-09-02T14:33:00Z
+                <input
+                  className={styles.artefactInput}
+                  value={d.dateTimeOriginal}
+                  spellCheck={false}
+                  onChange={(e) => update(i, { dateTimeOriginal: e.target.value })}
+                />
+              </label>
+            )}
+            {criteria?.provenance?.require_camera_model !== undefined && (
+              <div className={styles.artefactRow}>
+                <label className={styles.artefactLabel}>
+                  Camera make — this task checks the camera
+                  <input
+                    className={styles.artefactInput}
+                    value={d.cameraMake}
+                    spellCheck={false}
+                    onChange={(e) => update(i, { cameraMake: e.target.value })}
+                  />
+                </label>
+                <label className={styles.artefactLabel}>
+                  Camera model
+                  <input
+                    className={styles.artefactInput}
+                    value={d.cameraModel}
+                    spellCheck={false}
+                    onChange={(e) => update(i, { cameraModel: e.target.value })}
+                  />
+                </label>
+              </div>
+            )}
+            {criteria?.provenance?.reject_c2pa_ai_generated !== undefined && (
+              <label className={styles.artefactCheckboxRow}>
+                <input
+                  type="checkbox"
+                  checked={d.c2paAiGenerated}
+                  onChange={(e) => update(i, { c2paAiGenerated: e.target.checked })}
+                />
+                This artefact is AI-generated
+                {criteria.provenance.reject_c2pa_ai_generated && (
+                  <span className={styles.artefactHint}>
+                    {" "}
+                    — this task rejects AI-generated content
+                  </span>
+                )}
+              </label>
+            )}
+            {criteria?.phash_max_similarity_to !== undefined && (
+              <label className={styles.artefactLabel}>
+                Visual fingerprint (phash) — compared against this task&apos;s reference images
+                <input
+                  className={styles.artefactInput}
+                  value={d.phash}
+                  spellCheck={false}
+                  onChange={(e) => update(i, { phash: e.target.value })}
+                />
+              </label>
+            )}
+            {criteria === null && (
+              <p className={styles.artefactHint}>
+                This task&apos;s criteria could not be read — only the link can
+                be declared. Ask the hiring agent to re-issue the offer if in
+                doubt.
+              </p>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          className={styles.artefactAdd}
+          onClick={() =>
+            setEvidenceDrafts((prev) => ({
+              ...prev,
+              [task.id]: [...(prev[task.id] ?? []), emptyArtifactDraft()],
+            }))
+          }
+        >
+          + Add artefact
+        </button>
+        <p className={styles.evidenceGuidance}>
+          The platform stores hashes only. Your wallet commits this
+          bundle&apos;s hash — keep the artefacts at those links unchanged
+          until you are paid.
+        </p>
+      </div>
     );
   }
 
@@ -635,27 +806,30 @@ export default function DashboardPage() {
     );
   }
 
-  /** Validates the textarea draft and returns its parse — or shows the error. */
-  function parseDraft(taskId: string) {
-    const draft = (evidenceDrafts[taskId] ?? "").trim();
-    if (!draft) {
+  /** Validates the form draft and returns its parse — or shows the error. */
+  function parseDraft(task: Task) {
+    const build = buildEvidenceBundleJson(
+      task.payment_request_id,
+      evidenceDrafts[task.id] ?? [],
+    );
+    if (!build.ok) {
       setActionMsg((prev) => ({
         ...prev,
-        [taskId]: { ok: false, text: "Paste the evidence bundle JSON first." },
+        [task.id]: { ok: false, text: build.error },
       }));
       return null;
     }
     try {
-      return parseAndHashEvidenceBundle(draft);
+      return parseAndHashEvidenceBundle(build.json);
     } catch (err) {
       setActionMsg((prev) => ({
         ...prev,
-        [taskId]: {
+        [task.id]: {
           ok: false,
           text:
             err instanceof EvidenceBundleValidationError
               ? err.message
-              : "Could not parse the evidence bundle.",
+              : "Could not build the evidence bundle.",
         },
       }));
       return null;
@@ -715,7 +889,7 @@ export default function DashboardPage() {
   /** Funded → Delivered. The hash is computed client-side; only it goes on-chain. */
   async function handleSubmitWork(task: Task) {
     if (!escrowContract || !address || !task.on_chain) return;
-    const parsed = parseDraft(task.id);
+    const parsed = parseDraft(task);
     if (!parsed) return;
     setActionBusy(task.payment_request_id);
     setActionMsg((prev) => ({
@@ -818,7 +992,7 @@ export default function DashboardPage() {
   /** Delivered + passing verdict → claim without waiting out the window. */
   async function handleClaimEarly(task: Task) {
     if (!escrowContract || !address) return;
-    const parsed = parseDraft(task.id);
+    const parsed = parseDraft(task);
     if (!parsed) return;
     setActionBusy(task.payment_request_id);
     try {
@@ -891,7 +1065,7 @@ export default function DashboardPage() {
    */
   async function handleDispute(task: Task) {
     if (!escrowContract || !address) return;
-    const parsed = parseDraft(task.id);
+    const parsed = parseDraft(task);
     if (!parsed) return;
     setActionBusy(task.payment_request_id);
     try {
@@ -1847,6 +2021,7 @@ export default function DashboardPage() {
                   );
                   const busy = actionBusy === task.payment_request_id;
                   const specDisplay = parseSpecForDisplay(task.acceptance_spec);
+                  const specCriteria = parseSpecCriteria(task.acceptance_spec);
                   return (
                   <div
                     key={task.id}
@@ -1971,13 +2146,13 @@ export default function DashboardPage() {
                           {actionOpen[task.id] === "submit" && (
                             <div className={styles.actionForm}>
                               <p className={styles.actionNote}>
-                                Paste the evidence bundle and keep those exact
-                                bytes — the platform stores hashes only, and
-                                your wallet commits the bundle&apos;s hash (plus an
+                                Add each artefact below — the platform
+                                stores hashes only, and your wallet commits
+                                the bundle&apos;s hash (plus an
                                 acknowledgement of the committed acceptance
                                 criteria) with submitWork.
                               </p>
-                              {evidenceTextarea(task.id)}
+                              {evidenceForm(task, specCriteria)}
                               <button
                                 className={styles.actionBtn}
                                 onClick={() => handleSubmitWork(task)}
@@ -2022,13 +2197,14 @@ export default function DashboardPage() {
                           {actionOpen[task.id] === "claim-early" && (
                             <div className={styles.actionForm}>
                               <p className={styles.actionNote}>
-                                Paste the evidence bundle you submitted. The
-                                platform checks it against the committed
-                                acceptance criteria; if it passes, your wallet
-                                claims immediately with the signed verdict —
-                                no waiting out the review window.
+                                The artefacts you submitted are below —
+                                check they still match. The platform checks
+                                the bundle against the committed acceptance
+                                criteria; if it passes, your wallet claims
+                                immediately with the signed verdict — no
+                                waiting out the review window.
                               </p>
-                              {evidenceTextarea(task.id)}
+                              {evidenceForm(task, specCriteria)}
                               <button
                                 className={styles.actionBtn}
                                 onClick={() => handleClaimEarly(task)}
@@ -2096,15 +2272,15 @@ export default function DashboardPage() {
                             <div className={styles.disputeForm}>
                               <p className={styles.disputeWarning}>
                                 A dispute needs a signed failing verdict —
-                                there is no bare-assertion dispute. Paste the
-                                task&apos;s evidence bundle and the platform
-                                computes the verdict from the committed
-                                acceptance criteria; your wallet then submits
-                                disputeTask, freezing the funds until
-                                resolution. It must land before the review
-                                window closes.
+                                there is no bare-assertion dispute. Build the
+                                task&apos;s evidence bundle below and the
+                                platform computes the verdict from the
+                                committed acceptance criteria; your wallet
+                                then submits disputeTask, freezing the funds
+                                until resolution. It must land before the
+                                review window closes.
                               </p>
-                              {evidenceTextarea(task.id)}
+                              {evidenceForm(task, specCriteria)}
                               <button
                                 className={styles.disputeBtn}
                                 onClick={() => handleDispute(task)}

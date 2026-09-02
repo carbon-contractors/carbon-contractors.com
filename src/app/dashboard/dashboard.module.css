@@ -1250,3 +1250,116 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Evidence form (NOR-327): structured artefacts, no JSON ── */
+
+.evidenceForm {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.evidenceGuidance {
+  font-size: 0.75rem;
+  color: var(--cc-text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.artefactCard {
+  border: 1px solid var(--cc-border-subtle);
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.artefactHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.artefactIndex {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cc-text-muted);
+}
+
+.artefactRemove {
+  background: none;
+  border: none;
+  color: var(--cc-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.artefactRemove:hover {
+  color: var(--cc-red);
+}
+
+.artefactLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--cc-text);
+}
+
+.artefactRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.artefactInput {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--cc-bg-surface);
+  border: 1px solid var(--cc-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--cc-text);
+}
+
+.artefactInput:focus {
+  outline: none;
+  border-color: var(--cc-text-muted);
+}
+
+.artefactCheckboxRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--cc-text);
+}
+
+.artefactHint {
+  font-size: 0.7rem;
+  color: var(--cc-text-muted);
+}
+
+.artefactAdd {
+  background: none;
+  border: 1px dashed var(--cc-border);
+  border-radius: 6px;
+  padding: 0.45rem;
+  font-size: 0.75rem;
+  color: var(--cc-text-muted);
+  cursor: pointer;
+}
+
+.artefactAdd:hover {
+  color: var(--cc-text);
+  border-color: var(--cc-text-muted);
+}
