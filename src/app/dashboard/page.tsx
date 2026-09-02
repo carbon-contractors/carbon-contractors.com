@@ -9,6 +9,7 @@ import {
   parseAndHashEvidenceBundle,
   EvidenceBundleValidationError,
 } from "@/lib/checker/evidence-hash";
+import { parseSpecForDisplay } from "@/lib/spec/display";
 import {
   parseVerdictPayload,
   verdictTupleForContract,
@@ -191,6 +192,10 @@ interface Task {
   amount_usdc: number;
   deadline_unix: number;
   status: string;
+  /** When a pending offer lapses; null once decided (CC-094). */
+  offer_expiry_unix: number | null;
+  /** Verbatim spec JSON. Display-only here — the hash preimage is the agent's string (CC-084). */
+  acceptance_spec: string | null;
   tx_hash: string | null;
   escrow_contract: string | null;
   created_at: string;
@@ -266,10 +271,23 @@ function formatDeadline(unix: number): string {
   });
 }
 
+/** Relative time from now, for countdown-adjacent copy (NOR-325). */
+function formatIn(unix: number, nowSec: number): string {
+  const secs = Math.max(0, unix - nowSec);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (h > 0) return `${h} h ${m} min`;
+  if (m > 0) return `${m} min`;
+  return "under a minute";
+}
+
 function statusClass(status: string): string {
   switch (status) {
     case "pending":
       return styles.statusPending;
+    // NOR-324: accepted is agreed-but-unfunded — it must not read as expired.
+    case "accepted":
+      return styles.statusAccepted;
     case "active":
       return styles.statusActive;
     case "completed":
@@ -597,6 +615,56 @@ export default function DashboardPage() {
         },
       }));
       return null;
+    }
+  }
+
+  /** NOR-324: the worker's decision on a pending offer (CC-094 endpoints). */
+  async function handleOfferResponse(
+    task: Task,
+    decision: "accept" | "decline",
+  ) {
+    if (!address) return;
+    setActionBusy(task.payment_request_id);
+    try {
+      const res = await fetch(`/api/offers/${decision}`, {
+        method: "POST",
+        headers: await signedApiHeaders(),
+        body: JSON.stringify({ payment_request_id: task.payment_request_id }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        // The server's rejection copy is already worker-facing (CC-094): the
+        // lapse message, the concurrency-cap message. Show it verbatim.
+        setActionMsg((prev) => ({
+          ...prev,
+          [task.id]: {
+            ok: false,
+            text: data.error ?? "Could not record your decision.",
+          },
+        }));
+        return;
+      }
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: true,
+          text:
+            decision === "accept"
+              ? "Offer accepted. The task becomes active once the hiring agent funds it — you will see it here."
+              : "Offer declined. The hiring agent is free to re-target immediately.",
+        },
+      }));
+      await fetchTasks();
+    } catch {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: false,
+          text: "Signature declined or the request failed — your answer was not recorded.",
+        },
+      }));
+    } finally {
+      setActionBusy(null);
     }
   }
 
@@ -1582,14 +1650,28 @@ export default function DashboardPage() {
 
             {tasks.length > 0 && (
               <div className={styles.taskList}>
-                {tasks.map((task) => {
+                {[...tasks]
+                  .sort(
+                    (a, b) =>
+                      Number(b.status === "pending") -
+                      Number(a.status === "pending"),
+                  )
+                  .map((task) => {
                   const isWorkerForTask = Boolean(
                     address &&
                       task.to_human_wallet.toLowerCase() === address.toLowerCase(),
                   );
                   const busy = actionBusy === task.payment_request_id;
+                  const specDisplay = parseSpecForDisplay(task.acceptance_spec);
                   return (
-                  <div key={task.id} className={styles.taskCard}>
+                  <div
+                    key={task.id}
+                    className={
+                      task.status === "pending" && isWorkerForTask
+                        ? `${styles.taskCard} ${styles.taskCardOffer}`
+                        : styles.taskCard
+                    }
+                  >
                     <div className={styles.taskHeader}>
                       <span
                         className={`${styles.statusBadge} ${statusClass(task.status)}`}
@@ -1628,6 +1710,64 @@ export default function DashboardPage() {
                         </span>
                       )}
                     </div>
+
+                    {/* ── Pending offer — the deal, before the decision (NOR-323) ── */}
+                    {isWorkerForTask && task.status === "pending" && (
+                      <div className={styles.offerSection}>
+                        <p className={styles.offerHeading}>
+                          Offer — awaiting your decision
+                        </p>
+                        {task.offer_expiry_unix && (
+                          <p className={styles.offerExpiry}>
+                            Lapses {formatDeadline(task.offer_expiry_unix)} — in{" "}
+                            {formatIn(task.offer_expiry_unix, nowSec)}. After
+                            that it closes automatically.
+                          </p>
+                        )}
+                        <p className={styles.specTitle}>Acceptance criteria</p>
+                        {specDisplay.ok ? (
+                          <dl className={styles.specList}>
+                            {specDisplay.rows.map((row) => (
+                              <div key={row.key} className={styles.specRow}>
+                                <dt className={styles.specLabel}>
+                                  {row.label}:{" "}
+                                  <span className={styles.specValue}>{row.value}</span>
+                                </dt>
+                                <dd className={styles.specDesc}>{row.description}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        ) : (
+                          <p className={styles.specWarning}>
+                            The acceptance criteria could not be read (
+                            {specDisplay.reason}). Ask the hiring agent to re-issue
+                            this offer before accepting.
+                          </p>
+                        )}
+                        <p className={styles.actionNote}>
+                          Accepting does not move any money — the task only
+                          becomes active once the hiring agent funds it after
+                          your acceptance. Declining is free, carries no
+                          penalty, and frees the agent to re-target.
+                        </p>
+                        <div className={styles.offerActions}>
+                          <button
+                            className={styles.actionBtn}
+                            onClick={() => handleOfferResponse(task, "accept")}
+                            disabled={busy}
+                          >
+                            {busy ? "Working..." : "Accept offer"}
+                          </button>
+                          <button
+                            className={styles.declineBtn}
+                            onClick={() => handleOfferResponse(task, "decline")}
+                            disabled={busy}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* ── Submit work (CC-092): Funded → Delivered ─────── */}
                     {isWorkerForTask &&
