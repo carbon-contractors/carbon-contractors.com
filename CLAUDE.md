@@ -263,27 +263,35 @@ exists rather than reasoning from this file.**
 - **You cannot push to `master`.** Branch → PR → merge on GitHub. Two rulesets require verified
   signatures and code scanning; a direct push is rejected. "Push the commits" means this.
 - **The commit identity must match the signing key's account — and the gmail address matches
-  nothing.** The measured pair on this machine, `verified=true/valid` on every recently merged
-  commit and re-confirmed 2026-09-02 after PRs #177/#178 briefly landed `Unverified`:
+  nothing.** GitHub verifies a signature by resolving the **committer email** to an account, then
+  looking for the key among *that* account's **signing** keys. The measured pairs, 2026-09-03 —
+  established by extracting the embedded public key from each commit's SSHSIG, because GitHub's API
+  reports only valid/invalid and never *which* key signed:
 
-  | Machine | Signing key | Commit as |
-  | :-- | :-- | :-- |
-  | Main PC | `ssh-ed25519` (`~/.ssh/aarons-key`, no touch) | `Aaron Clifft <35355423+Wahzammo@users.noreply.github.com>` |
+  | Machine | Signing key | Commit as | Tap |
+  | :-- | :-- | :-- | :-- |
+  | Main PC, this clone (repo-local config) | `~/.ssh/id_ed25519_signing`, registered to ajclifft as a Signing Key 2026-09-03 | `244833942+ajclifft@users.noreply.github.com` | no |
+  | Main PC, fresh clone (global `.gitconfig`) | `~/.ssh/id_ed25519_sk_signing` (FIDO2) | global email — see below | **yes** |
+  | Other machine | `~/.ssh/aarons-key` (does not exist on this PC) | `35355423+Wahzammo@users.noreply.github.com` | no |
 
-  GitHub verifies a signature by resolving the **committer email** to an account, then looking for
-  the key among *that* account's signing keys. The **global** `.gitconfig` default,
-  `aaronclifft@gmail.com`, resolves to **no** GitHub account at all — `verified=false, no_user` —
-  so a perfectly signed commit lands unverified for a reason that never names the email as the
-  problem. This is what bites on every fresh coding environment; this clone pins it repo-locally
-  (`git config user.email "35355423+Wahzammo@users.noreply.github.com"`), and a new clone
-  inherits the global gmail again, so **set it before the first commit**. Any
+  The **global** `.gitconfig` email, `aaronjclifft@gmail.com`, resolves to **no** GitHub account at
+  all — `verified=false, no_user` — so a perfectly signed commit lands unverified for a reason that
+  never names the email as the problem. And the inverse bite, measured on PR #183 (2026-09-02):
+  **a repo-local `user.signingkey` override whose key belongs to no account matching the repo-local
+  email produces signed-but-Unverified commits silently** — this clone carried ajclifft's email over
+  the bare ed25519 key the day before it was registered, and every commit made with repo config
+  as-is landed `unknown_key` while commits that overrode the key to the FIDO2 one landed `valid`.
+  A new clone inherits the global gmail *and* the global FIDO2 key, so **check both before the
+  first commit on a machine** — email and key must belong to the same account. Any
   `@users.noreply.github.com` address avoids `GH007`; the specific account is what decides
-  verification. Check both before the first commit on a machine. → `CC-047`
-- **Signing is always on and needs no interaction on this machine.**
-  `commit.gpgsign=true`, `gpg.format=ssh`, plain `ssh-ed25519`. Until 2026-09-02 this entry claimed
-  the main PC signed with a FIDO2 key that blocks on a physical tap; both halves were wrong for
-  this box — it signs non-interactively, so an apparent hang during commit is a real fault here,
-  not a missing tap. The probe below still applies if a future machine carries an `sk-` key.
+  verification. → `CC-047`
+- **Signing is always on; whether it needs a tap depends on which config wins.**
+  `commit.gpgsign=true`, `gpg.format=ssh`. Repo-local config overrides global (see the table above):
+  this clone signs tap-free with the bare key; a fresh clone on this PC signs with the FIDO2 key and
+  **blocks until the key is physically touched**, then fails `invalid format?` if the tap is
+  missed. Not a config error, retrying does not help, and `ssh-add -L` reporting no agent is a red
+  herring. An apparent hang is a missing tap *only* when the resolved key is an `sk-` key;
+  otherwise it is a real fault.
   · `cut -d' ' -f1 "$(git config user.signingkey | sed "s|^~|$HOME|")"` — an `sk-` prefix
     (`sk-ssh-ed25519`) is FIDO2 and needs the touch; a bare `ssh-ed25519` does not
 - **Signed is not the same as verified, and the two fail differently.** Local commits verify `G`;
