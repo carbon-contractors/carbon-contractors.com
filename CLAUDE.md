@@ -391,7 +391,7 @@ src/lib/categories.ts  The 10 service categories, max 2 per worker
 contracts/             CarbonEscrow.sol (v2, CC-082), ReputationStake.sol
                        mocks/ is test-only — never deployed to a live network
 test/                  Hardhat/mocha contract tests. `npm run test:contracts`
-supabase/migrations/   001-020, applied by hand in order. Add new ones, never edit an applied one.
+supabase/migrations/   001-022, applied by hand in order. Add new ones, never edit an applied one.
                        No migration runner — **`ls` the directory for the next number** (CC-057).
                        There are already two 018s (funded_at, offer_lifecycle) — order-independent
                        by luck, not design. Trusting a range written here is what produced the
