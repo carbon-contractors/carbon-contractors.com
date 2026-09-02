@@ -20,6 +20,11 @@ export function createMockSupabase(result: MockQueryResult) {
     contains: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
+    // NOR-322: the session library filters on null checks and ranges and reads
+    // single-or-nothing rows.
+    is: vi.fn().mockReturnThis(),
+    gt: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue(result),
     single: vi.fn().mockResolvedValue(result),
     then: vi.fn((cb) =>
       cb(result)
