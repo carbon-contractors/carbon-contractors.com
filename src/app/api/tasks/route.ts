@@ -24,6 +24,7 @@ import {
 } from "@/lib/db/tasks";
 import { getOnChainTask, getEscrowConfig } from "@/lib/contracts/escrow";
 import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
+import { sessionWalletFromRequest } from "@/lib/auth/session";
 import { isValidWalletAddress } from "@/lib/validation";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
@@ -43,7 +44,14 @@ export async function GET(req: NextRequest) {
     let authenticated = false;
     let callerWallet: string | null = null;
 
-    if (hasAuthHeaders) {
+    // ADR-0009: a valid session (cookie or bearer) authenticates without a
+    // prompt. Machine callers keep the challenge path (ADR-0009 D6).
+    const sessionWallet = await sessionWalletFromRequest(req);
+    if (sessionWallet) {
+      callerWallet = sessionWallet;
+    }
+
+    if (!callerWallet && hasAuthHeaders) {
       if (!rawWallet || !isValidWalletAddress(rawWallet) || !signature || !nonce) {
         return Response.json(
           {
@@ -68,6 +76,9 @@ export async function GET(req: NextRequest) {
         );
       }
 
+    }
+
+    if (callerWallet) {
       tasks = await getTasksForParties(callerWallet);
       authenticated = true;
       log("info", "tasks_fetched", {

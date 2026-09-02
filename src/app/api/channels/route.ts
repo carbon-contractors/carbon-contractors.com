@@ -26,6 +26,7 @@ import {
 } from "@/lib/db/notifications";
 import { getHumanByWallet } from "@/lib/db/whitepages";
 import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
+import { sessionWalletFromRequest } from "@/lib/auth/session";
 import {
   isValidWalletAddress,
   isValidChannelAddress,
@@ -79,6 +80,13 @@ type AuthResult =
  * Returns the verified wallet on success, or a 401 response.
  */
 async function requireWalletAuth(request: NextRequest): Promise<AuthResult> {
+  // ADR-0009: a valid session (cookie or bearer) authenticates without a
+  // prompt; the challenge path below is kept for machine callers (D6).
+  const sessionWallet = await sessionWalletFromRequest(request);
+  if (sessionWallet) {
+    return { ok: true, wallet: sessionWallet };
+  }
+
   const rawWallet = request.headers.get("x-caller-wallet");
   const signature = request.headers.get("x-caller-signature") as
     | `0x${string}`

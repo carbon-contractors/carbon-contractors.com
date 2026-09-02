@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getHumanByWallet } from "@/lib/db/whitepages";
 import { getSupabaseAdmin } from "@/lib/db/client";
 import { verifyWalletSignature } from "@/lib/wallet/verify";
+import { sessionWalletFromRequest } from "@/lib/auth/session";
 import { validateCategorySelection } from "@/lib/categories";
 import { isValidWalletAddress } from "@/lib/validation";
 import type { Availability } from "@/lib/db/types";
@@ -77,7 +78,15 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
   const { message, signature, wallet } = body;
 
-  if (!message || !signature || !wallet || !isValidWalletAddress(wallet)) {
+  // ADR-0009: a valid session proves the caller instead of the per-save
+  // signature. The payload's own action, wallet-binding and freshness checks
+  // below still apply, so a session can only ever act as its own wallet.
+  const sessionWallet = await sessionWalletFromRequest(req);
+
+  if (
+    !message ||
+    (!sessionWallet && (!signature || !wallet || !isValidWalletAddress(wallet)))
+  ) {
     return Response.json(
       { ok: false, error: "Missing or invalid message, signature, or wallet" },
       { status: 400 },
@@ -87,31 +96,37 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   // Verify the signature against the claimed wallet. Must go through the public
   // client (ERC-6492/1271-aware) — Base Account smart wallets don't produce raw
   // ECDSA signatures recoverable to the address. Same helper as /api/register.
-  let valid: boolean;
-  try {
-    valid = await verifyWalletSignature({ address: wallet, message, signature });
-  } catch (err: unknown) {
-    // RPC/ERC-6492 detail, not user data — safe to surface (see register route).
-    const detail = err instanceof Error ? err.message : String(err);
-    log("error", "profile_signature_verification_error", { wallet, error: detail });
-    return Response.json(
-      { ok: false, error: "Signature verification failed", detail },
-      { status: 400 },
-    );
-  }
+  let valid = Boolean(sessionWallet);
+  if (!sessionWallet) {
+    // Verify the signature against the claimed wallet. Must go through the public
+    // client (ERC-6492/1271-aware) — Base Account smart wallets don't produce raw
+    // ECDSA signatures recoverable to the address. Same helper as /api/register.
+    try {
+      valid = await verifyWalletSignature({ address: wallet, message, signature });
+    } catch (err: unknown) {
+      // RPC/ERC-6492 detail, not user data — safe to surface (see register route).
+      const detail = err instanceof Error ? err.message : String(err);
+      log("error", "profile_signature_verification_error", { wallet, error: detail });
+      return Response.json(
+        { ok: false, error: "Signature verification failed", detail },
+        { status: 400 },
+      );
+    }
 
-  if (!valid) {
-    log("warn", "profile_invalid_signature", {
-      wallet,
-      messageLength: message.length,
-      signatureLength: signature.length,
-    });
-    return Response.json({ ok: false, error: "Invalid signature" }, { status: 401 });
+    if (!valid) {
+      log("warn", "profile_invalid_signature", {
+        wallet,
+        messageLength: message.length,
+        signatureLength: signature.length,
+      });
+      return Response.json({ ok: false, error: "Invalid signature" }, { status: 401 });
+    }
   }
 
   // Normalise once, post-verification — `humans.wallet` is lowercase-enforced
-  // (CC-002). Verification above used the original casing the client signed.
-  const normalizedWallet = wallet.toLowerCase() as `0x${string}`;
+  // (CC-002). A session wallet is already lowercase; the signature path used
+  // the original casing the client signed.
+  const normalizedWallet = (sessionWallet ?? wallet.toLowerCase()) as `0x${string}`;
 
   let parsed: ProfileUpdatePayload;
   try {
@@ -130,8 +145,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // The signature proved ownership of `wallet`; the payload must agree with it,
-  // or the caller is presenting a message signed by someone else's session.
+  // The proof (signature or session) established `normalizedWallet`; the
+  // payload must agree with it, or the caller is presenting someone else's
+  // update under their own session.
   if (
     typeof parsed.wallet !== "string" ||
     parsed.wallet.toLowerCase() !== normalizedWallet
