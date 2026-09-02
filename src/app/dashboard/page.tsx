@@ -11,6 +11,7 @@ import {
 } from "@/lib/checker/evidence-hash";
 import { parseSpecCriteria, parseSpecForDisplay } from "@/lib/spec/display";
 import type { AcceptanceSpec } from "@/lib/spec/schema";
+import { explainContractError } from "@/lib/contracts/reverts";
 import {
   buildEvidenceBundleJson,
   emptyArtifactDraft,
@@ -982,10 +983,17 @@ export default function DashboardPage() {
         ...prev,
         [task.id]: { ok: true, text: "Work submitted. The review window is now running." },
       }));
-    } catch {
+    } catch (err) {
       setActionMsg((prev) => ({
         ...prev,
-        [task.id]: { ok: false, text: "submitWork was not sent — cancelled or rejected in your wallet." },
+        [task.id]: {
+          ok: false,
+          // NOR-329: "you cancelled" is not "the chain said no" — keep them apart.
+          text: explainContractError(
+            err,
+            "submitWork was not sent — cancelled or rejected in your wallet.",
+          ),
+        },
       }));
     } finally {
       setActionBusy(null);
@@ -1012,10 +1020,16 @@ export default function DashboardPage() {
         ...prev,
         [task.id]: { ok: true, text: "Claim submitted — payment will arrive once the transaction confirms." },
       }));
-    } catch {
+    } catch (err) {
       setActionMsg((prev) => ({
         ...prev,
-        [task.id]: { ok: false, text: "Claim was not sent — cancelled or rejected in your wallet." },
+        [task.id]: {
+          ok: false,
+          text: explainContractError(
+            err,
+            "Claim was not sent — cancelled or rejected in your wallet.",
+          ),
+        },
       }));
     } finally {
       setActionBusy(null);
@@ -1048,10 +1062,16 @@ export default function DashboardPage() {
         ...prev,
         [task.id]: { ok: true, text: "Claim submitted — payment will arrive once the transaction confirms." },
       }));
-    } catch {
+    } catch (err) {
       setActionMsg((prev) => ({
         ...prev,
-        [task.id]: { ok: false, text: "Claim was not sent — cancelled or rejected in your wallet." },
+        [task.id]: {
+          ok: false,
+          text: explainContractError(
+            err,
+            "Claim was not sent — cancelled or rejected in your wallet.",
+          ),
+        },
       }));
     } finally {
       setActionBusy(null);
@@ -1133,7 +1153,10 @@ export default function DashboardPage() {
           text:
             err instanceof Error && err.message.startsWith("verdict field")
               ? `The verdict response was malformed: ${err.message}`
-              : "Claim was not sent — cancelled, rejected in your wallet, or the request failed.",
+              : explainContractError(
+                  err,
+                  "Claim was not sent — cancelled, rejected in your wallet, or the request failed.",
+                ),
         },
       }));
     } finally {
@@ -1225,7 +1248,10 @@ export default function DashboardPage() {
           text:
             err instanceof Error && err.message.startsWith("verdict field")
               ? `The verdict response was malformed: ${err.message}`
-              : "Dispute was not sent — cancelled, rejected in your wallet, or the request failed.",
+              : explainContractError(
+                  err,
+                  "Dispute was not sent — cancelled, rejected in your wallet, or the request failed.",
+                ),
         },
       }));
     } finally {
