@@ -15,6 +15,7 @@ import {
   MAX_SPEC_BYTES,
   SUPPORTED_SPEC_VERSIONS,
   schemaForVersion,
+  type AcceptanceSpec,
 } from "./schema";
 import { formatSpecForDisplay, type CriteriaRow } from "./format";
 
@@ -70,4 +71,43 @@ export function parseSpecForDisplay(
     return { ok: false, reason: "does not match its declared schema" };
   }
   return { ok: true, rows: formatSpecForDisplay(result.data) };
+}
+
+/**
+ * The criteria half of a validated spec, or null when the spec is absent or
+ * does not validate. The evidence form (NOR-327) uses this to show only the
+ * fields the task's spec actually checks — the form mirrors the deal the same
+ * way the offer card's rows do, from the same validation.
+ */
+export function parseSpecCriteria(
+  raw: string | null | undefined,
+): AcceptanceSpec["criteria"] | null {
+  if (raw == null || raw === "") {
+    return null;
+  }
+  if (raw.length > MAX_SPEC_BYTES) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const version = (parsed as Record<string, unknown>).schema_version;
+  if (typeof version !== "number") {
+    return null;
+  }
+  const schema = schemaForVersion(version);
+  if (!schema) {
+    return null;
+  }
+  const result = schema.safeParse(parsed);
+  if (!result.success) {
+    return null;
+  }
+  return result.data.criteria;
 }
