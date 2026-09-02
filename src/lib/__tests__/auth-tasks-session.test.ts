@@ -18,6 +18,7 @@ vi.mock("@/lib/db/tasks", () => ({
   getTasksForParties: (...args: unknown[]) => mockGetTasksForParties(...args),
   getPublicTasks: (...args: unknown[]) => mockGetPublicTasks(...args),
   lapseExpiredOffers: vi.fn(),
+  WORKER_CONCURRENCY_CAP: 3,
 }));
 
 vi.mock("@/lib/contracts/escrow", () => ({
@@ -61,6 +62,35 @@ describe("/api/tasks with a session (NOR-322)", () => {
     expect(data.tasks).toHaveLength(1);
     expect(mockGetTasksForParties).toHaveBeenCalledWith(WALLET);
     expect(mockGetPublicTasks).not.toHaveBeenCalled();
+  });
+
+  it("carries the concurrency cap and committed count (NOR-326)", async () => {
+    mockSessionWallet.mockResolvedValue(WALLET);
+    mockGetTasksForParties.mockResolvedValue([
+      { id: "t1", payment_request_id: "pr_1", to_human_wallet: WALLET, status: "accepted" },
+      { id: "t2", payment_request_id: "pr_2", to_human_wallet: WALLET, status: "active" },
+      { id: "t3", payment_request_id: "pr_3", to_human_wallet: "0xother", status: "active" },
+      { id: "t4", payment_request_id: "pr_4", to_human_wallet: WALLET, status: "completed" },
+    ]);
+
+    const { GET } = await import("@/app/api/tasks/route");
+    const res = await GET(makeRequest("/api/tasks", { cookie: "cc_session=ccs_raw" }));
+    const data = await res.json();
+
+    expect(data.worker_concurrency).toEqual({ committed: 2, cap: 3 });
+  });
+
+  it("omits the concurrency block for the public projection", async () => {
+    mockSessionWallet.mockResolvedValue(null);
+    mockGetPublicTasks.mockResolvedValue([]);
+
+    const { GET } = await import("@/app/api/tasks/route");
+    const res = await GET(makeRequest("/api/tasks", {
+      headers: {},
+    }) /* no auth headers */);
+    const data = await res.json();
+
+    expect(data.worker_concurrency).toBeUndefined();
   });
 
   it("works identically over the bearer transport", async () => {

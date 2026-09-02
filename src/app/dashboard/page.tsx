@@ -241,6 +241,15 @@ interface Reputation {
   };
 }
 
+/** NOR-330: a recorded slash, linking the on-chain event to its dispute. */
+interface StakeSlash {
+  id: string;
+  amount_usdc: number;
+  payment_request_id: string | null;
+  tx_hash: string;
+  slashed_at: string;
+}
+
 /** One row of the dashboard session list (ADR-0009 D5). */
 interface SessionInfo {
   id: string;
@@ -328,6 +337,13 @@ type TaskAction = "submit" | "claim-early" | "dispute";
 export default function DashboardPage() {
   const { address, isConnected } = useAccount();
   const [tasks, setTasks] = useState<Task[]>([]);
+  // NOR-326: the server's own cap and the caller's committed count, so the
+  // offer card warns before an accept 409s.
+  const [workerConcurrency, setWorkerConcurrency] = useState<{
+    committed: number;
+    cap: number;
+  } | null>(null);
+  const [slashes, setSlashes] = useState<StakeSlash[]>([]);
   const [reputation, setReputation] = useState<Reputation | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
@@ -496,6 +512,7 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.ok) {
         setTasks(data.tasks);
+        setWorkerConcurrency(data.worker_concurrency ?? null);
         // NOR-328: drop local drafts for tasks no longer in the list — they
         // are finished or purged, and the browser cache should follow.
         const known = new Set(
@@ -547,6 +564,7 @@ export default function DashboardPage() {
         // with the updater form since the two requests resolve independently.
         if (repData.ok) {
           setReputation(repData.reputation);
+          setSlashes(repData.slashes ?? []);
         } else {
           setErrors((prev) => ({
             ...prev,
@@ -1676,6 +1694,48 @@ export default function DashboardPage() {
                             {reputation.stake.slashed_total_usdc} USDC slashed
                           </div>
                         )}
+                        {reputation.stake.slashed_total_usdc > 0 &&
+                          slashes.length > 0 && (
+                            <div className={styles.slashList}>
+                              {slashes.map((slash) => {
+                                const task = tasks.find(
+                                  (t) =>
+                                    t.payment_request_id ===
+                                    slash.payment_request_id,
+                                );
+                                return (
+                                  <div key={slash.id} className={styles.slashRow}>
+                                    <span className={styles.slashAmount}>
+                                      {slash.amount_usdc} USDC
+                                    </span>
+                                    <span className={styles.slashWhen}>
+                                      {formatDeadline(
+                                        Math.floor(
+                                          new Date(slash.slashed_at).getTime() /
+                                            1000,
+                                        ),
+                                      )}
+                                    </span>
+                                    {task ? (
+                                      <a
+                                        className={styles.slashTaskLink}
+                                        href={`#task-${task.payment_request_id}`}
+                                      >
+                                        dispute on{" "}
+                                        {task.payment_request_id.slice(0, 12)}…
+                                      </a>
+                                    ) : (
+                                      <span className={styles.slashWhen}>
+                                        {slash.payment_request_id
+                                          ? `task ${slash.payment_request_id.slice(0, 12)}…`
+                                          : "task not recorded"}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
 
                         <div className={styles.stakeActions}>
                           <div className={styles.stakeInputGroup}>
@@ -2136,6 +2196,7 @@ export default function DashboardPage() {
                   return (
                   <div
                     key={task.id}
+                    id={`task-${task.payment_request_id}`}
                     className={
                       task.status === "pending" && isWorkerForTask
                         ? `${styles.taskCard} ${styles.taskCardOffer}`
@@ -2220,11 +2281,29 @@ export default function DashboardPage() {
                           your acceptance. Declining is free, carries no
                           penalty, and frees the agent to re-target.
                         </p>
+                        {workerConcurrency &&
+                          (workerConcurrency.committed >= workerConcurrency.cap ? (
+                            <p className={styles.offerExpiry}>
+                              You&apos;re at your cap of {workerConcurrency.cap}{" "}
+                              committed tasks (accepted + active) — complete one
+                              or let one lapse before accepting another.
+                            </p>
+                          ) : (
+                            <p className={styles.offerExpiry}>
+                              You have {workerConcurrency.committed} of{" "}
+                              {workerConcurrency.cap} committed tasks (accepted +
+                              active).
+                            </p>
+                          ))}
                         <div className={styles.offerActions}>
                           <button
                             className={styles.actionBtn}
                             onClick={() => handleOfferResponse(task, "accept")}
-                            disabled={busy}
+                            disabled={
+                              busy ||
+                              (workerConcurrency !== null &&
+                                workerConcurrency.committed >= workerConcurrency.cap)
+                            }
                           >
                             {busy ? "Working..." : "Accept offer"}
                           </button>
