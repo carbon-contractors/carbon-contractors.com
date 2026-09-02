@@ -368,6 +368,12 @@ frontmatter field.
 > a Linear id met in future work has no relationship to a `NOR-###` in a code comment. Linear also
 > carries in-platform coding agents, so a commit's motivating context may live there rather than in
 > an ADR or an issue file. → `docs/BCP-DR.md` § *Product and task tracking*
+>
+> **Multi-worker split (2026-09-02):** the repo backlog stays the stable goal definition; Linear is
+> where a `CC-###` gets broken into pickable sub-issues (hub pattern, `L1`/`L2`/`L3` tiering) for
+> whichever worker — Claude Code session, Hermes agent, more to come — picks it up. Every Linear
+> issue must name its `CC-###` parent. Full convention → `docs/backlog/README.md` § *Linear as the
+> live work-tracking layer*.
 
 ## Layout
 

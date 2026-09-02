@@ -1423,6 +1423,109 @@ The rest was scaffolding around a hazard I had not verified.
 
 Related: `ADR-0006` D2/A2, `CC-090`.
 
+## 30. Almost everything that broke today was in the checking layer
+
+**2026-09-01.** A long day, and a productive one: the Sepolia redeploy put the `ADR-0006` D3
+arbitration clock on chain for the first time anywhere; the refund outcome and a
+worker-raised dispute both executed for the first time on any chain; the EAS completion
+schema was registered and is now monitored; a seven-day arbitration timeout is running on a
+live task.
+
+**The contract did not misbehave once.** Neither did the escrow, the KMS signer, the verdict
+path, or the deployment. Every defect found today was in something built to *check*
+something else — and that is worth a section on its own, because it is not a coincidence and
+it recurs.
+
+### The list, because the pattern only shows up in aggregate
+
+| What broke | What it was checking |
+| :-- | :-- |
+| `report()` printed **FAIL** on a correct refund | whether the worker was paid |
+| `verify-unclaimed` failed hourly for three days | whether anything is unclaimed |
+| `verify-escrow-solvency` blamed the contract for a wrong-network RPC | solvency |
+| The dashboard blanked every worker action, silently | the on-chain state of a task |
+| `env-shadowing`'s regex missed every indented line | whether config is being ignored |
+| `chain-constants.json` was left syntactically broken and passed CI | the record of what is deployed |
+
+Six failures. Six checkers. Nothing being checked was at fault in any of them.
+
+### Why the checking layer is where the bugs are
+
+Three reasons, and they compound.
+
+**A checker has no user.** When `createTask` is wrong, a transaction reverts and someone
+notices in seconds. When a *reporter* is wrong, it prints something plausible and everyone
+reads past it. The refund run is the clearest case: the money moved correctly, the state was
+`Resolved`, the funder was repaid — and the last line said `FAIL — the worker was NOT paid as
+expected`, because `report()` carried one hard-coded expectation from when every phase paid
+the worker. Adding the refund phase made that assumption wrong and nothing said so.
+
+**A checker's happy path is usually the only path tested.** The `env-shadowing` regex was
+written as a template literal, where `\s` is not a recognised escape and collapses to `s`.
+The compiled pattern was `^s*NAME s*= s*(.*)$`. It matched `NAME=value` — because `s*`
+matches zero `s` characters — and silently missed `  NAME=value` and `NAME = value`, while
+its own comment claimed to be "deliberately loose" so that neither would defeat it. The
+hand-rolled verification used the one form that worked. **A tool built to surface a silent
+failure, failing silently.**
+
+**A checker that cannot fire looks identical to one that passes.** `verify-eas-schema` was
+deliberately kept out of the monitor registry until the schema was registered, because a
+monitor red by design teaches its reader to ignore the schedule. That decision was made
+*because* `verify-unclaimed` had spent three days red — first on an ABI mismatch I introduced,
+then on transient RPC rate limiting — and a red schedule that is always red is a schedule
+nobody reads. `ADR-0003` makes this argument in the abstract; today it was earned.
+
+### The two failures that were mine in a more specific way
+
+**I verified the adjacent property, three times.** Told to run something, I checked that a
+`git push` had *succeeded* rather than that the commit had reached `master`. It had succeeded
+— onto a branch whose PR was already merged. Three rounds of "file not found" before I fixed
+the check rather than the symptom. This is `§28` again in a new costume: confirm the property
+you actually depend on, not the nearest observable one.
+
+**I guessed at `fetch failed` for far too long.** It is a network-level error carrying a
+`cause` with a real code — `ENOTFOUND`, `SELF_SIGNED_CERT_IN_CHAIN`, and so on — and my
+script threw that away. So we speculated about URLs, paths and Vercel settings while the
+diagnostic sat one property access away. Aaron eventually said "it has to be something else",
+which was right, and the correct first move had been available from the start: print
+`err.cause`.
+
+### What automated review got right, and how to read it
+
+Two findings from bots today, and they wanted opposite responses.
+
+`github-code-quality` flagged *"missing space after `amountUsdc,`"* on the EAS schema string.
+**A false positive** — the string is the schema's identity, and that space would have forked
+the UID. But it pointed at something genuinely fragile: the assertion was a three-line `+`
+concatenation, exactly the shape a formatter reflows without thinking. The tripwire became a
+single unwrappable hex literal instead.
+
+CodeQL flagged the useless `\s` escape. **A straight bug**, as above.
+
+So the reading is not "trust the bot" or "dismiss the bot". It is: *a finding on code you
+believe is correct is still information about how fragile that code is to being edited by
+someone who does not.*
+
+### The transferable part
+
+**Spend proportionate care on the thing that will tell you when you are wrong.** The instinct
+is to test the money path hardest, and the money path is indeed where the consequences live —
+but the money path is also where a failure is loud, immediate, and attributable. The checking
+layer is where a failure is quiet, deferred, and misattributed to whatever it was checking.
+
+Concretely, three habits that came out of today:
+
+- **Mutation-test the checker, not just the checked.** Every guard written today was mutated;
+  two of the mutations survived first time, and *both survivors were faults in my tests*
+  rather than in the code. A test that passes against a broken implementation is not a test.
+- **A correct run must never print `FAIL`.** If it can, the verdict line is noise, and the
+  next real failure will be read past.
+- **When a diagnostic fails, read the diagnostic before theorising.** `err.cause`,
+  `e.shortMessage`, the exit code. The information is nearly always already there.
+
+Related: `§26` (three things written down, none enforced), `§28` (verifying the adjacent
+hazard), `§29` (a proxy recorded as the property), `ADR-0003`.
+
 ## Open questions
 
 Recorded here because pretending to certainty would defeat the purpose of the document.

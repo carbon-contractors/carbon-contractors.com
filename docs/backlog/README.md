@@ -69,6 +69,38 @@ deliberately not being done.
 Reference issue ids in commit messages (`fix(connect): show wallet button on mobile (CC-001)`)
 so `git log --grep=CC-001` reconstructs the story.
 
+## Linear as the live work-tracking layer
+
+As of 2026-09-02, multiple workers touch this repo at once — Aaron directly, Claude Code sessions,
+and a Hermes agent, with more workers (human or agent) anticipated if things go well. Splitting
+"what we're building" from "who's doing what right now" avoids every worker contending for edit
+rights on the same `CC-###.md` file:
+
+- **The repo (`CC-###.md`) stays the stable definition of the goal.** Problem, fix, acceptance
+  criteria — the thing a worker checks their output against. Low churn, gated by the
+  tracked-work-items rule (`CLAUDE.md`), because it is the shared record everyone re-derives from.
+- **Linear (North Metro Tech workspace) is the churn layer.** A `CC-###` item that needs breaking
+  into actionable pieces gets a Linear **hub issue** (mirrors the `CC-076`/`CC-039` hub pattern:
+  not itself actionable, exists to parent sub-issues) plus as many sub-issues as the work actually
+  needs, added or closed freely without touching the repo file. This is where day-to-day pickup,
+  assignment and status live.
+- **Every Linear issue must name its `CC-###` parent** in its description (`Related: CC-###`), not
+  just the Linear hub — a worker pulling from Linear has to be able to find the repo definition of
+  "done" without already knowing the mapping.
+- **Tier with the existing `L1`/`L2`/`L3` labels** so work routes to the right worker: `L1` direct
+  to a Hermes Coder (small, bounded, low-risk), `L2` to Hermes Kanban (multi-step, dependencies,
+  review coordination), `L3` escalates to Claude Code (difficult, unfamiliar, security-sensitive —
+  this includes anything touching the auth/trust boundary, not just contract code).
+- **The repo file gets a Linear provenance table**, refreshed periodically (same shape as the
+  existing "Linear provenance" section in `INDEX.md`, or `CC-099`'s own closing note) — not kept
+  live in sync item-by-item, since Linear will always move faster than a file gated by explicit
+  approval. Treat a stale provenance table as expected, not a defect; refresh it at a natural
+  checkpoint (a hub issue closing out, a milestone, a status check-in), not on every Linear edit.
+
+This does not change the tracked-work-items rule itself — creating or editing a `CC-###.md` file
+still needs your explicit go-ahead. It changes what has to go through that gate: the stable
+definition does, the day-to-day breakdown of it does not.
+
 ## Numbering
 
 `CC-###`, allocated sequentially, never reused.
