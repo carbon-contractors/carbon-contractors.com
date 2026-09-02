@@ -1363,3 +1363,41 @@
   color: var(--cc-text);
   border-color: var(--cc-text-muted);
 }
+
+/* ── Stake slash records (NOR-330): the why behind the slashed total ── */
+
+.slashList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.slashRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.slashAmount {
+  color: var(--cc-red);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.slashWhen {
+  color: var(--cc-text-muted);
+  white-space: nowrap;
+}
+
+.slashTaskLink {
+  color: var(--cc-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.slashTaskLink:hover {
+  color: var(--cc-text-muted);
+}

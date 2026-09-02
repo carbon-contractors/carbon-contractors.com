@@ -16,6 +16,7 @@
 
 import { NextRequest } from "next/server";
 import {
+  WORKER_CONCURRENCY_CAP,
   getTasksForParties,
   getPublicTasks,
   lapseExpiredOffers,
@@ -143,7 +144,28 @@ export async function GET(req: NextRequest) {
       }),
     );
 
-    return Response.json({ ok: true, authenticated, tasks: enriched });
+    return Response.json({
+      ok: true,
+      authenticated,
+      tasks: enriched,
+      // NOR-326: the caller's committed-task count against the cap, so the
+      // dashboard can warn before the accept 409 instead of after. Committed
+      // is derived from the fetched list itself — accepted or active, on the
+      // worker side — matching countCommittedTasks' definition without a
+      // second query.
+      ...(authenticated && callerWallet
+        ? {
+            worker_concurrency: {
+              committed: enriched.filter(
+                (t) =>
+                  t.to_human_wallet === callerWallet &&
+                  (t.status === "accepted" || t.status === "active"),
+              ).length,
+              cap: WORKER_CONCURRENCY_CAP,
+            },
+          }
+        : {}),
+    });
   } catch (err: unknown) {
     return safeErrorResponse(err, "tasks_fetch_failed");
   }

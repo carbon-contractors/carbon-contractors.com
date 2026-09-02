@@ -5,6 +5,7 @@ const mockGetTasksForParties = vi.fn();
 const mockGetPublicTasks = vi.fn();
 const mockLapseExpiredOffers = vi.fn();
 vi.mock("@/lib/db/tasks", () => ({
+  WORKER_CONCURRENCY_CAP: 3,
   getTasksForParties: (...args: unknown[]) => mockGetTasksForParties(...args),
   getPublicTasks: (...args: unknown[]) => mockGetPublicTasks(...args),
   lapseExpiredOffers: (...args: unknown[]) => mockLapseExpiredOffers(...args),
