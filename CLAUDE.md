@@ -99,6 +99,17 @@ Two positions that keep getting re-litigated. Both settled. Read
   identity verification and not a contradiction — ADR-0004 D4–D6. Never move a notification address
   onto the world-readable `humans` table.
 
+## Agent UX is product CX — see NOR-333
+
+One more position that keeps needing restating. Settled (Aaron, 2026-09-02):
+
+- **The customer-facing experience includes the hiring agent's experience, not just the human
+  worker's.** Time-to-response is the agent's load time; lapse of an ignored offer is a re-targeting
+  feature, not a failure (ADR-0005); stake/AWOL/reputation must stay machine-readable over MCP;
+  auto-booking (CC-074/075) is agent UX. Canonical statement and rationale live in Linear
+  (`NOR-333`); check every worker-side feature against the question — *does this make an agent wait
+  longer, or trust the pool less?*
+
 ## Hazards
 
 Each entry is the operational fact and where the reasoning lives. **Verify with the command where one
