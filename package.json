@@ -70,7 +70,8 @@
     "vitest": "^3.2.4"
   },
   "overrides": {
-    "picomatch": ">=2.3.2",
+    "decode-uri-component": "0.5.0",
+   "picomatch": ">=2.3.2",
     "path-to-regexp": ">=8.4.0",
     "defu": ">=6.1.6",
     "lodash": ">=4.17.24",
