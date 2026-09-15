@@ -49,6 +49,142 @@ describe("ratelimit", () => {
   });
 });
 
+// ── CC-020: Upstash REST path ────────────────────────────────────────────────
+//
+// The limiter the middleware and MCP surfaces delegate to is Upstash-backed when
+// UPSTASH_REDIS_REST_URL/_TOKEN are set. These tests stub global fetch to a
+// fake Upstash REST endpoint and verify the wire protocol (pipeline INCR+EXPIRE,
+// Bearer auth) and the fail-open behaviour on transport errors.
+
+describe("ratelimit — Upstash REST path (CC-020)", () => {
+  let calls: Array<{ url: string; auth: string | null; body: unknown }>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    process.env.UPSTASH_REDIS_REST_URL = "https://fake-db.upstash.io";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "fake-token";
+    calls = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the Upstash limiter when env vars are configured", async () => {
+    let requestCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          auth: init?.headers ? (init.headers as Record<string, string>).Authorization : null,
+          body: JSON.parse(String(init?.body)),
+        });
+        requestCount++;
+        return new Response(JSON.stringify([{ result: requestCount }]), {
+          status: 200,
+        });
+      }),
+    );
+
+    const { apiRateLimiter } = await import("@/lib/ratelimit");
+
+    // First request under the limit
+    let result = await apiRateLimiter.limit("upstash-ip");
+    expect(result.success).toBe(true);
+
+    result = await apiRateLimiter.limit("upstash-ip");
+    expect(result.success).toBe(true);
+    expect(result.remaining).toBe(58);
+
+    expect(calls.length).toBe(2);
+    expect(calls[0].url).toBe("https://fake-db.upstash.io/pipeline");
+    expect(calls[0].auth).toBe("Bearer fake-token");
+    expect(Array.isArray(calls[0].body)).toBe(true);
+    // Pipeline shape: INCR then EXPIRE
+    expect(calls[0].body).toEqual([
+      ["INCR", "api:upstash-ip"],
+      ["EXPIRE", "api:upstash-ip", "60"],
+    ]);
+  });
+
+  it("blocks past the limit and reports the window as Retry-After", async () => {
+    let requestCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        calls.push({ url: _url, auth: null, body: JSON.parse(String(init?.body)) });
+        requestCount++;
+        return new Response(JSON.stringify([{ result: requestCount }]), {
+          status: 200,
+        });
+      }),
+    );
+
+    const { challengeRateLimiter } = await import("@/lib/ratelimit");
+
+    // Challenge bucket is 10/min
+    for (let i = 0; i < 10; i++) {
+      const r = await challengeRateLimiter.limit("upstash-blocked-ip");
+      expect(r.success).toBe(true);
+    }
+
+    const blocked = await challengeRateLimiter.limit("upstash-blocked-ip");
+    expect(blocked.success).toBe(false);
+    expect(blocked.retryAfterS).toBe(60);
+  });
+
+  it("prefixes keys per limiter, so buckets do not collide", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        calls.push({ url: _url, auth: null, body: JSON.parse(String(init?.body)) });
+        return new Response(JSON.stringify([{ result: 1 }]), { status: 200 });
+      }),
+    );
+
+    const { apiRateLimiter, challengeRateLimiter } = await import("@/lib/ratelimit");
+
+    await apiRateLimiter.limit("same-ip");
+    await challengeRateLimiter.limit("same-ip");
+
+    const keys = calls.map((c) => (c.body as string[][])[0][1]);
+    expect(keys).toEqual(["api:same-ip", "challenge:same-ip"]);
+  });
+
+  it("fails open when Upstash is unreachable — no outage-induced lockout", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("ECONNREFUSED");
+      }),
+    );
+
+    const { apiRateLimiter } = await import("@/lib/ratelimit");
+
+    // Every call fails at the transport layer; the limiter must allow traffic
+    // rather than turning an Upstash outage into a full API outage.
+    for (let i = 0; i < 100; i++) {
+      const r = await apiRateLimiter.limit("outage-ip");
+      expect(r.success).toBe(true);
+    }
+  });
+
+  it("treats a non-2xx Upstash response as an error and fails open", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("rate limited by provider", { status: 429 })),
+    );
+
+    const { apiRateLimiter } = await import("@/lib/ratelimit");
+
+    const r = await apiRateLimiter.limit("provider-limited-ip");
+    expect(r.success).toBe(true);
+  });
+});
+
 // ── CC-097 ───────────────────────────────────────────────────────────────────
 //
 // The regression these exist for: `parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ??

@@ -6,65 +6,71 @@ vi.stubEnv("RATE_LIMIT_MAX_REQUESTS", "3");
 vi.stubEnv("RATE_LIMIT_WINDOW_MS", "60000");
 
 // We need to test the middleware function — root middleware.ts (not src/)
-let middleware: (req: NextRequest) => ReturnType<typeof import("../../../middleware").middleware>;
+let middleware: (
+  req: NextRequest,
+) => ReturnType<typeof import("../../../middleware").middleware>;
 
 describe("rate limiting middleware", () => {
   beforeEach(async () => {
     vi.resetModules();
+    // No Upstash in unit tests — exercise the in-memory fallback. The Upstash
+    // REST path is covered in ratelimit.test.ts with a stubbed fetch.
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
     // Re-import to get fresh state (root middleware.ts)
     const mod = await import("../../../middleware");
     middleware = mod.middleware;
   });
 
-  it("allows requests under the limit", () => {
+  it("allows requests under the limit", async () => {
     const req = new NextRequest("http://localhost:3000/api/tasks", {
       headers: { "x-forwarded-for": "1.2.3.4" },
     });
-    const result = middleware(req);
+    const result = await middleware(req);
     expect(result).toBeUndefined();
   });
 
-  it("returns 429 when limit exceeded", () => {
+  it("returns 429 when limit exceeded", async () => {
     const ip = "10.0.0.1";
     for (let i = 0; i < 3; i++) {
       const req = new NextRequest("http://localhost:3000/api/tasks", {
         headers: { "x-forwarded-for": ip },
       });
-      middleware(req);
+      await middleware(req);
     }
     // 4th request should be blocked
     const req = new NextRequest("http://localhost:3000/api/tasks", {
       headers: { "x-forwarded-for": ip },
     });
-    const result = middleware(req);
+    const result = await middleware(req);
     expect(result?.status).toBe(429);
   });
 
-  it("exempts /api/health from rate limiting", () => {
+  it("exempts /api/health from rate limiting", async () => {
     const req = new NextRequest("http://localhost:3000/api/health", {
       headers: { "x-forwarded-for": "5.5.5.5" },
     });
-    const result = middleware(req);
+    const result = await middleware(req);
     expect(result).toBeUndefined();
   });
 
-  it("tracks different IPs independently", () => {
+  it("tracks different IPs independently", async () => {
     // Max out IP A
     for (let i = 0; i < 3; i++) {
       const req = new NextRequest("http://localhost:3000/api/tasks", {
         headers: { "x-forwarded-for": "10.0.0.2" },
       });
-      middleware(req);
+      await middleware(req);
     }
     // IP B should still work
     const req = new NextRequest("http://localhost:3000/api/tasks", {
       headers: { "x-forwarded-for": "10.0.0.3" },
     });
-    const result = middleware(req);
+    const result = await middleware(req);
     expect(result).toBeUndefined();
   });
 
-  it("applies tighter limits to MCP challenge endpoint", () => {
+  it("applies tighter limits to MCP challenge endpoint", async () => {
     // Challenge endpoint has a limit of 10, but env stubs set MAX_REQUESTS=3.
     // The per-endpoint limit for /api/basedhuman.mcp/challenge is 10,
     // which is higher than the stubbed 3, but the endpoint map takes precedence.
@@ -77,7 +83,7 @@ describe("rate limiting middleware", () => {
         "http://localhost:3000/api/basedhuman.mcp/challenge",
         { headers: { "x-forwarded-for": ip } },
       );
-      const result = middleware(req);
+      const result = await middleware(req);
       expect(result).toBeUndefined();
     }
     // 4th request: general API would block, but challenge endpoint allows up to 10
@@ -85,7 +91,7 @@ describe("rate limiting middleware", () => {
       "http://localhost:3000/api/basedhuman.mcp/challenge",
       { headers: { "x-forwarded-for": ip } },
     );
-    const result = middleware(req);
+    const result = await middleware(req);
     expect(result).toBeUndefined();
   });
 });
@@ -95,12 +101,14 @@ describe("rate limiting middleware", () => {
 // Blank RATE_LIMIT_* vars broke this middleware in two opposite directions at once.
 // WINDOW_MS = NaN meant `now - windowStart > NaN` was false, so the window never
 // rolled over; MAX_REQUESTS = NaN meant `count > NaN` was false, so the general
-// /api/* limit never tripped. ENDPOINT_LIMITS holds *literal* limits, though, so
+// /api/* limit never tripped. ENDPOINT_LIMITS held *literal* limits, though, so
 // those kept comparing against a counter that could never reset — the MCP routes
 // would have locked out permanently while the rest of the API went unlimited.
 
 describe("rate limiting middleware — blank env vars (CC-097)", () => {
-  let middleware: (req: NextRequest) => ReturnType<typeof import("../../../middleware").middleware>;
+  let middleware: (
+    req: NextRequest,
+  ) => ReturnType<typeof import("../../../middleware").middleware>;
 
   const request = (path: string, ip: string) =>
     new NextRequest(`http://localhost:3000${path}`, {
@@ -109,6 +117,8 @@ describe("rate limiting middleware — blank env vars (CC-097)", () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
     vi.stubEnv("RATE_LIMIT_MAX_REQUESTS", "");
     vi.stubEnv("RATE_LIMIT_WINDOW_MS", "");
     const mod = await import("../../../middleware");
@@ -120,38 +130,38 @@ describe("rate limiting middleware — blank env vars (CC-097)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("falls back to the documented 60/min instead of not limiting at all", () => {
+  it("falls back to the documented 60/min instead of not limiting at all", async () => {
     const ip = "203.0.113.1";
     for (let i = 0; i < 60; i++) {
-      expect(middleware(request("/api/tasks", ip))).toBeUndefined();
+      expect(await middleware(request("/api/tasks", ip))).toBeUndefined();
     }
-    expect(middleware(request("/api/tasks", ip))?.status).toBe(429);
+    expect((await middleware(request("/api/tasks", ip)))?.status).toBe(429);
   });
 
-  it("rolls the window over, so a tighter endpoint limit is not a permanent lockout", () => {
+  it("rolls the window over, so a tighter endpoint limit is not a permanent lockout", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-16T00:00:00Z"));
 
     const ip = "203.0.113.2";
     const path = "/api/basedhuman.mcp/challenge";
 
-    // ENDPOINT_LIMITS caps this at 10 regardless of RATE_LIMIT_MAX_REQUESTS.
+    // The challenge bucket caps this at 10 regardless of RATE_LIMIT_MAX_REQUESTS.
     for (let i = 0; i < 10; i++) {
-      expect(middleware(request(path, ip))).toBeUndefined();
+      expect(await middleware(request(path, ip))).toBeUndefined();
     }
-    expect(middleware(request(path, ip))?.status).toBe(429);
+    expect((await middleware(request(path, ip)))?.status).toBe(429);
 
     // Past the 60s default window the counter must reset. With WINDOW_MS = NaN the
     // comparison at middleware.ts:86 was false forever and this stayed 429.
     vi.advanceTimersByTime(61_000);
-    expect(middleware(request(path, ip))).toBeUndefined();
+    expect(await middleware(request(path, ip))).toBeUndefined();
   });
 
-  it("sends a numeric Retry-After, never the string NaN", () => {
+  it("sends a numeric Retry-After, never the string NaN", async () => {
     const ip = "203.0.113.3";
-    for (let i = 0; i < 60; i++) middleware(request("/api/tasks", ip));
+    for (let i = 0; i < 60; i++) await middleware(request("/api/tasks", ip));
 
-    const blocked = middleware(request("/api/tasks", ip));
+    const blocked = await middleware(request("/api/tasks", ip));
     const retryAfter = blocked?.headers.get("Retry-After");
 
     expect(retryAfter).not.toBeNull();
