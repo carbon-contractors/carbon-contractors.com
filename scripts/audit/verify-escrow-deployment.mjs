@@ -17,10 +17,26 @@
  * Usage:
  *   node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs
  *   node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs 0xADDRESS
+ *   node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs 0xADDRESS --signer=0xSIGNER
+ *   node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs 0xADDRESS --owner=0xSAFE
  *
  * The positional argument exists so a fresh deployment can be checked BEFORE
  * NEXT_PUBLIC_ESCROW_CONTRACT is re-pointed at it — which is the order the CC-082
  * checklist actually happens in.
+ *
+ * --owner names the address ownership is expected to have — the 2-of-4 Safe once
+ * CC-090's mainnet leg lands. Default is the CC-059 HSM key.
+ *
+ * The expected verdict signer (CC-090) is the committed
+ * docs/carbon-contractors-escrow-signer-1.pub by default, or --signer=0xADDR during
+ * a key-rotation window (before signing switches to the new key, or to assert the old
+ * one was removed). VERDICT_SIGNER_ADDRESS, when set, is cross-checked against it and
+ * a mismatch is FATAL — the deploy script seeds the accepted-signer set from the env
+ * var, so an env var the contract disagrees with means every verdict is silently
+ * rejected. The signer is deliberately NOT the owner constant: once ownership moves to
+ * the 2-of-4 Safe, signer and owner are different addresses and this script must
+ * check the signer, not the owner. On mainnet it is additionally FATAL for the signer
+ * to equal the owner (ADR-0006 D2 separation gate).
  */
 
 import { readFileSync } from "node:fs";
@@ -29,31 +45,25 @@ import { fileURLToPath } from "node:url";
 import { createPublicClient, http, getAddress, toFunctionSelector, keccak256 } from "viem";
 import { baseSepolia, base } from "viem/chains";
 
-/** CC-059 — the HSM key that must own the contract and whose verdicts it must accept. */
+/** CC-059 — the HSM key that must own the contract. */
 const HSM = "0xa8931097540e69B474013D294d0bA6A2cC853e4b";
 
 /**
  * CC-090 — the address the contract is expected to accept verdicts from.
  *
- * NOT necessarily the owner. The whole point of CC-090 is that verdict signing and
- * contract ownership are two roles that will move to different custodies (owner to a
- * 2-of-4 Safe, signer staying a hot KMS key), and this script previously checked
+ * NOT the owner. The whole point of CC-090 is that verdict signing and contract
+ * ownership are two roles that will move to different custodies (owner to a 2-of-4
+ * Safe, signer staying a hot KMS key), and this script previously checked
  * acceptedSigners() against the HSM owner constant — the exact conflation the ticket
  * exists to remove. Once separation lands, that check would fail against a perfectly
  * correct deployment, and worse, it could never *detect* a separation regression
  * (signer == owner re-merged) because it asserted they were the same address.
  *
- * Resolution order:
- *   1. --signer=0xADDR  — explicit override for key-rotation windows: you want to know
- *      setVerdictSigner(new, true) landed BEFORE signing switches to it, and that the
- *      old one was removed after (same pattern as verify-signer.mjs).
- *   2. VERDICT_SIGNER_ADDRESS — what the deploy script seeds the accepted-signer set
- *      from, and what the signing path actually signs with.
- *   3. The committed .pub — what the signing key derives to today, offline.
- *
- * The first two are environment; the third is the repo's independent statement of
- * intent. If they disagree, verify-signer.mjs flags it — this script reports the
- * mismatch rather than silently picking a winner.
+ * Resolution: --signer=0xADDR names an explicit expectation (key-rotation windows —
+ * you want to know setVerdictSigner(new, true) landed BEFORE signing switches to it,
+ * same pattern as verify-signer.mjs). Otherwise the expected signer is the committed
+ * .pub, and VERDICT_SIGNER_ADDRESS, when set, is a fatal-on-mismatch cross-check —
+ * the deploy script seeds the accepted-signer set from that env var.
  */
 
 const ABI = [
@@ -114,11 +124,14 @@ function addressFromPem(path) {
 const mark = (ok) => (ok ? "✓" : "✗");
 
 async function main() {
-  const args = process.argv.filter((a) => !a.startsWith("--signer="));
+  const flagArgs = process.argv.filter((a) => !a.startsWith("--signer=") && !a.startsWith("--owner="));
   const signerOverrideRaw = process.argv
     .find((a) => a.startsWith("--signer="))
     ?.slice("--signer=".length);
-  const override = args[2];
+  const ownerOverrideRaw = process.argv
+    .find((a) => a.startsWith("--owner="))
+    ?.slice("--owner=".length);
+  const override = flagArgs[2];
   const raw = override ?? process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
   if (!raw) {
     console.error("Pass an address, or set NEXT_PUBLIC_ESCROW_CONTRACT.");
@@ -227,7 +240,8 @@ async function main() {
   const claimPathPresent = code.toLowerCase().includes(RELEASE_AFTER_ARBITRATION_SELECTOR);
 
   const expectedUsdc = process.env.NEXT_PUBLIC_USDC_ADDRESS;
-  const ownerIsHsm = owner.toLowerCase() === HSM.toLowerCase();
+  const expectedOwner = ownerOverrideRaw ? getAddress(ownerOverrideRaw) : HSM;
+  const ownerIsExpected = owner.toLowerCase() === expectedOwner.toLowerCase();
   const usdcOk = !expectedUsdc || usdc.toLowerCase() === expectedUsdc.toLowerCase();
 
   console.log(`is v2 (verdict surface)  ${mark(true)}`);
@@ -251,7 +265,10 @@ async function main() {
   // perfectly normal escrow while still printing CLEAN underneath. Whether the balance is
   // *accounted for* is verify-escrow-solvency.mjs's question, not this script's.
   console.log(`totalLocked()               ${locked} units${locked === 0n ? " (nothing in flight)" : ""}`);
-  console.log(`owner()                  ${mark(ownerIsHsm)}  ${owner}`);
+  console.log(`owner()                  ${mark(ownerIsExpected)}  ${owner}`);
+  console.log(
+    `                         (expected: ${expectedOwner}${ownerOverrideRaw ? " — from --owner" : " — CC-059 HSM constant; pass --owner=0xSAFE for the 2-of-4 Safe (CC-090 mainnet leg)"})`,
+  );
   console.log(
     `acceptedSigners(signer)  ${mark(signerAccepted)}  ${signerAccepted}  (${signerOverrideRaw ? "from --signer" : "from committed .pub"})`,
   );
@@ -301,21 +318,46 @@ async function main() {
   console.log(`\nESCROW_DEPLOY_BLOCK=${lo}`);
 
   console.log();
-  if (!ownerIsHsm) {
-    console.log(`✗ OWNER IS NOT THE HSM KEY. Run \`npm run transfer:ownership\` (CC-059).`);
-    console.log(`  expected ${HSM}`);
+  if (!ownerIsExpected) {
+    if (ownerOverrideRaw) {
+      console.log(`✗ OWNER IS NOT THE EXPECTED ADDRESS.`);
+      console.log(`  expected ${expectedOwner} (--owner)`);
+      console.log(`  actual   ${owner}`);
+    } else {
+      console.log(`✗ OWNER IS NOT THE HSM KEY. Run \`npm run transfer:ownership\` (CC-059).`);
+      console.log(`  expected ${HSM}`);
+      console.log("  If ownership has intentionally moved to the 2-of-4 Safe (CC-090 mainnet leg),");
+      console.log("  re-run with --owner=0xSAFE to verify against it, and record it in");
+      console.log("  chain-constants.json once verify-contract-owner.mjs passes against it.");
+    }
     process.exit(1);
   }
   if (!signerAccepted) {
-    console.log("✗ The HSM key is not an accepted verdict signer — settlement cannot verify a");
-    console.log("  verdict. Owner must call setVerdictSigner(HSM, true).");
+    console.log("✗ The expected verdict signer is NOT accepted — settlement cannot verify a");
+    console.log("  verdict. Owner must call setVerdictSigner(signer, true).");
+    console.log(`  expected ${expectedSigner} (${signerOverrideRaw ? "from --signer" : "from committed .pub"})`);
+    process.exit(1);
+  }
+  if (!envSignerAgrees) {
+    console.log(`✗ VERDICT_SIGNER_ADDRESS (${getAddress(envSigner)}) does not match the expected`);
+    console.log(`  signer (${expectedSigner}). The deploy script seeds the accepted-signer set from`);
+    console.log("  the env var, so one of them is stale. This is the rotation trap CC-090 exists");
+    console.log("  to make visible: an env var pointing at a key the contract no longer accepts");
+    console.log("  means every verdict is rejected silently.");
     process.exit(1);
   }
   if (!usdcOk) {
     console.log(`✗ usdc() does not match NEXT_PUBLIC_USDC_ADDRESS (${expectedUsdc}).`);
     process.exit(1);
   }
-  console.log("✓ CLEAN — v2, owned by the HSM key, verdict signer seeded.");
+  if (mainnet && signerIsOwner) {
+    console.log("✗ MAINNET DEPLOYED WITH SIGNER == OWNER — CC-090 separation is a mainnet gate.");
+    console.log("  ADR-0006 D2 requires the owner to be the 2-of-4 Safe while verdict signing");
+    console.log("  stays on the hot KMS key. Do not fund tasks in this state.");
+    process.exit(1);
+  }
+  console.log("✓ CLEAN — v2, owner verified, verdict signer accepted.");
+  console.log(`  Owner/signer separation: ${signerIsOwner ? "NOT separated (same key) — known open item, CC-090" : "separated"}.`);
   console.log("  Whether the locked balance is accounted for is a separate question:");
   console.log("    node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs");
 }
