@@ -182,7 +182,7 @@ const envSchema = z.object({
   // R2 target for the Tier 1 export cron. All optional with the same
   // fail-closed polarity as CRON_SECRET: /api/cron/backup-export refuses to
   // run (503) while any of these is unset rather than running against a
-  // half-configured target — provisioning is the PO action in CC-108.
+  // half-configured target — provisioning is the PO action in CC-109.
   // envOptional so a blanked Vercel field reads as unset, not as a bucket
   // named "" (CC-097).
   R2_ACCOUNT_ID: envOptional(z.string().optional()),

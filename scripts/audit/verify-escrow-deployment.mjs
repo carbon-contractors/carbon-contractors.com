@@ -23,11 +23,38 @@
  * checklist actually happens in.
  */
 
-import { createPublicClient, http, getAddress, toFunctionSelector } from "viem";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createPublicClient, http, getAddress, toFunctionSelector, keccak256 } from "viem";
 import { baseSepolia, base } from "viem/chains";
 
 /** CC-059 — the HSM key that must own the contract and whose verdicts it must accept. */
 const HSM = "0xa8931097540e69B474013D294d0bA6A2cC853e4b";
+
+/**
+ * CC-090 — the address the contract is expected to accept verdicts from.
+ *
+ * NOT necessarily the owner. The whole point of CC-090 is that verdict signing and
+ * contract ownership are two roles that will move to different custodies (owner to a
+ * 2-of-4 Safe, signer staying a hot KMS key), and this script previously checked
+ * acceptedSigners() against the HSM owner constant — the exact conflation the ticket
+ * exists to remove. Once separation lands, that check would fail against a perfectly
+ * correct deployment, and worse, it could never *detect* a separation regression
+ * (signer == owner re-merged) because it asserted they were the same address.
+ *
+ * Resolution order:
+ *   1. --signer=0xADDR  — explicit override for key-rotation windows: you want to know
+ *      setVerdictSigner(new, true) landed BEFORE signing switches to it, and that the
+ *      old one was removed after (same pattern as verify-signer.mjs).
+ *   2. VERDICT_SIGNER_ADDRESS — what the deploy script seeds the accepted-signer set
+ *      from, and what the signing path actually signs with.
+ *   3. The committed .pub — what the signing key derives to today, offline.
+ *
+ * The first two are environment; the third is the repo's independent statement of
+ * intent. If they disagree, verify-signer.mjs flags it — this script reports the
+ * mismatch rather than silently picking a winner.
+ */
 
 const ABI = [
   { type: "function", name: "owner", inputs: [], outputs: [{ type: "address" }], stateMutability: "view" },
@@ -60,10 +87,38 @@ async function withRetry(label, fn, attempts = 6) {
   }
 }
 
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const PUB_KEY = join(REPO, "docs", "carbon-contractors-escrow-signer-1.pub");
+
+/**
+ * Derive an Ethereum address from a secp256k1 SubjectPublicKeyInfo PEM, offline.
+ * Mirrors addressFromPem() in verify-contract-owner.mjs and verify-signer.mjs, which
+ * in turn mirror getEthAddressFromKms() in src/lib/contracts/kms-signer.ts — the
+ * uncompressed EC point (0x04 || x || y) is always the last 65 bytes of the DER.
+ */
+function addressFromPem(path) {
+  const body = readFileSync(path, "utf8")
+    .replace(/-----BEGIN PUBLIC KEY-----/, "")
+    .replace(/-----END PUBLIC KEY-----/, "")
+    .replace(/\s/g, "");
+  const der = Buffer.from(body, "base64");
+  const point = der.subarray(der.length - 65);
+  if (point[0] !== 0x04) {
+    throw new Error(
+      `Expected uncompressed EC point (0x04 prefix), got 0x${point[0].toString(16)}`,
+    );
+  }
+  return getAddress("0x" + keccak256("0x" + Buffer.from(point.subarray(1)).toString("hex")).slice(-40));
+}
+
 const mark = (ok) => (ok ? "✓" : "✗");
 
 async function main() {
-  const override = process.argv[2];
+  const args = process.argv.filter((a) => !a.startsWith("--signer="));
+  const signerOverrideRaw = process.argv
+    .find((a) => a.startsWith("--signer="))
+    ?.slice("--signer=".length);
+  const override = args[2];
   const raw = override ?? process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
   if (!raw) {
     console.error("Pass an address, or set NEXT_PUBLIC_ESCROW_CONTRACT.");
@@ -78,6 +133,40 @@ async function main() {
     chain.rpcUrls.default.http[0];
 
   const client = createPublicClient({ chain, transport: http(rpcUrl) });
+
+  // ── Expected verdict signer (CC-090) ───────────────────────────────────────
+  let pubKeyAddress = null;
+  try {
+    pubKeyAddress = addressFromPem(PUB_KEY);
+  } catch (err) {
+    if (!signerOverrideRaw) {
+      console.error(`MISCONFIGURED: could not derive the HSM address from ${PUB_KEY}`);
+      console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(2);
+    }
+    // Under an explicit --signer override the PEM is not needed to name the
+    // expected signer; it is still printed as a cross-check when available.
+  }
+  let expectedSigner;
+  try {
+    expectedSigner = signerOverrideRaw ? getAddress(signerOverrideRaw) : pubKeyAddress;
+  } catch (err) {
+    console.error(`MISCONFIGURED: --signer=${signerOverrideRaw} is not a valid address.`);
+    console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  }
+  const envSigner = process.env.VERDICT_SIGNER_ADDRESS;
+  const envSignerAgrees =
+    !envSigner || getAddress(envSigner) === expectedSigner;
+
+  console.log(`expected signer           ${expectedSigner}  (${signerOverrideRaw ? "--signer override" : "committed .pub"})`);
+  if (signerOverrideRaw && pubKeyAddress) {
+    console.log(`  cross-check committed .pub       ${pubKeyAddress}  ${pubKeyAddress === expectedSigner ? "matches" : "DIFFERS"}`);
+  }
+  if (envSigner) {
+    console.log(`  cross-check VERDICT_SIGNER_ADDRESS  ${getAddress(envSigner)}  ${envSignerAgrees ? "matches" : "DIFFERS"}`);
+  }
+  console.log();
 
   console.log("── CarbonEscrow v2 deployment ───────────────────────────────────");
   console.log(`network   ${chain.name} (${chain.id})`);
@@ -103,7 +192,7 @@ async function main() {
       call("MAX_REVIEW_WINDOW"),
       call("domainSeparator"),
       call("VERDICT_TYPEHASH"),
-      call("acceptedSigners", [getAddress(HSM)]),
+      call("acceptedSigners", [expectedSigner]),
     ]);
   } catch {
     console.log(`\n${mark(false)} This is NOT CarbonEscrow v2 — the v2 functions are absent.`);
@@ -163,7 +252,13 @@ async function main() {
   // *accounted for* is verify-escrow-solvency.mjs's question, not this script's.
   console.log(`totalLocked()               ${locked} units${locked === 0n ? " (nothing in flight)" : ""}`);
   console.log(`owner()                  ${mark(ownerIsHsm)}  ${owner}`);
-  console.log(`acceptedSigners(HSM)     ${mark(signerAccepted)}  ${signerAccepted}`);
+  console.log(
+    `acceptedSigners(signer)  ${mark(signerAccepted)}  ${signerAccepted}  (${signerOverrideRaw ? "from --signer" : "from committed .pub"})`,
+  );
+  const signerIsOwner = owner.toLowerCase() === expectedSigner.toLowerCase();
+  console.log(
+    `signer/owner separation  ${signerIsOwner ? "SAME key (CC-090 open — testnet posture)" : "separated (CC-090)"}`,
+  );
   console.log(`VERDICT_TYPEHASH         ${typehash}`);
   console.log(`domainSeparator()        ${domain}`);
 

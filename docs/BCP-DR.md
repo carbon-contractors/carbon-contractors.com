@@ -162,9 +162,9 @@ backups as one of three traps that would make the claim false; D8 turns that cau
   (`assertSpecCompliance` refuses a spec that includes it). Every object is read back and
   hash-verified before a run reports success; `scripts/audit/verify-backup-export.ts` is the
   independent manual deep-check. Provisioning the bucket and the four Vercel env vars is the PO
-  action in `CC-108` — until then the cron 503s loudly every day, which is the fail-closed
+  action in `CC-109` — until then the cron 503s loudly every day, which is the fail-closed
   posture, not an outage. The **one-time restore test** ("restore-tested at least once before
-  mainnet") remains open and is tracked on `CC-108`.
+  mainnet") remains open and is tracked on `CC-109`.
 
 Retention itself now runs: `/api/cron/retention` fires daily at 03:17 UTC (`CC-087`, PR #147).
 

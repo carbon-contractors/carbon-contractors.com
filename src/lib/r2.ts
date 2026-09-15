@@ -32,7 +32,7 @@
 
 import { createHash, createHmac } from "node:crypto";
 
-/** R2 credentials, created by the PO in the Cloudflare dashboard (CC-108). */
+/** R2 credentials, created by the PO in the Cloudflare dashboard (CC-109). */
 export interface R2Credentials {
   /** 32-hex Cloudflare account id (the one in the dashboard URL). */
   accountId: string;

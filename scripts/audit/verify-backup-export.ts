@@ -26,7 +26,7 @@ import { getObject, R2Credentials } from "../../src/lib/r2";
 function env(name: string): string {
   const v = process.env[name];
   if (!v) {
-    console.error(`missing env ${name} (see .env.example, CC-108 section)`);
+    console.error(`missing env ${name} (see .env.example, CC-109 section)`);
     process.exit(2);
   }
   return v;
