@@ -18,7 +18,6 @@ import { log } from "@/lib/logging";
 import { getConfig } from "@/lib/config";
 import { setSessionCount } from "@/lib/mcp/session-count";
 import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
-import { mcpRateLimiter } from "@/lib/ratelimit";
 
 // ── Session registry ─────────────────────────────────────────────────────────
 
@@ -99,18 +98,12 @@ async function handler(req: NextRequest): Promise<Response> {
   // Purge stale sessions on every request
   purgeExpiredSessions();
 
-// ── Rate limiting (NOR-179) ──────────────────────────────────────────────────
-  const ip = req.headers.get("x-forwarded-for") ?? "127.0.0.1";
-  const { success, retryAfterS } = await mcpRateLimiter.limit(ip);
-  if (!success) {
-    // The limiter already computes when the window reopens; sending it as
-    // Retry-After is what lets an agent back off correctly instead of hammering.
-    // It was previously destructured and dropped, which is the lint warning this
-    // resolves — by using the value rather than deleting it.
-    return jsonRpcError(-32029, "Rate limit exceeded. Try again later.", 429, {
-      "Retry-After": String(retryAfterS),
-    });
-  }
+// ── Rate limiting ──────────────────────────────────────────────────────────
+// Removed (CC-020): middleware.ts enforces the MCP bucket (30/min per IP,
+// Upstash-backed when configured) via @/lib/ratelimit before the request ever
+// reaches this handler. The route previously kept its own mcpRateLimiter call
+// on the same shared limiter — a second increment of the same bucket, which
+// halved the effective limit once middleware delegated to the same object.
 
   if (req.method === "POST") {
     let body: unknown;
