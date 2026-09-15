@@ -155,9 +155,16 @@ backups as one of three traps that would make the claim false; D8 turns that cau
 - **Not backed up, deliberately:** `task_description`, `acceptance_spec`, and anything else the
   `CC-087` retention engine prunes. The accepted cost is that **task content has no restore path.**
   That is the intended trade — the alternative is a backup that silently un-deletes.
-- **Nothing implements this yet.** D8 is a requirement; the Supabase backup configuration that
-  satisfies it is unbuilt, and a backup configured wrong is indistinguishable from one configured
-  right until somebody restores. That belongs with the D8 restore test.
+- **The off-vendor export exists.** `/api/cron/backup-export` (`CC-107`, daily 04:17 UTC) exports
+  the Tier 1 set — `humans`, `notification_channels`, task metadata, the `CC-087` deletion log,
+  and `stake_slashes` once migration 023 is applied — as NDJSON + sha256 manifest to Cloudflare R2
+  via the S3 API. Column allowlists are explicit; task content is structurally absent
+  (`assertSpecCompliance` refuses a spec that includes it). Every object is read back and
+  hash-verified before a run reports success; `scripts/audit/verify-backup-export.ts` is the
+  independent manual deep-check. Provisioning the bucket and the four Vercel env vars is the PO
+  action in `CC-108` — until then the cron 503s loudly every day, which is the fail-closed
+  posture, not an outage. The **one-time restore test** ("restore-tested at least once before
+  mainnet") remains open and is tracked on `CC-108`.
 
 Retention itself now runs: `/api/cron/retention` fires daily at 03:17 UTC (`CC-087`, PR #147).
 

@@ -178,6 +178,22 @@ const envSchema = z.object({
   // (CC-097).
   CRON_SECRET: envOptional(z.string().optional()),
 
+  // ── Off-vendor backup export (CC-107, ADR-0006 D8) ────────────────────────
+  // R2 target for the Tier 1 export cron. All optional with the same
+  // fail-closed polarity as CRON_SECRET: /api/cron/backup-export refuses to
+  // run (503) while any of these is unset rather than running against a
+  // half-configured target — provisioning is the PO action in CC-108.
+  // envOptional so a blanked Vercel field reads as unset, not as a bucket
+  // named "" (CC-097).
+  R2_ACCOUNT_ID: envOptional(z.string().optional()),
+  R2_ACCESS_KEY_ID: envOptional(z.string().optional()),
+  R2_SECRET_ACCESS_KEY: envOptional(z.string().optional()),
+  BACKUP_R2_BUCKET: envOptional(z.string().optional()),
+  // Optional dead-man's-switch URL (healthchecks.io et al). Pinged only on a
+  // fully-verified run, so silence stays the success signal and the external
+  // monitor notices the absence — run-monitors.mjs Path 2 philosophy.
+  BACKUP_HEARTBEAT_URL: envOptional(z.string().optional()),
+
   // ── Rate limiting ─────────────────────────────────────────────────────────
   // Shape shared with getRateLimitConfig() — see rateLimitShape above.
   ...rateLimitShape,
