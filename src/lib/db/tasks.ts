@@ -28,6 +28,12 @@ export interface TaskRecord {
   status: TaskStatus;
   /** When the pending offer lapses; null once accepted or auto-booked (CC-094). */
   offer_expiry_unix: number | null;
+  /**
+   * Once-only marker for the offer_expiring reminder (CC-095, migration 024):
+   * null/false = not yet reminded, true = reminder already dispatched. Set by
+   * the reminder cron only.
+   */
+  offer_reminder_sent: boolean | null;
   tx_hash: string | null;
   escrow_contract: string | null;
   /** Verbatim spec string — the specHash preimage. Never reserialise it (CC-084). */
@@ -213,6 +219,82 @@ export async function lapseExpiredOffers(): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+/**
+ * How long before an offer's expiry the offer_expiring reminder fires
+ * (CC-095). Deliberately inside the D4 lower bound (15 minutes) but above the
+ * cron interval (1 hour), so a reminder can only ever be a genuine "act now"
+ * signal: an offer created with the minimum 15-minute expiry is already past
+ * the reminder threshold when the first hourly scan sees it, and never
+ * receives a redundant ping.
+ */
+export const OFFER_REMINDER_LEAD_SECONDS = 2 * 60 * 60;
+
+/**
+ * Pending offers whose expiry falls inside the reminder window and whose
+ * reminder has not been sent (CC-095). The cron's candidate read — the
+ * partial index from migration 024 keeps this an index probe.
+ *
+ * Content columns are deliberately NOT selected: the reminder payload is
+ * built from ids, amounts and the expiry alone. A description would be task
+ * content travelling into a cron log line (ADR-0002 D4).
+ */
+export async function getOffersNeedingReminder(
+  nowUnixSeconds: number,
+): Promise<OfferReminderCandidate[]> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(
+      "payment_request_id,to_human_wallet,amount_usdc,offer_expiry_unix",
+    )
+    .eq("status", "pending")
+    .gt("offer_expiry_unix", nowUnixSeconds)
+    .lte("offer_expiry_unix", nowUnixSeconds + OFFER_REMINDER_LEAD_SECONDS)
+    .neq("offer_reminder_sent", true);
+
+  if (error) throw new Error(`getOffersNeedingReminder failed: ${error.message}`);
+  // The .gt() above already excludes NULL expiries (SQL comparisons on NULL
+  // are not true); the filter + cast narrows the row type to match.
+  return (data ?? []).filter(
+    (row) => row.offer_expiry_unix !== null,
+  ) as OfferReminderCandidate[];
+}
+
+/** A reminder candidate — an expiry inside the window, hence non-null. */
+export interface OfferReminderCandidate {
+  payment_request_id: string;
+  to_human_wallet: string;
+  amount_usdc: number;
+  offer_expiry_unix: number;
+}
+
+/**
+ * Compare-and-set the reminder marker (CC-095, migration 024). Returns true
+ * only when this caller's write won the race — two concurrent cron fires
+ * (Vercel can overlap runs on the hour boundary) will not both send.
+ *
+ * Guarded on status='pending' too: if the worker accepted or the offer lapsed
+ * between the candidate read and this write, the reminder is moot and the
+ * marker stays untouched — no reminder can ever fire for a dead offer.
+ */
+export async function markOfferReminderSent(
+  paymentRequestId: string,
+): Promise<boolean> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({ offer_reminder_sent: true, updated_at: new Date().toISOString() })
+    .eq("payment_request_id", paymentRequestId)
+    .eq("status", "pending")
+    .neq("offer_reminder_sent", true)
+    .select("payment_request_id");
+
+  if (error) throw new Error(`markOfferReminderSent failed: ${error.message}`);
+  return (data ?? []).length > 0;
 }
 
 /**

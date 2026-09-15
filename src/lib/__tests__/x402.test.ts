@@ -220,6 +220,7 @@ describe("x402 idempotency passthrough and replay (CC-046)", () => {
     deadline_unix: 1850000000,
     status: "pending" as const,
     offer_expiry_unix: 1840000000,
+    offer_reminder_sent: null,
     tx_hash: "",
     escrow_contract: "0x1234567890123456789012345678901234567890",
     acceptance_spec: VALID_SPEC,

@@ -83,6 +83,23 @@ export function formatMessage(
           `Payment${amountClause(payload)} for task (${id}) is claimable. ` +
           `Settlement is pull-payment — claim it from your dashboard before the funds sit unclaimed.`,
       };
+    case "task_accepted":
+      return {
+        title: "Offer accepted",
+        body: `You accepted task (${id}). It becomes active when the hiring agent funds the escrow.`,
+      };
+    case "task_declined":
+      return {
+        title: "Offer declined",
+        body: `You declined task (${id}). This is just a confirmation — no action needed.`,
+      };
+    case "auto_booking_disabled":
+      return {
+        title: "Auto-booking disabled",
+        body:
+          `Auto-booking was switched off after repeated missed offers or expiries ` +
+          `(reason: ${payload.category ?? "inactivity"}). You can re-enable it anytime from your dashboard.`,
+      };
   }
 }
 

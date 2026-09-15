@@ -71,6 +71,12 @@ export interface Database {
            * auto-accepted tasks and on anything past the offer stage.
            */
           offer_expiry_unix: number | null;
+          /**
+           * offer_expiring reminder marker (CC-095, migration 024): null/false
+           * = not yet reminded, true = dispatched. Writable only by the
+           * reminder cron's compare-and-set.
+           */
+          offer_reminder_sent: boolean | null;
           tx_hash: string | null;
           escrow_contract: string | null;
           acceptance_spec: string | null;
@@ -129,6 +135,9 @@ export interface Database {
           deadline_unix?: number;
           status?: TaskStatus;
           offer_expiry_unix?: number | null;
+          // Reminder marker (CC-095, migration 024): written only by the
+          // reminder cron's compare-and-set, one row at a time.
+          offer_reminder_sent?: boolean | null;
           tx_hash?: string | null;
           escrow_contract?: string | null;
           // acceptance_spec / spec_hash / spec_schema_version are deliberately absent:

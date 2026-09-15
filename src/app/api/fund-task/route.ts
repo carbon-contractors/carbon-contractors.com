@@ -35,6 +35,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTaskByPaymentId, markTaskFunded } from "@/lib/db/tasks";
 import { getOnChainTask, getEscrowConfig, getCurrentBlockTimestamp } from "@/lib/contracts/escrow";
+import { notifyContractor } from "@/lib/notifications/dispatch";
+import { getHumanByWallet } from "@/lib/db/whitepages";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
 
@@ -165,6 +167,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       to_worker: task.to_human_wallet,
       funded_at: fundedAt,
     });
+
+    // CC-095: this is the moment task_funded is true — the chain says Funded
+    // and the row just flipped to active. notifyContractor never throws, so
+    // this cannot fail the confirmation the agent is waiting on; the worker
+    // lookup adds a read but the deadline is on the task row either way.
+    try {
+      const worker = await getHumanByWallet(task.to_human_wallet);
+      if (worker) {
+        await notifyContractor(worker.id, {
+          type: "task_funded",
+          payment_request_id,
+          amount_usdc: task.amount_usdc,
+          deadline_unix: task.deadline_unix,
+        });
+      }
+    } catch {
+      // getHumanByWallet throwing must not 500 a completed confirmation.
+      // notifyContractor already contains its own faults; this belt catches
+      // the lookup. The funding stands.
+    }
 
     return NextResponse.json({
       ok: true,

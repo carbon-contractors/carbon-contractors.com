@@ -35,6 +35,16 @@ vi.mock("@/lib/contracts/escrow", () => ({
 
 vi.mock("@/lib/logging", () => ({ log: vi.fn() }));
 
+const mockGetHumanByWallet = vi.fn();
+vi.mock("@/lib/db/whitepages", () => ({
+  getHumanByWallet: (...args: unknown[]) => mockGetHumanByWallet(...args),
+}));
+
+const mockNotifyContractor = vi.fn();
+vi.mock("@/lib/notifications/dispatch", () => ({
+  notifyContractor: (...args: unknown[]) => mockNotifyContractor(...args),
+}));
+
 const WORKER = "0xworkerworkerworkerworkerworkerworkerwo";
 const AGENT = "0xagentagentagentagentagentagentagentagen";
 
@@ -78,6 +88,10 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     });
     mockMarkTaskFunded.mockResolvedValue(undefined);
     mockGetCurrentBlockTimestamp.mockResolvedValue(1_700_000_000);
+    // CC-095: worker lookup succeeds by default so the funding notification
+    // path runs; the task fixture carries a deadline for the payload.
+    mockGetHumanByWallet.mockResolvedValue({ id: "worker-uuid", wallet: WORKER });
+    mockNotifyContractor.mockResolvedValue({ notified_channels: 1 });
   });
 
   it("activates a task only after reading Funded from the chain", async () => {
@@ -93,6 +107,34 @@ describe("POST /api/fund-task (CC-081 Defects 1+3)", () => {
     expect(json.on_chain_state).toBe("Funded");
     expect(mockGetOnChainTask).toHaveBeenCalledWith("pr_1");
     expect(mockMarkTaskFunded).toHaveBeenCalledWith("pr_1", 1_700_000_000);
+
+    // CC-095: chain-confirmed funding is the task_funded moment — the worker
+    // is told here, not at hire time.
+    expect(mockNotifyContractor).toHaveBeenCalledWith(
+      "worker-uuid",
+      expect.objectContaining({ type: "task_funded", payment_request_id: "pr_1" }),
+    );
+  });
+
+  it("does not notify task_funded when activation is refused", async () => {
+    mockGetOnChainTask.mockResolvedValue(fundedOnChainTask({ state: "None", stateRaw: 0 }));
+
+    const { POST } = await import("@/app/api/fund-task/route");
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(409);
+    expect(mockNotifyContractor).not.toHaveBeenCalled();
+  });
+
+  it("does not 500 when the worker lookup fails — the confirmation stands", async () => {
+    mockGetOnChainTask.mockResolvedValue(fundedOnChainTask());
+    mockGetHumanByWallet.mockRejectedValue(new Error("supabase down"));
+
+    const { POST } = await import("@/app/api/fund-task/route");
+    const res = await POST(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(mockNotifyContractor).not.toHaveBeenCalled();
   });
 
   it("refuses to activate when the on-chain task does not exist yet", async () => {

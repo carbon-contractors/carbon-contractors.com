@@ -13,6 +13,9 @@
     },
     "src/app/api/cron/backup-export/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/offer-reminders/route.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -23,6 +26,10 @@
     {
       "path": "/api/cron/backup-export",
       "schedule": "17 4 * * *"
+    },
+    {
+      "path": "/api/cron/offer-reminders",
+      "schedule": "0 * * * *"
     }
   ]
 }

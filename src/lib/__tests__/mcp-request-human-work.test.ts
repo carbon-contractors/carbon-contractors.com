@@ -431,6 +431,10 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
 
     const types = mockNotifyContractor.mock.calls.map(([, ev]) => ev.type);
     expect(types).toContain("offer_received");
-    expect(types).toContain("task_funded");
+    // CC-095 wiring: task_funded no longer fires at hire time — at hire no
+    // money is locked yet. It fires when /api/fund-task confirms funding
+    // on-chain. The auto-booked hire itself is one event, like the manual one.
+    expect(types).not.toContain("task_funded");
+    expect(mockNotifyContractor).toHaveBeenCalledTimes(1);
   });
 });

@@ -21,6 +21,8 @@ import { sessionWalletFromRequest } from "@/lib/auth/session";
 import { isValidWalletAddress } from "@/lib/validation";
 import { computeAndSignVerdict, VerdictInputError } from "@/lib/contracts/verdict-service";
 import { serializeVerdict } from "@/lib/contracts/verdict-json";
+import { notifyContractor } from "@/lib/notifications/dispatch";
+import { getHumanByWallet } from "@/lib/db/whitepages";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
 
@@ -103,6 +105,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       caller: callerWallet,
       passed: verdict.passed,
     });
+
+    // CC-095: tell the worker their verdict is signed — passing means the
+    // pull-payment window is open (ADR-0001 A1.2). Best-effort via the
+    // never-throw seam; the worker lookup failing must not fail a verdict
+    // the caller already holds.
+    try {
+      const worker = await getHumanByWallet(task.to_human_wallet);
+      if (worker) {
+        await notifyContractor(worker.id, {
+          type: "verdict_signed",
+          payment_request_id,
+          passed: verdict.passed,
+          amount_usdc: task.amount_usdc,
+        });
+        if (verdict.passed) {
+          await notifyContractor(worker.id, {
+            type: "payment_claimable",
+            payment_request_id,
+            amount_usdc: task.amount_usdc,
+          });
+        }
+      }
+    } catch {
+      // Contained — see comment above.
+    }
 
     return NextResponse.json({
       ok: true,

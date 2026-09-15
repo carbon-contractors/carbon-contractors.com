@@ -50,6 +50,7 @@ function baseTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     spec_schema_version: 1,
     accepted_description_hash: null,
     offer_expiry_unix: null,
+    offer_reminder_sent: null,
     funded_at: "2026-08-20T00:00:00.000Z",
     content_purged_at: null,
     content_purge_rule: null,
