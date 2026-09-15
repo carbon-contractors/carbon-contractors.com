@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useEffect, useState } from "react";
+import { useAccount, useConfig, useConnect, useDisconnect } from "wagmi";
+import type { Connector } from "wagmi";
 import { useResumableConnector } from "@/lib/wallet/useResumableConnector";
 import { requestAccountSwitch } from "@/lib/wallet/requestAccountSwitch";
+import {
+  clearRecentWalletId,
+  setRecentWalletId,
+} from "@/lib/wallet/recentWallet";
 import styles from "./WalletConnectButton.module.css";
 
 function truncateAddress(addr: string): string {
@@ -38,10 +43,30 @@ export default function WalletConnectButton({
   onAction,
   dropdownAlign = "right",
 }: WalletConnectButtonProps) {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector: activeConnector } = useAccount();
   const { connect, connectors, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
+  const config = useConfig();
   const resumable = useResumableConnector();
+
+  /**
+   * Record a successful connection in our own marker (on top of wagmi's
+   * recentConnectorId) — the thing that lets useResumableConnector offer
+   * resume after a reload even when the Base Account SDK's own session
+   * record has been wiped (CC-071). Watching the connected state rather
+   * than writing at click time means a rejected connect leaves no marker,
+   * so we never advertise resuming a session that never existed.
+   */
+  useEffect(() => {
+    if (isConnected && activeConnector) {
+      void setRecentWalletId(config.storage, activeConnector.id);
+    }
+  }, [isConnected, activeConnector, config.storage]);
+
+  /** Every connect path funnels through here: picker, resume, post-switch. */
+  function connectWith(connector: Connector) {
+    connect({ connector });
+  }
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -66,7 +91,7 @@ export default function WalletConnectButton({
     try {
       const result = await requestAccountSwitch(resumable);
       if (result === "prompted") {
-        connect({ connector: resumable });
+        connectWith(resumable);
         onAction?.();
         return;
       }
@@ -99,6 +124,10 @@ export default function WalletConnectButton({
             <button
               className={styles.walletDisconnect}
               onClick={() => {
+                // Explicit disconnect means what it says: the next visit starts
+                // from "Connect Wallet", not an offer to resume the session the
+                // user just chose to end (CC-071).
+                void clearRecentWalletId(config.storage);
                 disconnect();
                 setDropdownOpen(false);
                 onAction?.();
@@ -121,7 +150,7 @@ export default function WalletConnectButton({
       <div className={styles.wallet}>
         <button
           className={styles.walletButton}
-          onClick={() => connect({ connector: resumable })}
+          onClick={() => connectWith(resumable)}
           disabled={isPending}
         >
           {isPending ? "Resuming..." : "Resume Session"}
@@ -154,7 +183,7 @@ export default function WalletConnectButton({
               key={connector.uid}
               className={styles.walletDropdownItem}
               onClick={() => {
-                connect({ connector });
+                connectWith(connector);
                 setDropdownOpen(false);
                 onAction?.();
               }}
