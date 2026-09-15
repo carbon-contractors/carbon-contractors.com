@@ -15,6 +15,7 @@
     "monitors": "node --env-file-if-exists=.env.local scripts/audit/run-monitors.mjs",
     "monitors:list": "node scripts/audit/run-monitors.mjs --list",
     "check:closure": "node scripts/check-closure.mjs",
+    "verify:backup": "tsx --env-file-if-exists=.env.local scripts/audit/verify-backup-export.ts",
     "compile": "hardhat compile",
     "gen:abi": "node scripts/gen-abi.mjs",
     "deploy:sepolia": "hardhat run scripts/deploy/escrow.ts --network baseSepolia",

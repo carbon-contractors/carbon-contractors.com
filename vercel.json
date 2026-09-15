@@ -10,12 +10,19 @@
     },
     "src/app/api/cron/retention/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/backup-export/route.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
     {
       "path": "/api/cron/retention",
       "schedule": "17 3 * * *"
+    },
+    {
+      "path": "/api/cron/backup-export",
+      "schedule": "17 4 * * *"
     }
   ]
 }

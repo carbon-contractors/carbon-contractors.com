@@ -168,6 +168,33 @@ export interface Database {
         };
         Relationships: [];
       };
+      // CC-107: the CC-087 deletion record (migration 019). D9 requires this
+      // durable and auditable; the off-vendor export reads it, so it needs a
+      // type. Service-role only.
+      task_content_deletion_log: {
+        Row: {
+          id: string;
+          task_id: string;
+          payment_request_id: string | null;
+          retention_rule_version: string | null;
+          deleted_at: string;
+        };
+        Insert: {
+          id?: string;
+          task_id: string;
+          payment_request_id?: string | null;
+          retention_rule_version?: string | null;
+          deleted_at?: string;
+        };
+        Update: {
+          id?: string;
+          task_id?: string;
+          payment_request_id?: string | null;
+          retention_rule_version?: string | null;
+          deleted_at?: string;
+        };
+        Relationships: [];
+      };
       used_nonces: {
         Row: {
           nonce: string;
