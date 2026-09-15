@@ -94,7 +94,7 @@ describe("GET /api/cron/backup-export (CC-107)", () => {
     expect(mockExport).not.toHaveBeenCalled();
   });
 
-  it("refuses with 503 and a CC-108 pointer when the R2 target is unconfigured", async () => {
+  it("refuses with 503 and a CC-109 pointer when the R2 target is unconfigured", async () => {
     // Authenticated correctly — the missing piece is provisioning, not auth.
     mockConfig = { ...FULL_CONFIG, BACKUP_R2_BUCKET: undefined };
     const { GET } = await import("@/app/api/cron/backup-export/route");
@@ -102,7 +102,7 @@ describe("GET /api/cron/backup-export (CC-107)", () => {
     const res = await GET(makeRequest(`Bearer ${SECRET}`));
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error?: string };
-    expect(body.error).toMatch(/CC-108/);
+    expect(body.error).toMatch(/CC-109/);
     expect(mockExport).not.toHaveBeenCalled();
   });
 

@@ -25,7 +25,7 @@
  * 1. CRON_SECRET — unset (or blank) means refuse, not run. An unset secret is
  *    a misconfiguration, not permission.
  * 2. R2 target — unset (or blank) means refuse with 503 and a pointer to
- *    CC-108, not a partial run. Until the PO provisions the bucket and the
+ *    CC-109, not a partial run. Until the PO provisions the bucket and the
  *    four env vars, this endpoint does nothing except say so. That is the
  *    correct posture for a pipeline whose credentials do not exist yet: a
  *    scheduled task that fails loudly every day until it is configured beats
@@ -94,14 +94,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   if (!r2Configured) {
-    // Provisioning is a PO action (CC-108). Refuse loudly, daily, until done.
+    // Provisioning is a PO action (CC-109). Refuse loudly, daily, until done.
     log("error", "backup_export_target_not_configured", {});
     return NextResponse.json(
       {
         ok: false,
         error:
           "R2 backup target not configured (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, " +
-          "R2_SECRET_ACCESS_KEY, BACKUP_R2_BUCKET). See CC-108 — refusing to run.",
+          "R2_SECRET_ACCESS_KEY, BACKUP_R2_BUCKET). See CC-109 — refusing to run.",
       },
       { status: 503 },
     );

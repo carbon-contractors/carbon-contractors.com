@@ -48,7 +48,7 @@
  * restore can be verified against the manifest independently of R2's own
  * integrity story. This is D8's "restore-tested" instinct applied on every
  * run rather than once before mainnet; the one-time full restore test is
- * still tracked (CC-108 acceptance).
+ * still tracked (CC-109 acceptance).
  *
  * ## Failure visibility
  *
@@ -318,7 +318,7 @@ function r2CredentialsFromConfig(): R2Credentials & { bucket: string; heartbeat?
   if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !BACKUP_R2_BUCKET) {
     throw new Error(
       "R2 backup target not configured: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, " +
-        "R2_SECRET_ACCESS_KEY and BACKUP_R2_BUCKET must all be set (CC-108). " +
+        "R2_SECRET_ACCESS_KEY and BACKUP_R2_BUCKET must all be set (CC-109). " +
         "Refusing to run a partial export.",
     );
   }
