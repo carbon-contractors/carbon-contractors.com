@@ -3,24 +3,30 @@
 import { useEffect, useState } from "react";
 import { useAccount, useConfig } from "wagmi";
 import type { Connector } from "wagmi";
+import { resolveResumableConnector } from "@/lib/wallet/resolveResumableConnector";
 
 /**
- * Finds a previously-authorized connector without ever calling `connect()` — so nothing
- * opens a popup on page load.
+ * Finds a connector to resume a previous session with, without ever calling
+ * `connect()` unprompted — so nothing opens a popup on page load.
  *
- * wagmi's default `reconnectOnMount` behaviour (see `WagmiProvider` in `providers.tsx`,
- * where it's disabled) calls `connector.isAuthorized()` and then, if true, calls
- * `connector.connect({ isReconnecting: true })` anyway. For `baseAccount`, `connect()`
- * unconditionally fires the SDK's `wallet_connect` RPC, which opens a popup window — and an
- * automatic reconnect on page load is not a user gesture, so mobile browsers block that
- * popup. The result: a real, previously-authorized session gets silently wiped out on every
- * refresh, which reads to a user as "the connect button re-triggers the connection request
- * every time" (CC-071).
+ * wagmi's default `reconnectOnMount` behaviour (see `WagmiProvider` in
+ * `providers.tsx`, where it's disabled) calls `connector.isAuthorized()` and
+ * then, if true, calls `connector.connect({ isReconnecting: true })` anyway.
+ * For `baseAccount`, `connect()` unconditionally fires the SDK's
+ * `wallet_connect` RPC, which opens a popup window — and an automatic
+ * reconnect on page load is not a user gesture, so mobile browsers block
+ * that popup. The result: a real, previously-authorized session gets silently
+ * wiped out on every refresh, which reads to a user as "the connect button
+ * re-triggers the connection request every time" (CC-071).
  *
- * This checks `isAuthorized()` only (a plain read-only call, e.g. `eth_accounts` for
- * `baseAccount` — no popup) and returns the connector to resume, if any, so the UI can offer
- * a one-tap "Resume session" action. That tap is a real user gesture, so if the connector's
- * own `connect()` does need to open a popup, it's allowed to.
+ * The two-tier decision (live `isAuthorized()` session first, then the
+ * app-owned `cc.recentWallet` marker) lives in resolveResumableConnector.ts,
+ * where it is unit-tested without React. This hook just runs it on mount and
+ * holds the result for the UI.
+ *
+ * Returns the connector to resume with, if any, so the UI can offer a
+ * one-tap "Resume Session" action instead of re-running the whole
+ * first-visit flow.
  */
 export function useResumableConnector(): Connector | null {
   const config = useConfig();
@@ -36,33 +42,11 @@ export function useResumableConnector(): Connector | null {
     let cancelled = false;
 
     (async () => {
-      let recentConnectorId: string | undefined;
-      try {
-        recentConnectorId = await config.storage?.getItem("recentConnectorId") ?? undefined;
-      } catch {
-        // storage unavailable (e.g. private browsing) -- fall through, try connectors in order
-      }
-
-      const ordered = recentConnectorId
-        ? [
-            ...config.connectors.filter((c) => c.id === recentConnectorId),
-            ...config.connectors.filter((c) => c.id !== recentConnectorId),
-          ]
-        : config.connectors;
-
-      for (const connector of ordered) {
-        if (cancelled) return;
-        try {
-          if (await connector.isAuthorized()) {
-            if (!cancelled) setResumable(connector);
-            return;
-          }
-        } catch {
-          // this connector can't tell us -- try the next one
-        }
-      }
-
-      if (!cancelled) setResumable(null);
+      const result = await resolveResumableConnector(
+        config.connectors,
+        config.storage,
+      );
+      if (!cancelled) setResumable(result);
     })();
 
     return () => {
