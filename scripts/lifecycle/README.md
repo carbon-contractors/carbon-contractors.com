@@ -123,6 +123,66 @@ config.
   work. Treat its first output with suspicion and reconcile against
   `verify-escrow-solvency.mjs`, which every run invokes.
 
+## CC-032 — Discovery-stage harness (off-chain, no funds)
+
+CC-032 owns the Discovery stage of the split lifecycle (2026-08-11 triage): `register → discover
+via MCP (search_whitepages, get_contractor) → worker findable with correct categories, rate and
+availability`. Funding is CC-077 above, settlement CC-078, disputes CC-079.
+
+Nothing in this stage touches the chain: registration is a signed message (the server verifies it
+with its own public client), profile updates likewise, and the MCP read tools need no
+authentication. The harness therefore needs NO RPC URL and NO funded wallet.
+
+### Run it
+
+```bash
+# Plan only — validates env, contacts nothing:
+node scripts/lifecycle/discovery-stage.mjs --dry-run
+
+# The systematic pass, live, against the deployment named by NEXT_PUBLIC_BASE_URL:
+node scripts/lifecycle/discovery-stage.mjs --execute --generate-wallet
+
+# Extra cases — one flag per run:
+node scripts/lifecycle/discovery-stage.mjs --execute --generate-wallet --case-already-registered
+node scripts/lifecycle/discovery-stage.mjs --execute --generate-wallet --case-profile-update
+```
+
+`--generate-wallet` mints an ephemeral throwaway EOA (preferred — nothing lands on disk). Without
+it, `DISCOVERY_WALLET_PRIVATE_KEY` must be set: a **throwaway** key, never `DEPLOYER_PRIVATE_KEY`
+(that would make the platform owner discoverable as a worker) and never `AGENT_WALLET_PRIVATE_KEY`
+(couples a test row to the CC-077 money-path wallet). The key is never printed or logged.
+
+Target: `NEXT_PUBLIC_BASE_URL` (e.g. `https://www.carbon-contractors.com` — **note the www**, the
+apex answers 307). `/api/*` is public and bypasses the coming-soon gate.
+
+### What the systematic pass proves
+
+1. **Register** — a fresh wallet signs `{categories, rate_usdc, nonce, timestamp}`; server returns
+   `200 {ok:true, wallet}` (normalised lowercase).
+2. **search_whitepages** — the new worker appears in BOTH registered categories with wallet,
+   categories, rate, availability and reputation_score, identically in each.
+3. **get_contractor by wallet** — mixed-case input (CC-002 heritage: lookups normalise casing);
+   returns the UUID, full profile, `accepts_auto_booking`.
+4. **get_contractor by UUID** — identical profile to the wallet lookup.
+5. **GET /api/profile** — the plain HTTP surface agrees with MCP.
+6. **Negative control** — an unregistered wallet gets `CONTRACTOR_NOT_FOUND` (MCP) and `404`
+   (HTTP): the reads answer from the registry, not a cache.
+7. **Hygiene** — the row is left `offline` (visible in the whitepages, unbookable), and the run
+   prints the wallet address so the row can be identified in any later cleanup.
+
+Extra cases: `--case-already-registered` (re-registration upserts — onConflict wallet — and the
+old category stops matching), `--case-profile-update` (signed `profile-update` PATCH propagates
+to every read surface).
+
+Note: the MCP endpoint is rate-limited (30/min per IP) and `/api/*` 60/min — a full pass makes
+about a dozen calls, well inside the limits. Transport-level failures (a dropped or expired MCP
+session) are retried once via session re-initialisation before being reported — a dropped
+session is not a tool verdict.
+
+### Exit codes
+
+`0` PASS · `1` FAIL or TRANSIENT (deployment unreachable) · `2` bad args/config.
+
 ## Layout
 
 ```
@@ -132,5 +192,9 @@ scripts/lifecycle/
   args.mjs            CLI parsing (pure, unit-tested)
   plan.mjs            plan build/render — the same object --dry-run prints and --execute runs
   funding-stage.mjs   CLI entry (self-executing; live runner lives here)
+  discovery-config.mjs   CC-032: env validation, no RPC needed (pure, unit-tested)
+  discovery-cases.mjs    CC-032: case registry (pure, unit-tested)
+  discovery-args.mjs     CC-032: CLI parsing (pure, unit-tested)
+  discovery-stage.mjs    CC-032: CLI entry (self-executing; off-chain live runner)
   __tests__/          hermetic vitest tests (offline logic only, CC-060)
 ```
