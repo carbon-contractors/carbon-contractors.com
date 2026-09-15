@@ -64,6 +64,7 @@ const Route = {
   ReviewElapsed: 1n,
   PassingVerdict: 2n,
   ArbitrationTimeout: 3n,
+  OwnerEmergency: 4n,
 } as const;
 
 const VERDICT_TYPES = {
@@ -599,6 +600,87 @@ describe("CarbonEscrow — completeTask", () => {
       escrow,
       "InvalidState",
     );
+  });
+});
+
+describe("CarbonEscrow — completeTaskByOwner (CC-049, scoped into CC-034)", () => {
+  it("pays the worker on a Delivered task whose agent key is gone — the CC-049 case", async () => {
+    // The recovery runbook's §7 scenario: work was delivered, then the agent's release
+    // path disappears (key rotated/lost). Before this function the only route out was
+    // dispute → resolveDispute — an owner ruling dressed as an operational recovery.
+    const { escrow, usdc, agent, worker, deployer } = await loadFixture(deployFixture);
+    await fundAndSubmit(escrow, agent, worker);
+
+    const before = await usdc.balanceOf(worker.address);
+    await expect(escrow.connect(deployer).completeTaskByOwner(TASK_ID))
+      .to.emit(escrow, "TaskCompleted")
+      .withArgs(TASK_ID, worker.address, AMOUNT, Route.OwnerEmergency);
+
+    expect(await usdc.balanceOf(worker.address)).to.equal(before + AMOUNT);
+    expect(await escrow.totalLocked()).to.equal(0n);
+    expect((await escrow.getTask(TASK_ID)).state).to.equal(State.Completed);
+  });
+
+  it("works from Funded as well, mirroring completeTask's early-pay", async () => {
+    const { escrow, usdc, agent, worker, deployer } = await loadFixture(deployFixture);
+    await fund(escrow, agent, worker);
+
+    const before = await usdc.balanceOf(worker.address);
+    await escrow.connect(deployer).completeTaskByOwner(TASK_ID);
+    expect(await usdc.balanceOf(worker.address)).to.equal(before + AMOUNT);
+  });
+
+  it("is owner-only — the agent, the worker, and an outsider are all rejected", async () => {
+    const { escrow, agent, worker, outsider } = await loadFixture(deployFixture);
+    await fundAndSubmit(escrow, agent, worker);
+    for (const caller of [agent, worker, outsider]) {
+      await expect(escrow.connect(caller).completeTaskByOwner(TASK_ID)).to.be.revertedWithCustomError(
+        escrow,
+        "OwnableUnauthorizedAccount",
+      );
+    }
+  });
+
+  it("cannot pre-empt an active dispute or arbitration", async () => {
+    // Disputed and Arbitrating are owned by resolveDispute / releaseAfterArbitration.
+    // An emergency path that could settle mid-arbitration would let the owner overrule
+    // a pending ruling — exactly the concentration ADR-0001 D2 removed.
+    const { escrow, agent, worker, verdictSigner, deployer } = await loadFixture(deployFixture);
+    await fundAndSubmit(escrow, agent, worker);
+
+    const failing = buildVerdict({ passed: false });
+    const sig = await signVerdict(escrow, verdictSigner, failing);
+    await escrow.connect(agent).disputeTask(TASK_ID, asTuple(failing) as never, sig);
+
+    await expect(
+      escrow.connect(deployer).completeTaskByOwner(TASK_ID),
+    ).to.be.revertedWithCustomError(escrow, "InvalidState");
+
+    await escrow.connect(deployer).beginArbitration(TASK_ID);
+    await expect(
+      escrow.connect(deployer).completeTaskByOwner(TASK_ID),
+    ).to.be.revertedWithCustomError(escrow, "InvalidState");
+  });
+
+  it("cannot double-pay after completeTask, and vice versa", async () => {
+    const { escrow, agent, worker, deployer } = await loadFixture(deployFixture);
+    await fundAndSubmit(escrow, agent, worker);
+    await escrow.connect(agent).completeTask(TASK_ID);
+    await expect(
+      escrow.connect(deployer).completeTaskByOwner(TASK_ID),
+    ).to.be.revertedWithCustomError(escrow, "InvalidState");
+  });
+
+  it("pays task.worker, never an arbitrary destination (ADR-0001 D9 in test form)", async () => {
+    // There is no path, owner included, to send this anywhere but the two addresses
+    // fixed at funding. This test exists so that a future edit adding a recipient
+    // argument has to delete it.
+    const { escrow, usdc, agent, worker, deployer, outsider } = await loadFixture(deployFixture);
+    await fundAndSubmit(escrow, agent, worker);
+
+    await escrow.connect(deployer).completeTaskByOwner(TASK_ID);
+    expect(await usdc.balanceOf(worker.address)).to.equal(AMOUNT);
+    expect(await usdc.balanceOf(outsider.address)).to.equal(0n);
   });
 });
 

@@ -173,6 +173,19 @@ export const CARBON_ESCROW_ABI = [
         "internalType": "bytes32",
         "name": "taskId",
         "type": "bytes32"
+      }
+    ],
+    "name": "completeTaskByOwner",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "taskId",
+        "type": "bytes32"
       },
       {
         "internalType": "address",
