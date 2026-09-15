@@ -4,7 +4,7 @@
  * The chain records THAT a slash happened; this table records WHICH dispute it
  * resolved. Rows are attestations written by the platform at resolution time
  * (the owner's recorder script); tx_hash is unique, so one on-chain slash can
- * never become two rows. See migration 023 for the reasoning.
+ * never become two rows. See migration 024 for the reasoning.
  */
 
 import { getSupabaseAdmin } from "./client";

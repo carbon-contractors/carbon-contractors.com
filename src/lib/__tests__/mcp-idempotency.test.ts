@@ -195,7 +195,7 @@ describe("request_human_work idempotency (CC-046)", () => {
   });
 
   it("recovers a concurrent insert conflict by replaying the winner (23505)", async () => {
-    // The TTL lookup missed, but migration 020's unique index means a racing
+    // The TTL lookup missed, but migration 021's unique index means a racing
     // duplicate insert fails — the loser must replay the winner's row, not error.
     mockFindTaskByIdempotencyKey
       .mockResolvedValueOnce(null)

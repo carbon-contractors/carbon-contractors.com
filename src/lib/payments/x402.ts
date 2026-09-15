@@ -51,7 +51,7 @@ export interface X402PaymentRequest {
   offer_expiry_seconds?: number;
   /**
    * CC-046: caller-scoped dedup key. Stored verbatim; unique per agent by
-   * migration 020, so a concurrent duplicate insert fails (23505) and the
+   * migration 021, so a concurrent duplicate insert fails (23505) and the
    * caller replays the surviving row instead of double-creating.
    */
   idempotency_key?: string;

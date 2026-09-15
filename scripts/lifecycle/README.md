@@ -55,7 +55,7 @@ unset (CC-097).
 `request_human_work` needs a running, authenticated MCP session (wallet challenge), so run it
 yourself (your MCP client against the server) and resume the harness with
 `--task-id=<payment_request_id>` taken **from that response**. Do not scrape `GET /api/tasks`:
-`payment_request_id` is null for unfunded rows (migration 021), deliberately.
+`payment_request_id` is null for unfunded rows (migration 022), deliberately.
 
 The quote response also carries `worker`, `amount_wei`, `deadline_unix`, `review_window_seconds`
 and `spec_hash` — pass what you can via the `--worker`, `--amount-usdc`, `--spec-hash` flags

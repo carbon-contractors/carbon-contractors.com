@@ -1,4 +1,4 @@
--- 021_hide_live_offer_payment_ids.sql
+-- 022_hide_live_offer_payment_ids.sql
 --
 -- Stop publishing the payment_request_id of a task that has not been funded yet.
 --

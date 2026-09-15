@@ -1,4 +1,4 @@
--- 020_task_idempotency_key.sql
+-- 021_task_idempotency_key.sql
 -- CC-046: idempotent request_human_work. An agent retrying a hire after a network
 -- failure must get the original task back, not a second task row it might also
 -- fund. The key is caller-scoped: (from_agent_wallet, idempotency_key).

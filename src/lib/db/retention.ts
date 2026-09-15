@@ -19,7 +19,7 @@
  * durable record, the DB a working set). evidence_url and verdict breakdowns
  * have no columns to clear: the platform never stores them (D3 — the checker
  * streams from the agent's bucket and the verdict service is stateless), and
- * the place to add them if that ever changes is migration 019's RPC, not here.
+ * the place to add them if that ever changes is migration 020's RPC, not here.
  *
  * Scheduling is out of scope for this module — a cron/route invocation wires
  * `pruneExpiredTaskContent` the same way the CC-085 monitors are scheduled.
@@ -65,7 +65,7 @@ export interface RetentionCandidate {
   payment_request_id: string;
   status: TaskStatus;
   /** Proxy for "entered terminal state": every status transition bumps it and
-   *  nothing else writes a terminal task. See migration 019's note. */
+   *  nothing else writes a terminal task. See migration 020's note. */
   updated_at: string;
   content_purged_at: string | null;
 }

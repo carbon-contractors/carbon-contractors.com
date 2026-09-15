@@ -1,4 +1,4 @@
--- 022_worker_sessions.sql
+-- 023_worker_sessions.sql
 --
 -- NOR-322 / ADR-0009 — server-side sessions: sign once at connect, then only
 -- when the chain is touched.

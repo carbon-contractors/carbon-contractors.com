@@ -157,7 +157,7 @@ backups as one of three traps that would make the claim false; D8 turns that cau
   That is the intended trade — the alternative is a backup that silently un-deletes.
 - **The off-vendor export exists.** `/api/cron/backup-export` (`CC-107`, daily 04:17 UTC) exports
   the Tier 1 set — `humans`, `notification_channels`, task metadata, the `CC-087` deletion log,
-  and `stake_slashes` once migration 023 is applied — as NDJSON + sha256 manifest to Cloudflare R2
+  and `stake_slashes` once migration 024 is applied — as NDJSON + sha256 manifest to Cloudflare R2
   via the S3 API. Column allowlists are explicit; task content is structurally absent
   (`assertSpecCompliance` refuses a spec that includes it). Every object is read back and
   hash-verified before a run reports success; `scripts/audit/verify-backup-export.ts` is the
