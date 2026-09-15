@@ -222,7 +222,7 @@ describe("exportTier1ToR2", () => {
     expect(humans?.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("marks a table absent when the schema lacks it (migration 023 not applied)", async () => {
+  it("marks a table absent when the schema lacks it (migration 024 not applied)", async () => {
     pages(
       { data: [HUMAN_ROW] }, // humans: 1 row
       { error: { code: "PGRST205", message: "Could not find the table" } }, // notification_channels? no — second spec table

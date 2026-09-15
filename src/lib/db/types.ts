@@ -142,7 +142,7 @@ export interface Database {
           // migration 018's trigger guards the second write, not the first.
           funded_at?: string | null;
           // The purge markers are writable only by the prune_task_content RPC
-          // (CC-087) — migration 019's trigger rejects any direct write, so they
+          // (CC-087) — migration 020's trigger rejects any direct write, so they
           // stay out of the app layer's reach here, same reasoning as the spec
           // columns above.
           created_at?: string;
@@ -180,7 +180,7 @@ export interface Database {
         };
         Relationships: [];
       };
-      // CC-107: the CC-087 deletion record (migration 019). D9 requires this
+      // CC-107: the CC-087 deletion record (migration 020). D9 requires this
       // durable and auditable; the off-vendor export reads it, so it needs a
       // type. Service-role only.
       task_content_deletion_log: {
@@ -255,7 +255,7 @@ export interface Database {
       // NOR-322 / ADR-0009: server-side sessions minted from one successful
       // wallet challenge. Only the SHA-256 token hash is stored; read and
       // written exclusively by the server via the service role (RLS deny-all,
-      // migration 022).
+      // migration 023).
       sessions: {
         Row: {
           id: string;
@@ -294,7 +294,7 @@ export interface Database {
       };
       // NOR-330: resolution-time attestations linking a stake slash to the
       // dispute that caused it (the chain records the slash, not the cause).
-      // Service-role only; migration 023.
+      // Service-role only; migration 024.
       stake_slashes: {
         Row: {
           id: string;
@@ -343,7 +343,7 @@ export interface Database {
     };
     Functions: {
       /**
-       * Prunes one task's content in place, atomically (CC-087, migration 019).
+       * Prunes one task's content in place, atomically (CC-087, migration 020).
        * Returned by `pruneExpiredTaskContent` in ./retention.ts — never call
        * directly from a route; the TS engine owns the window and the logging.
        */

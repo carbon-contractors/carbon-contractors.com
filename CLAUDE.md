@@ -410,11 +410,13 @@ src/lib/categories.ts  The 10 service categories, max 2 per worker
 contracts/             CarbonEscrow.sol (v2, CC-082), ReputationStake.sol
                        mocks/ is test-only — never deployed to a live network
 test/                  Hardhat/mocha contract tests. `npm run test:contracts`
-supabase/migrations/   001-022, applied by hand in order. Add new ones, never edit an applied one.
-                       No migration runner — **`ls` the directory for the next number** (CC-057).
-                       There are already two 018s (funded_at, offer_lifecycle) — order-independent
-                       by luck, not design. Trusting a range written here is what produced the
-                       duplicate 014 in August 2026, and then these.
+supabase/migrations/   001-024, applied by hand in order. Add new ones, never edit an applied one.
+                       Numbers are unique and gapless — the duplicate 018 pair was renumbered by
+                       CC-111 (2026-09-16) to match what production actually applied. The live
+                       project's supabase_migrations.schema_migrations is the record of what is
+                       applied and must match these filenames 1:1. No migration runner — **`ls` the
+                       directory for the next number** (CC-057). Trusting a range written here is
+                       what produced the duplicate 014 in August 2026, and then the two 018s.
 scripts/audit/         Read-only verification scripts. Run these instead of trusting this file.
 ```
 

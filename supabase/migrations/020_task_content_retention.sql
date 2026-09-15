@@ -1,4 +1,4 @@
--- 019_task_content_retention.sql
+-- 020_task_content_retention.sql
 -- CC-087: verifiable task content deletion at terminal state + dispute window.
 -- ADR-0002 D4 states the rule (retention tied to the last moment the data can be
 -- needed, not a calendar); D9 states the constraint (deletion must be verifiable,
@@ -43,7 +43,7 @@ ALTER TABLE tasks
   );
 
 -- ── Immutability: permit exactly the one-way prune ──────────────────────────
--- Replaces the function from 018. The spec columns stay immutable from creation
+-- Replaces the function from 018_funded_at. The spec columns stay immutable from creation
 -- with one carve-out: the transition from held to pruned, which may happen once,
 -- only on a terminal task, only together with content_purged_at, and only in the
 -- direction that clears preimages and preserves commitments. Nothing may ever
@@ -86,7 +86,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- funded_at: settable once, then locked (018, unchanged).
+  -- funded_at: settable once, then locked (018_funded_at, unchanged).
   IF OLD.funded_at IS NOT NULL AND NEW.funded_at IS DISTINCT FROM OLD.funded_at THEN
     RAISE EXCEPTION 'Cannot modify funded_at once it is set (CC-092)';
   END IF;

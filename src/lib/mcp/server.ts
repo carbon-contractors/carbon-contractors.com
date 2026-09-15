@@ -272,7 +272,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // not burn a token. Caller-scoped: the lookup includes the authenticated
         // wallet, so one agent's key never shadows another's. A concurrent
         // double-send that slips past this lookup fails the insert on
-        // migration 020's unique index (23505) and replays from the catch below.
+        // migration 021's unique index (23505) and replays from the catch below.
         if (idempotency_key !== undefined) {
           const existing = await findTaskByIdempotencyKey(
             from_agent_wallet,
@@ -478,7 +478,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        // Migration 020's unique index lost the concurrent-retry race: another
+        // Migration 021's unique index lost the concurrent-retry race: another
         // request with the same (agent, key) inserted first. Fetch theirs and
         // replay it — the agent must not see an error it would instinctively
         // retry with a fresh key.

@@ -65,7 +65,7 @@ via a short-TTL pre-signed PUT that the platform mints.
   that `specHash` pins. Scope: `PutObject` only, under a per-task prefix (`tasks/<taskId>/`), no
   `List`, no `Delete`. Platform stores it KMS-envelope-encrypted (precedent:
   `src/lib/contracts/kms-signer.ts`) in an unbacked ephemeral table, excluded from PITR — the
-  migration-019 pattern.
+  migration-020 pattern.
 - **Flow:** authenticated worker session (`ADR-0009`) → `POST /api/evidence/upload-url`
   `{taskId, filename, contentType}` → platform validates (worker assigned, task active, content-type
   allowlist, size cap) → returns pre-signed PUT, TTL ≤ 10 minutes, one artefact per URL → browser
@@ -78,7 +78,7 @@ via a short-TTL pre-signed PUT that the platform mints.
 ### D3 — Retention: the grant dies with the task; the bytes were never ours
 
 - The credential row and any upload metadata live in the ephemeral task-content store, purged on
-  the migration-019 clock, with a `task_content_deletion_log` entry. The grant itself can die at
+  the migration-020 clock, with a `task_content_deletion_log` entry. The grant itself can die at
   terminal state — earlier than the evidence-URL field, which D4 holds until verdict-posted.
 - **No byte-deletion claim is made or needed** — the platform never held them. Bucket-side lifecycle
   is the agent's business; `ADR-0002` D7's task-creation notice should tell agents to configure

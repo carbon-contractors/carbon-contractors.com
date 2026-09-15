@@ -14,7 +14,7 @@
  * Step 1 is NOT automated — it needs a running, authenticated MCP session — so
  * every run resumes from --task-id=<payment_request_id> obtained by the
  * operator. The public /api/tasks feed nulls payment_request_id for unfunded
- * rows (migration 021), so the id must come from the request_human_work
+ * rows (migration 022), so the id must come from the request_human_work
  * response, never scraped.
  *
  * Modes:
@@ -292,7 +292,7 @@ async function runFundTaskBeforeFunding(config, plan) {
   console.log(`  ${JSON.stringify(body)}`);
   const cleanRefusal = res.status === 409 && body.on_chain_state === "None";
   // Row untouched: the public feed nulls payment_request_id for unfunded rows
-  // (migration 021), so verify via the refusal itself + a status spot-check.
+  // (migration 022), so verify via the refusal itself + a status spot-check.
   console.log(cleanRefusal
     ? `CLEAN — 409 with on_chain_state "None"; the row cannot have activated with no on-chain task.`
     : `NOT CLEAN — expected 409 + on_chain_state "None", got ${res.status} ${JSON.stringify(body)}.`);

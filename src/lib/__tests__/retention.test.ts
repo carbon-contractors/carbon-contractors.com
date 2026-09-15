@@ -201,7 +201,7 @@ describe("pruneExpiredTaskContent", () => {
     expect(summary.pruned.map((p) => p.payment_request_id)).toEqual(["pr_1", "pr_2"]);
     // The engine must not touch columns itself: hashes and on-chain references
     // are preserved because the only write path is the RPC, whose UPDATE
-    // (migration 019) never touches spec_hash, wallets, amount or timestamps.
+    // (migration 020) never touches spec_hash, wallets, amount or timestamps.
     expect(chain.update).not.toHaveBeenCalled();
     expect(chain.delete).not.toHaveBeenCalled();
     expect(chain.insert).not.toHaveBeenCalled();

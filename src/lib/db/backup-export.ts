@@ -115,7 +115,7 @@ export interface TableSpec {
  * to be durable and auditable).
  *
  * Column lists mirror the live schema as verified 2026-09-16. `stake_slashes`
- * (migration 023) is not applied to the production project yet; the exporter
+ * (migration 024) is not applied to the production project yet; the exporter
  * treats its absence as `absent`, distinct from `0 rows`, and says so in the
  * manifest — "table not there yet" and "table empty" are different facts.
  */
@@ -180,7 +180,7 @@ export const TIER1_TABLES: readonly TableSpec[] = [
   {
     name: "stake_slashes",
     columns: ["id", "wallet", "amount_usdc", "payment_request_id", "tx_hash", "slashed_at"],
-    note: "resolution-time slash attribution (migration 023) — the on-chain event plus the why",
+    note: "resolution-time slash attribution (migration 024) — the on-chain event plus the why",
   },
 ];
 
@@ -368,7 +368,7 @@ async function fetchAllRows(
   return all;
 }
 
-/** Thrown when a spec table is not in the live schema (e.g. migration 023 not
+/** Thrown when a spec table is not in the live schema (e.g. migration 024 not
  *  yet applied). Distinct from a query failure. */
 class AbsentTableError extends Error {
   constructor(public readonly tableName: string) {
@@ -437,7 +437,7 @@ export async function exportTier1ToR2(
       });
     } catch (err) {
       if (err instanceof AbsentTableError) {
-        // Legitimate state (migration 023 not applied yet). Recorded, not
+        // Legitimate state (migration 024 not applied yet). Recorded, not
         // failed — but visible in every manifest until it exists.
         results.push({ name: err.tableName, status: "absent", rows: 0 });
         continue;

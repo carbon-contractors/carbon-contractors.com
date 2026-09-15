@@ -46,7 +46,7 @@ export interface TaskRecord {
   funded_at: string | null;
   /**
    * Caller-scoped dedup key from request_human_work (CC-046). Unique per
-   * from_agent_wallet by migration 020's partial index; the app-layer TTL
+   * from_agent_wallet by migration 021's partial index; the app-layer TTL
    * lookup is findTaskByIdempotencyKey.
    */
   idempotency_key: string | null;
@@ -78,7 +78,7 @@ export interface CreateTaskInput {
   status?: TaskStatus;
   /** Required with status 'pending' — when the offer lapses (ADR-0005 D4). */
   offer_expiry_unix?: number | null;
-  /** CC-046: stored verbatim; unique per agent (migration 020). */
+  /** CC-046: stored verbatim; unique per agent (migration 021). */
   idempotency_key?: string | null;
   review_window_seconds?: number | null;
 }
@@ -130,7 +130,7 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
 /**
  * How long an idempotency_key binds its caller (CC-046): a retry after a network
  * failure within this window gets the original task back instead of a new one.
- * The unique index from migration 020 outlives it — see its comment.
+ * The unique index from migration 021 outlives it — see its comment.
  */
 export const IDEMPOTENCY_KEY_TTL_SECONDS = 24 * 60 * 60;
 

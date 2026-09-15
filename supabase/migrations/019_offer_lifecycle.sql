@@ -1,4 +1,4 @@
--- 018_offer_lifecycle.sql
+-- 019_offer_lifecycle.sql
 -- CC-094 / ADR-0005: the offer stage between request_human_work and funding.
 -- New task states 'accepted', 'declined', 'lapsed', plus the agent-set offer
 -- expiry (bounded 15 minutes to 7 days in the app layer, ADR-0005 D4).

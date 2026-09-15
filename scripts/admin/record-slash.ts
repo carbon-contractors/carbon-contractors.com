@@ -1,6 +1,6 @@
 /**
  * record-slash.ts — write the resolution-time record for a stake slash
- * (NOR-330, migration 023).
+ * (NOR-330, migration 024).
  *
  * The chain's Slashed event says a worker was slashed and by how much, but not
  * which dispute caused it — that knowledge exists only in the room where the

@@ -1,4 +1,4 @@
--- 023_stake_slash_records.sql
+-- 024_stake_slash_records.sql
 --
 -- NOR-330 / CC-101 — the link from a stake slash back to the dispute that
 -- caused it.

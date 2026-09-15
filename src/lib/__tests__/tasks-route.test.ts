@@ -268,7 +268,7 @@ describe("GET /api/tasks on-chain enrichment (CC-092 v2 fields)", () => {
     expect(json.tasks[0].on_chain).toBeNull();
   });
 
-  it("survives a live offer whose payment_request_id the view withholds (migration 021)", async () => {
+  it("survives a live offer whose payment_request_id the view withholds (migration 022)", async () => {
     // tasks_public NULLs the id while a task is `pending`/`accepted`, because taskId is
     // keccak256 of it and `createTask` is permissionless first-come-first-served — an
     // unauthenticated observer could otherwise burn the id for 1 unit of USDC before the
