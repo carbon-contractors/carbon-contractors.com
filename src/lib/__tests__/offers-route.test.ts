@@ -10,11 +10,13 @@ import type { NextRequest } from "next/server";
 
 const mockGetTaskByPaymentId = vi.fn();
 const mockUpdateTaskStatus = vi.fn();
+const mockAcceptTask = vi.fn();
 const mockCountCommittedTasks = vi.fn();
 const mockLapseExpiredOffers = vi.fn();
 vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: (...args: unknown[]) => mockGetTaskByPaymentId(...args),
   updateTaskStatus: (...args: unknown[]) => mockUpdateTaskStatus(...args),
+  acceptTask: (...args: unknown[]) => mockAcceptTask(...args),
   countCommittedTasks: (...args: unknown[]) => mockCountCommittedTasks(...args),
   lapseExpiredOffers: (...args: unknown[]) => mockLapseExpiredOffers(...args),
   WORKER_CONCURRENCY_CAP: 3,
@@ -51,6 +53,7 @@ function openOffer(overrides: Record<string, unknown> = {}) {
     payment_request_id: "pr_1",
     from_agent_wallet: "0xagentagentagentagentagentagentagentagen",
     to_human_wallet: WORKER_WALLET,
+    task_description: "Photograph 8 switchboard bays at 44 Example St.",
     amount_usdc: 25,
     status: "pending",
     offer_expiry_unix: Math.floor(Date.now() / 1000) + 3600,
@@ -83,6 +86,7 @@ describe("offer decision endpoints (CC-094)", () => {
     mockLapseExpiredOffers.mockResolvedValue(0);
     mockGetTaskByPaymentId.mockResolvedValue(openOffer());
     mockUpdateTaskStatus.mockResolvedValue(undefined);
+    mockAcceptTask.mockResolvedValue({ ok: true });
     mockCountCommittedTasks.mockResolvedValue(0);
     mockGetHumanByWallet.mockResolvedValue({ id: "human-uuid", wallet: WORKER_WALLET });
     mockNotifyContractor.mockResolvedValue({ notified_channels: 1 });
@@ -129,14 +133,47 @@ describe("offer decision endpoints (CC-094)", () => {
 
   // ─── Accept ───────────────────────────────────────────────────────────────
 
-  it("accepts an open offer: pending → accepted", async () => {
+  it("accepts an open offer: pending → accepted, pinning the prose the worker read (CC-084)", async () => {
     const res = await postAccept({ headers: AUTH_HEADERS });
 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);
     expect(json.status).toBe("accepted");
-    expect(mockUpdateTaskStatus).toHaveBeenCalledWith("pr_1", "accepted");
+    // The pin ride: acceptTask flips the status AND writes the description hash
+    // in one guarded statement — never a bare updateTaskStatus on accept.
+    expect(mockAcceptTask).toHaveBeenCalledWith(
+      "pr_1",
+      "Photograph 8 switchboard bays at 44 Example St.",
+    );
+    expect(mockUpdateTaskStatus).not.toHaveBeenCalledWith("pr_1", "accepted");
+  });
+
+  it("rejects an accept whose brief changed mid-decision — 409, nothing pinned (CC-084)", async () => {
+    mockAcceptTask.mockResolvedValue({ ok: false, reason: "brief_changed" });
+
+    const res = await postAccept({ headers: AUTH_HEADERS });
+
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.brief_changed).toBe(true);
+    expect(json.error).toContain("changed");
+    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it("maps an acceptTask wrong_state race to the generic 409", async () => {
+    mockAcceptTask.mockResolvedValue({
+      ok: false,
+      reason: "wrong_state",
+      currentStatus: "lapsed",
+    });
+
+    const res = await postAccept({ headers: AUTH_HEADERS });
+
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain("lapsed");
+    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
   });
 
   it("enforces the ADR-0005 D5 concurrency cap on accept", async () => {

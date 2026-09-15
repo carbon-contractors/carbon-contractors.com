@@ -223,6 +223,7 @@ describe("x402 idempotency passthrough and replay (CC-046)", () => {
     tx_hash: "",
     escrow_contract: "0x1234567890123456789012345678901234567890",
     acceptance_spec: VALID_SPEC,
+    accepted_description_hash: null,
     spec_hash: parseAndHashSpec(VALID_SPEC).hash,
     spec_schema_version: 1,
     funded_at: null,

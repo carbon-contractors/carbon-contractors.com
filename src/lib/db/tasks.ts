@@ -5,6 +5,17 @@
 
 import { getSupabaseAdmin, getSupabase } from "./client";
 import type { TaskStatus } from "./types";
+import { keccak256, toHex } from "viem";
+
+/**
+ * keccak256 of the task_description bytes — the prose pin (CC-084 criterion 5).
+ * Same idiom as the specHash preimage (`src/lib/spec/hash.ts`): no
+ * canonicalisation, the platform's own string is hashed, `keccak256(toHex(…))`.
+ * A commitment, not content — it survives the CC-087 prune and reveals nothing.
+ */
+export function hashDescription(description: string): string {
+  return keccak256(toHex(description));
+}
 
 export interface TaskRecord {
   id: string;
@@ -23,6 +34,14 @@ export interface TaskRecord {
   acceptance_spec: string | null;
   spec_hash: string | null;
   spec_schema_version: number | null;
+  /**
+   * keccak256 of the task_description bytes at worker acceptance (CC-084
+   * criterion 5). NULL until the worker accepts (or from creation on an
+   * auto-booked task, ADR-0005 D3). A commitment, not content: survives the
+   * CC-087 prune alongside spec_hash, and its only reader is the drift
+   * comparison that tells the worker the brief changed since they accepted.
+   */
+  accepted_description_hash: string | null;
   /** On-chain block timestamp when Funded was confirmed. Settable once (CC-092). */
   funded_at: string | null;
   /**
@@ -67,6 +86,14 @@ export interface CreateTaskInput {
 export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
   const supabase = getSupabaseAdmin();
 
+  // The pin is derived, never passed in: an auto-booked row (status 'accepted'
+  // at creation, ADR-0005 D3) pins its prose at insertion — pre-authorisation is
+  // consent. A pending row takes NULL; acceptTask sets it with the decision.
+  const pin =
+    (input.status ?? "pending") === "accepted"
+      ? hashDescription(input.task_description)
+      : null;
+
   const { data, error } = await supabase
     .from("tasks")
     .insert({
@@ -85,6 +112,7 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
       offer_expiry_unix: input.offer_expiry_unix ?? null,
       idempotency_key: input.idempotency_key ?? null,
       review_window_seconds: input.review_window_seconds ?? null,
+      accepted_description_hash: pin,
     })
     .select()
     .single();
@@ -310,6 +338,78 @@ export async function markTaskFunded(
       `Invalid state transition: ${current.status} → active (allowed from: accepted)`,
     );
   }
+}
+
+/**
+ * CC-084 criterion 5, second half: pin the prose the worker accepted, atomically
+ * with the acceptance itself.
+ *
+ * One write does both — status `pending` → `accepted` AND the pin — guarded on
+ * the exact `task_description` the caller read. An agent's mid-accept edit (the
+ * brief can legitimately change while the offer is open, per Amendment 2 A2.1)
+ * makes the guard miss, and the failure is loud rather than a silent pin of the
+ * wrong text:
+ *
+ *   - 0 rows matched with a status-mismatch → the normal updateTaskStatus
+ *     diagnosis (wrong source state);
+ *   - 0 rows matched with the description guard → BRIEF_CHANGED: the worker was
+ *     shown one deal and would have accepted another. They should re-read the
+ *     new brief before deciding; the route maps this to 409.
+ *
+ * The pin is `hashDescription(task.task_description)` — keccak256 of the prose
+ * bytes at the moment of consent. From then on, migration 024's trigger makes it
+ * immutable, and the worker's dashboard compares it against the live
+ * task_description to say "the brief has changed since you accepted."
+ */
+export async function acceptTask(
+  paymentRequestId: string,
+  expectedDescription: string,
+): Promise<
+  | { ok: true }
+  | { ok: false; reason: "not_found" | "wrong_state"; currentStatus?: TaskStatus }
+  | { ok: false; reason: "brief_changed" }
+> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({
+      status: "accepted",
+      accepted_description_hash: hashDescription(expectedDescription),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("payment_request_id", paymentRequestId)
+    .eq("status", "pending")
+    .eq("task_description", expectedDescription)
+    .select("payment_request_id");
+
+  if (error) throw new Error(`acceptTask failed: ${error.message}`);
+
+  if (!data || data.length === 0) {
+    // Distinguish the two zero-match causes. The description guard is the
+    // CC-084 concern; the status guard is the ordinary transition check.
+    // PGRST116 is "no rows" — the task never existed (same handling as
+    // getTaskByPaymentId).
+    const { data: current, error: lookupError } = await supabase
+      .from("tasks")
+      .select("status,task_description")
+      .eq("payment_request_id", paymentRequestId)
+      .single();
+    if (lookupError && lookupError.code !== "PGRST116") {
+      throw new Error(`acceptTask lookup failed: ${lookupError.message}`);
+    }
+    if (!current) {
+      return { ok: false, reason: "not_found" };
+    }
+    if (current.status !== "pending") {
+      return { ok: false, reason: "wrong_state", currentStatus: current.status };
+    }
+    // Status is pending but the description differs — the brief moved between
+    // the worker's read and their accept. Never pin text they never saw.
+    return { ok: false, reason: "brief_changed" };
+  }
+
+  return { ok: true };
 }
 
 export async function getTasksByWallet(

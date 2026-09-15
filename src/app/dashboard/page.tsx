@@ -208,6 +208,13 @@ interface Task {
   offer_expiry_unix: number | null;
   /** Verbatim spec JSON. Display-only here — the hash preimage is the agent's string (CC-084). */
   acceptance_spec: string | null;
+  /**
+   * keccak256 of the task_description the worker accepted (CC-084 criterion 5).
+   * Null before acceptance (or on tasks created before migration 024). When set
+   * and different from the live description's hash, the worker sees that the
+   * brief changed since they accepted.
+   */
+  accepted_description_hash: string | null;
   tx_hash: string | null;
   escrow_contract: string | null;
   created_at: string;
@@ -2216,6 +2223,23 @@ export default function DashboardPage() {
                     <p className={styles.description}>
                       {task.task_description}
                     </p>
+                    {/* CC-084 criterion 5: the prose is mutable (Amendment 2
+                        A2.1) but the version the worker accepted is pinned.
+                        When the live brief no longer hashes to the pin, say so —
+                        the worker's deal is the criteria + the prose they read. */}
+                    {isWorkerForTask &&
+                      task.accepted_description_hash &&
+                      (task.status === "accepted" || task.status === "active") &&
+                      keccak256(toHex(task.task_description)) !==
+                        task.accepted_description_hash && (
+                        <p className={styles.specWarning}>
+                          The brief has changed since you accepted it. The
+                          acceptance criteria you agreed to are unchanged and
+                          still bind payment, but the instructions above have
+                          been edited by the hiring agent — re-read them before
+                          submitting work.
+                        </p>
+                      )}
                     <div className={styles.meta}>
                       <span>
                         <span className={styles.metaLabel}>Agent: </span>

@@ -76,6 +76,12 @@ export interface Database {
           acceptance_spec: string | null;
           spec_hash: string | null;
           spec_schema_version: number | null;
+          /**
+           * keccak256 of task_description at acceptance (CC-084 criterion 5).
+           * Set once by the accept path (or at creation for auto-booked tasks,
+           * ADR-0005 D3); migration 024's trigger rejects any later change.
+           */
+          accepted_description_hash: string | null;
           /** ISO timestamp of the on-chain block when Funded was confirmed (CC-092). Settable once. */
           funded_at: string | null;
           /** When this row's content was pruned by the retention engine (CC-087). Settable once. */
@@ -104,6 +110,9 @@ export interface Database {
           acceptance_spec?: string | null;
           spec_hash?: string | null;
           spec_schema_version?: number | null;
+          // Pinned at insertion for auto-booked tasks only (ADR-0005 D3) —
+          // otherwise NULL; the accept path sets it once (CC-084 criterion 5).
+          accepted_description_hash?: string | null;
           funded_at?: string | null;
           idempotency_key?: string | null;
           review_window_seconds?: number | null;
@@ -125,6 +134,9 @@ export interface Database {
           // acceptance_spec / spec_hash / spec_schema_version are deliberately absent:
           // migration 016's trigger rejects any change to them, unconditionally. Leaving
           // them out makes that a compile error rather than a runtime exception (CC-084).
+          // accepted_description_hash is absent for the same reason: settable exactly
+          // once (migration 024), by createTask's auto-book insert and acceptTask's
+          // transition write — never a general-purpose update target.
           // funded_at IS included here — unlike the spec columns it starts NULL and is
           // legitimately set once by /api/fund-task's confirmation write (CC-092);
           // migration 018's trigger guards the second write, not the first.
