@@ -14,7 +14,7 @@
   ],
 
   "schemaVersion": 1,
-  "updated": "2026-08-26",
+  "updated": "2026-09-16",
 
   "protocol": {
     "$comment": "Network-independent. These are properties of the committed source, not of a deployment.",
@@ -121,9 +121,9 @@
       "escrow": {
         "address": "0xc6aa99a8226b679C71945dd9545685896a91E4d3",
         "version": 2,
-        "deployedAt": "2026-08-15",
+        "deployedAt": "2026-09-01",
         "deployBlock": 46227900,
-        "$comment": "deployBlock is load-bearing for cost, not correctness: unset, every getLogs query scans from genesis (~36x the requests) and fails slowly rather than loudly (CC-070)."
+        "$comment": "deployBlock is load-bearing for cost, not correctness: unset, every getLogs query scans from genesis (~36x the requests) and fails slowly rather than loudly (CC-070). deployedAt read 2026-08-15 (the superseded 2026-08-15 v2 deploy at 0xe80d…B1b1, pre-dating the D3 clock) until corrected 2026-09-16 — it was never bumped by the 2026-09-01 redeploy (b383e95) and the stale value misled CC-034's 2026-09-16 audit into reporting the live contract as predating the D3 arbitration clock. Authorities, in order: verify-escrow-deployment.mjs (ARBITRATION_WINDOW present), the deployBlock timestamp (2026-09-01T00:54:48Z), then this field."
       },
       "reputationStake": {
         "address": null,
