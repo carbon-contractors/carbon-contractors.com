@@ -44,6 +44,11 @@ import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
 import { MAX_SPEC_BYTES } from "@/lib/spec/schema";
+import { MAX_EVIDENCE_BYTES } from "@/lib/checker/evidence-hash";
+import {
+  isValidChannelAddress,
+  normalizeChannelAddress,
+} from "@/lib/validation";
 import { isIntakePaused } from "@/lib/config";
 import { isWalletSanctioned } from "@/lib/sanctions";
 import { evaluateAwolAtBooking, type AwolBookingDecision } from "@/lib/awol";
@@ -54,6 +59,19 @@ export interface McpSessionContext {
   /** The authenticated caller's wallet address, or null if unauthenticated. */
   callerWallet: string | null;
 }
+
+/**
+ * CC-045: per-type rejection messages for register_notification_channel,
+ * mirroring /api/channels (CC-073) so both surfaces answer identically.
+ */
+const INVALID_CHANNEL_ADDRESS_MESSAGES = {
+  email: "Invalid email address",
+  webhook: "Webhook address must be an HTTPS URL",
+  telegram:
+    "Telegram address must be a numeric chat ID (negative for group chats) — not an @username",
+  discord:
+    "Discord address must be a numeric user ID — enable Developer Mode and use Copy User ID",
+} as const;
 
 /**
  * Creates a fresh McpServer instance per session.
@@ -80,6 +98,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       category: z
         .string()
         .min(1)
+        .max(100)
         .describe(
           "Category slug to search for, e.g. 'delivery-errands', 'cleaning', 'pet-services'"
         ),
@@ -503,8 +522,10 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
     {
       payment_request_id: z
         .string()
-        .min(1)
-        .describe("The payment_request_id returned by request_human_work"),
+        .regex(/^[a-f0-9]{32}$/)
+        .describe(
+          "The payment_request_id returned by request_human_work (32-char hex)"
+        ),
     },
     async ({ payment_request_id }) => {
       try {
@@ -591,8 +612,10 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
     {
       payment_request_id: z
         .string()
-        .min(1)
-        .describe("The payment_request_id of the task to confirm complete"),
+        .regex(/^[a-f0-9]{32}$/)
+        .describe(
+          "The payment_request_id of the task to confirm complete (32-char hex)"
+        ),
     },
     async ({ payment_request_id }) => {
       try {
@@ -702,22 +725,25 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   );
 
   // ─── Tool: register_notification_channel ──────────────────────────────────
+  // CC-045: this tool previously took contractor_id as an argument and never
+  // touched context.callerWallet, so any anonymous session could overwrite any
+  // worker's channels (their UUID is handed out by get_contractor — whitepages
+  // is intentionally public) and force accepts_auto_booking: true, bypassing
+  // the ADR-0005 D3 consent gate. Same defect class as CC-081 Defect 4; now
+  // bound to the authenticated caller like every other mutating tool.
   server.tool(
     "register_notification_channel",
-    "Register or update a notification channel for a contractor. When accepts_auto_booking is true, orchestrator agents can hire this worker directly without human approval.",
+    "Register or update a notification channel for YOUR contractor account (the authenticated wallet). Takes no contractor_id — the channel is always bound to you. When accepts_auto_booking is true, orchestrator agents can hire you directly without human approval. address must match the type: email address, HTTPS webhook URL, numeric Telegram chat ID, or numeric Discord user ID.",
     {
-      contractor_id: z
-        .string()
-        .uuid()
-        .describe("UUID of the contractor (from humans table)"),
       type: z
         .enum(["email", "webhook", "telegram", "discord"])
         .describe("Notification channel type"),
       address: z
         .string()
         .min(1)
+        .max(2048)
         .describe(
-          "Channel address: email address, webhook URL, Telegram chat ID, or Discord user ID"
+          "Channel address: email address, HTTPS webhook URL, Telegram chat ID (numeric, negative for groups), or Discord user ID (numeric)"
         ),
       accepts_auto_booking: z
         .boolean()
@@ -725,17 +751,50 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           "If true, orchestrator agents can hire this worker without human approval"
         ),
     },
-    async ({ contractor_id, type, address, accepts_auto_booking }) => {
+    async ({ type, address, accepts_auto_booking }) => {
       try {
+        // Authorization: only the contractor themselves, via a verified wallet.
+        if (!context?.callerWallet) {
+          return toolError(
+            "Authentication required. POST { walletAddress } to /api/basedhuman.mcp/challenge, sign the returned message with your wallet, and re-initialize the session with the x-caller-wallet, x-caller-signature and x-caller-nonce headers.",
+            "UNAUTHENTICATED",
+          );
+        }
+
+        // CC-045: same rule set as the dashboard twin /api/channels (CC-073).
+        // An unbounded address would also have let an MCP caller store any
+        // string for any type — including http:// webhook targets, which
+        // become server-side fetch targets once CC-095 lands real delivery.
+        if (!isValidChannelAddress(type, address)) {
+          return toolError(
+            INVALID_CHANNEL_ADDRESS_MESSAGES[type],
+            "INVALID_ARGUMENT",
+            { reason: "invalid_channel_address" },
+          );
+        }
+
+        // The channel is bound to the caller's own contractor record — never
+        // to an argument. An unregistered wallet cannot have channels.
+        const caller = await getHumanByWallet(context.callerWallet);
+        if (!caller) {
+          log("warn", "register_channel_unregistered_caller", {
+            caller: context.callerWallet,
+          });
+          return toolError(
+            "Your wallet is not a registered contractor. Register at /connect first.",
+            "CONTRACTOR_NOT_FOUND",
+          );
+        }
+
         const channel = await registerNotificationChannel({
-          contractor_id,
+          contractor_id: caller.id,
           type,
-          address,
+          address: normalizeChannelAddress(type, address),
           accepts_auto_booking,
         });
 
         log("info", "notification_channel_registered", {
-          contractor_id,
+          contractor_id: caller.id,
           type,
           accepts_auto_booking,
         });
@@ -769,6 +828,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
     {
       wallet: z
         .string()
+        .regex(/^0x[0-9a-fA-F]{40}$/)
         .optional()
         .describe("Contractor's 0x wallet address"),
       id: z
@@ -894,11 +954,14 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
     {
       payment_request_id: z
         .string()
-        .min(1)
-        .describe("The payment_request_id of the task to dispute"),
+        .regex(/^[a-f0-9]{32}$/)
+        .describe(
+          "The payment_request_id of the task to dispute (32-char hex)"
+        ),
       evidence_bundle: z
         .string()
         .min(1)
+        .max(MAX_EVIDENCE_BYTES)
         .optional()
         .describe(
           "The task's evidence bundle as a JSON STRING (not an object) — the exact bytes whose keccak256 the worker committed as evidenceHash at submitWork. Required to open a new dispute; omit only to record a dispute that already happened on-chain."
@@ -1112,11 +1175,14 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
     {
       payment_request_id: z
         .string()
-        .min(1)
-        .describe("The payment_request_id of the delivered task"),
+        .regex(/^[a-f0-9]{32}$/)
+        .describe(
+          "The payment_request_id of the delivered task (32-char hex)"
+        ),
       evidence_bundle: z
         .string()
         .min(1)
+        .max(MAX_EVIDENCE_BYTES)
         .describe(
           "The task's evidence bundle as a JSON STRING (not an object) — the exact bytes the worker committed at submitWork. The exact bytes you send are the hash preimage; re-serialising changes the hash."
         ),

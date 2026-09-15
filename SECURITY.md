@@ -74,6 +74,30 @@ Full report: [AUDIT-2026-03-25.md](AUDIT-2026-03-25.md). Operational follow-ups:
 
 ---
 
+### CC-045 MCP Hardening Audit — 2026-09-16
+
+Swept the live `/api/basedhuman.mcp` surface against CC-045's four vulnerability classes
+(command injection; argument-injection bypass; zero-click prompt injection via poisoned config;
+marketplace poisoning). Full record in `docs/backlog/CC-045.md`. Summary:
+
+| Ref | Category | Severity | Status |
+|-----|----------|----------|--------|
+| CC-045 | `register_notification_channel` accepted caller-supplied `contractor_id` with no caller authentication — any session could overwrite any worker's channels and force `accepts_auto_booking: true` (pre-fix SSRF chain entry, see CC-108) | High | ✅ Fixed — tool binds to the authenticated wallet; `contractor_id` removed from the schema |
+| CC-045 | `register_notification_channel.address` unbounded and type-unvalidated (http webhooks accepted) | Medium | ✅ Fixed — per-type validation shared with `/api/channels` (CC-073), HTTPS-only webhooks |
+| CC-045 | Six unbounded-string tool inputs (`payment_request_id` ×4, `category`, `evidence_bundle` ×2 unbounded past the parser cap) | Low | ✅ Fixed — regex/bounds at the Zod layer |
+| CC-045 | Authenticated webhook self-registration can target internal addresses (SSRF); unauth half fixed here, delivery-side hardening | Medium | ⏳ Open — spun out as `CC-108` |
+| — | No `child_process`/`exec`/`spawn`/`eval` usage in `src/` (scripts-only, not agent-reachable) | — | ✅ Verified clean |
+| — | npm supply chain (2FA via YubiKey, OIDC provenance, `npm audit signatures`, `.npmignore`, Dependabot) | — | ⏳ Blocked on CC-044 package existing |
+
+**Correction to the record:** the pre-launch NOR-174 finding ("MCP tools lack per-caller
+authentication") was closed on the understanding that challenge-response auth plus in-handler
+checks covered every tool. `register_notification_channel` was missed — added in CC-005-era
+tooling without the pattern, and every audit since (including this repo's own CC-037 item 5
+verification) checked the task tools only. NOR-174's closure now genuinely holds for all ten
+tools.
+
+---
+
 ## Platform Security Architecture
 
 A few design decisions relevant to the threat model:
@@ -121,4 +145,4 @@ We'll do the same in return — act in good faith and we will too.
 
 ---
 
-*Last updated: 2026-03-22*
+*Last updated: 2026-09-16*
