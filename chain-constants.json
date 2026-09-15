@@ -126,8 +126,9 @@
         "$comment": "deployBlock is load-bearing for cost, not correctness: unset, every getLogs query scans from genesis (~36x the requests) and fails slowly rather than loudly (CC-070). deployedAt read 2026-08-15 (the superseded 2026-08-15 v2 deploy at 0xe80d…B1b1, pre-dating the D3 clock) until corrected 2026-09-16 — it was never bumped by the 2026-09-01 redeploy (b383e95) and the stale value misled CC-034's 2026-09-16 audit into reporting the live contract as predating the D3 arbitration clock. Authorities, in order: verify-escrow-deployment.mjs (ARBITRATION_WINDOW present), the deployBlock timestamp (2026-09-01T00:54:48Z), then this field."
       },
       "reputationStake": {
-        "address": null,
-        "$comment": "Deployed, address not recorded here — it lives only in the Vercel environment. Recover with `node --env-file=.env.local scripts/audit/inspect-live-schema.sql`-adjacent tooling or the deploy transaction, then fill this in. Left null rather than guessed."
+        "address": "0x4cdeF542F9361201f9543512eeCd1eE834793203",
+        "deployBlock": 34411824,
+        "$comment": "Recovered 2026-09-16 for CC-072 — previously null ('deployed, address not recorded here'). The address was recovered from three concordant repo sources (.github/workflows/monitors.yml, docs/Security-Trust-Disclosure.md, docs/backlog/CC-059.md) and verified against the live chain (eth_getCode + owner() = the HSM owner + usdc() = canonical USDC + minStake=20 + COOLDOWN=7d + totalStaked=0, confirming the contract is live and virgin). Deploy block from the creation tx's blockNumber. The Vercel env serves the same address via /api/reputation (verified 2026-09-16: stake.contract matches). Re-verify: node scripts/staking/stake-lifecycle.mjs --phase=status --execute (reads this file and the chain together)."
       },
       "usdc": {
         "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
