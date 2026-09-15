@@ -53,11 +53,10 @@ const TOOLS = [
   {
     name: "register_notification_channel",
     description:
-      "Register or update a notification channel for a contractor. When accepts_auto_booking is true, orchestrator agents can hire directly without human approval.",
+      "Register or update a notification channel for your own contractor account (the authenticated wallet). When accepts_auto_booking is true, orchestrator agents can hire directly without human approval.",
     params: [
-      "contractor_id: uuid",
       "type: email|webhook|telegram|discord",
-      "address: string",
+      "address: string (email address, HTTPS webhook URL, numeric Telegram chat ID, or numeric Discord user ID)",
       "accepts_auto_booking: boolean",
     ],
     phase: "Settle",
