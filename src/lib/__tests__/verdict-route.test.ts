@@ -6,6 +6,16 @@ vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: (...args: unknown[]) => mockGetTaskByPaymentId(...args),
 }));
 
+const mockGetHumanByWallet = vi.fn();
+vi.mock("@/lib/db/whitepages", () => ({
+  getHumanByWallet: (...args: unknown[]) => mockGetHumanByWallet(...args),
+}));
+
+const mockNotifyContractor = vi.fn();
+vi.mock("@/lib/notifications/dispatch", () => ({
+  notifyContractor: (...args: unknown[]) => mockNotifyContractor(...args),
+}));
+
 const mockVerifyChallengeSignature = vi.fn();
 vi.mock("@/lib/auth/wallet-challenge", () => ({
   verifyChallengeSignature: (...args: unknown[]) => mockVerifyChallengeSignature(...args),
@@ -79,6 +89,9 @@ describe("POST /api/verdict (CC-092)", () => {
       signature: "0xsignedsignedsignedsignedsignedsignedsignedsignedsignedsignedsigned",
       checks: [{ check: "min_artefacts", passed: true }],
     });
+    // CC-095: worker lookup succeeds by default so the notification path runs.
+    mockGetHumanByWallet.mockResolvedValue({ id: "worker-uuid", wallet: WORKER_WALLET });
+    mockNotifyContractor.mockResolvedValue({ notified_channels: 1 });
   });
 
   it("401s without a signature", async () => {
@@ -134,6 +147,17 @@ describe("POST /api/verdict (CC-092)", () => {
       "0xsignedsignedsignedsignedsignedsignedsignedsignedsignedsignedsigned",
     );
     expect(mockComputeAndSignVerdict).toHaveBeenCalledWith(TASK, "{}");
+
+    // CC-095: passing verdict → verdict_signed + payment_claimable to the
+    // worker's channels.
+    expect(mockNotifyContractor).toHaveBeenCalledWith(
+      "worker-uuid",
+      expect.objectContaining({ type: "verdict_signed", passed: true }),
+    );
+    expect(mockNotifyContractor).toHaveBeenCalledWith(
+      "worker-uuid",
+      expect.objectContaining({ type: "payment_claimable" }),
+    );
   });
 
   it("allows the hiring agent too — a verdict is not worker-only", async () => {
@@ -143,6 +167,17 @@ describe("POST /api/verdict (CC-092)", () => {
     const res = await POST(makeRequest({ headers: authHeaders(AGENT_WALLET) }));
 
     expect(res.status).toBe(200);
+  });
+
+  it("does not 500 when the worker lookup fails — the verdict stands without a notification", async () => {
+    mockVerifyChallengeSignature.mockResolvedValue(WORKER_WALLET);
+    mockGetHumanByWallet.mockRejectedValue(new Error("supabase down"));
+
+    const { POST } = await import("@/app/api/verdict/route");
+    const res = await POST(makeRequest({ headers: authHeaders(WORKER_WALLET) }));
+
+    expect(res.status).toBe(200);
+    expect(mockNotifyContractor).not.toHaveBeenCalled();
   });
 
   it("400s a missing evidence_bundle", async () => {

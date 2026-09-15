@@ -439,21 +439,18 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         });
 
         // ADR-0005 D7: the worker must be told about the offer. notifyContractor
-        // is the CC-095 seam — structured logging until real delivery ships — and
-        // never throws, so a notification fault cannot fail the hire.
+        // delivers over their registered channels (CC-095) and never throws,
+        // so a notification fault cannot fail the hire. On the auto-booked
+        // path the task_funded event is deliberately NOT sent here: at hire
+        // time no money is locked yet — the agent still has to fund the
+        // escrow — and it fires when /api/fund-task confirms funding
+        // on-chain instead.
         await notifyContractor(worker.id, {
           type: "offer_received",
           payment_request_id: response.payment_request_id,
           amount_usdc,
           offer_expiry_unix: response.offer_expiry_unix,
         });
-        if (autoAccept) {
-          await notifyContractor(worker.id, {
-            type: "task_funded",
-            payment_request_id: response.payment_request_id,
-            amount_usdc,
-          });
-        }
 
         // When AWOL triggered, the offer requires the worker's manual
         // acceptance — the task row is created `pending` either way, with the
@@ -1236,6 +1233,33 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           passed: computed.verdict.passed,
           surface: "mcp",
         });
+
+        // CC-095: a signed verdict is the worker's signal that settlement
+        // moved — passing means their pull-payment window is open (ADR-0001
+        // A1.2), failing means a dispute is the next step. Best-effort: the
+        // notifyContractor seam never throws, and the worker being unlisted
+        // must not fail the verdict the caller already holds.
+        try {
+          const worker = await getHumanByWallet(task.to_human_wallet);
+          if (worker) {
+            await notifyContractor(worker.id, {
+              type: "verdict_signed",
+              payment_request_id,
+              passed: computed.verdict.passed,
+              amount_usdc: task.amount_usdc,
+            });
+            if (computed.verdict.passed) {
+              await notifyContractor(worker.id, {
+                type: "payment_claimable",
+                payment_request_id,
+                amount_usdc: task.amount_usdc,
+              });
+            }
+          }
+        } catch {
+          // Contained per the seam's contract — the verdict response is
+          // already complete and must not 500 over a notification.
+        }
 
         return {
           content: [

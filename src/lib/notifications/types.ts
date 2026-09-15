@@ -12,13 +12,24 @@
 import { z } from "zod";
 import type { NotificationChannelType } from "@/lib/db/types";
 
-/** The lifecycle events worth interrupting a worker for (CC-095 scope). */
+/**
+ * The lifecycle events worth interrupting a worker for (CC-095 scope).
+ *
+ * offer_received .. payment_claimable are task events; task_accepted /
+ * task_declined mirror the worker's own decision back to their channels (a
+ * cross-device confirmation that the decision landed); auto_booking_disabled
+ * is the AWOL notice CC-075 promised would actually be delivered "when CC-095
+ * lands" — that is this change.
+ */
 export const NOTIFICATION_EVENTS = [
   "offer_received",
   "offer_expiring",
   "task_funded",
   "verdict_signed",
   "payment_claimable",
+  "task_accepted",
+  "task_declined",
+  "auto_booking_disabled",
 ] as const;
 
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];

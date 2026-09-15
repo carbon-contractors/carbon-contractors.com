@@ -1,21 +1,42 @@
 /**
  * dispatch.ts
- * Contractor notification dispatch — the seam CC-095 plugs real delivery into.
+ * Contractor notification dispatch — the CC-094 seam, now wired to the CC-095
+ * delivery engine.
  *
- * ADR-0005 D7 makes notification delivery a dependency of the offer lifecycle,
- * not a nicety: an offer nobody is told about is an expiry with extra steps.
- * CC-095 (delivery over email/webhook/telegram/discord) is not built yet, so
- * this module records the event per channel as a structured log line and
- * nothing more. Every offer-path caller goes through `notifyContractor`, so
- * CC-095 replaces one function and the lifecycle needs no further change.
+ * History, because it explains the shape: this module was born as the
+ * ADR-0005 D7 logging seam — "CC-095 is not built yet, so record the event per
+ * channel as a structured log line and nothing more; CC-095 replaces one
+ * function and the lifecycle needs no further change." PR #125 then shipped the
+ * engine (`src/lib/notifications/delivery.ts`) on 2026-08-22, but the
+ * replacement never happened: the lifecycle kept importing this logging stub,
+ * and CC-095 was closed on 2026-08-26 against call sites that reached *this*
+ * module, not the engine — a closure reopened on 2026-09-16 when it was found
+ * that no non-test code had ever imported delivery.ts.
  *
- * Never throws: a notification failure must never fail the hire or accept
- * path it rides on. And never log a channel address — notification_channels
- * holds workers' contact addresses, which is exactly the third-party data
- * carve-out in the publish-by-default policy (CC-009, ADR-0002 D9).
+ * So the swap the header planned for CC-095 happens here: `notifyContractor`
+ * and `notifyAutoBookingDisabled` now deliver for real over every registered
+ * channel, keeping the two promises the lifecycle has always relied on —
+ *
+ *   • Never throws: a notification failure must never fail the hire, accept,
+ *     funding-confirmation or verdict path it rides on. The engine's
+ *     notifyContractor throws only on a malformed payload (a programming
+ *     error, caught below); delivery faults are contained inside the engine
+ *     and reported as failed outcome records.
+ *   • Never logs a channel address: notification_channels holds workers'
+ *     contact addresses, exactly the third-party data carve-out in the
+ *     publish-by-default policy (CC-009, ADR-0002 D9). The engine enforces
+ *     this too (maskChannelAddress / sha256 handles), but the promise is
+ *     restated here because callers were promised it at the seam.
+ *
+ * The lifecycle event shapes below are unchanged from the logging era, so no
+ * caller had to move; they are translated 1:1 into the engine's payload.
  */
 
-import { getChannelsForContractor } from "@/lib/db/notifications";
+import {
+  notifyContractor as deliverToContractor,
+  dispatchToChannels,
+} from "@/lib/notifications/delivery";
+import type { ChannelDeliveryResult } from "@/lib/notifications/types";
 import type { NotificationChannel } from "@/lib/db/notifications";
 import type { AwolSignal } from "@/lib/awol";
 import { log } from "@/lib/logging";
@@ -48,35 +69,55 @@ export interface DeliveryAttempt {
   delivered: boolean;
 }
 
+/**
+ * Tell a worker their auto-booking was switched off (CC-075 / ADR-0005 D6,
+ * ADR-0001 D1). Real delivery since CC-095's wiring: one attempt series per
+ * registered channel, each reported honestly. The caller (awol.ts) already
+ * holds the channel list, so the channels are passed in rather than re-read.
+ *
+ * `category` carries the AWOL signal as the notice's reason — it is the only
+ * payload field the engine's schema has for a non-sensitive label, and
+ * "lapsed_offers" / "expired_tasks" is exactly that.
+ */
 export async function notifyAutoBookingDisabled(input: {
   worker: { id: string; wallet: string };
   channels: NotificationChannel[];
   signal: AwolSignal;
 }): Promise<DeliveryAttempt[]> {
-  const notice = buildAutoBookingDisabledNotice({
-    contractorId: input.worker.id,
-    signal: input.signal,
-  });
+  if (input.channels.length === 0) {
+    return [];
+  }
 
-  const attempts: DeliveryAttempt[] = [];
-
-  for (const channel of input.channels) {
-    log("info", "worker_notice_dispatched", {
+  let results: ChannelDeliveryResult[];
+  try {
+    results = await dispatchToChannels(
+      input.channels,
+      "auto_booking_disabled",
+      {
+        taskId: "auto-booking",
+        category: input.signal,
+      },
+    );
+  } catch (err) {
+    // A programming error (bad payload shape) rather than a delivery fault.
+    // Contained here: the AWOL decision that triggered this notice must stand
+    // regardless of the notification's fate.
+    log("error", "worker_notice_dispatch_failed", {
       contractor_id: input.worker.id,
-      channel_id: channel.id,
-      channel_type: channel.type,
-      kind: notice.kind,
-      signal: notice.signal,
+      error: err instanceof Error ? err.name : "unknown",
     });
-    // Delivered is false until CC-095 lands real channel delivery
-    attempts.push({
+    return input.channels.map((channel) => ({
       channel_id: channel.id,
       channel_type: channel.type,
       delivered: false,
-    });
+    }));
   }
 
-  return attempts;
+  return results.map((result) => ({
+    channel_id: result.channelId,
+    channel_type: result.channelType,
+    delivered: result.outcome === "delivered",
+  }));
 }
 
 export type ContractorNotificationEvent =
@@ -88,45 +129,125 @@ export type ContractorNotificationEvent =
       offer_expiry_unix: number | null;
     }
   | {
-      /** Auto-booked (ADR-0005 D3): consent came from the worker's own flag. */
+      /** Reminder that a pending offer is about to lapse (reminder cron). */
+      type: "offer_expiring";
+      payment_request_id: string;
+      amount_usdc: number;
+      offer_expiry_unix: number;
+    }
+  | {
+      /** Chain-confirmed funding (fund-task route). Not sent at hire time —
+       *  at hire the money is not locked yet, and a "task funded" message
+       *  then would be a lie sent at the worker's expense. */
       type: "task_funded";
       payment_request_id: string;
       amount_usdc: number;
+      /** Delivery deadline, unix seconds — on the row and on-chain. */
+      deadline_unix?: number;
+    }
+  | {
+      /** Verdict computed and signed (either surface). */
+      type: "verdict_signed";
+      payment_request_id: string;
+      passed: boolean;
+      amount_usdc?: number;
+    }
+  | {
+      /** Passing verdict → the worker's pull-payment window is open. */
+      type: "payment_claimable";
+      payment_request_id: string;
+      amount_usdc?: number;
     }
   | { type: "task_accepted"; payment_request_id: string }
   | { type: "task_declined"; payment_request_id: string };
 
 export interface NotifyResult {
-  /** Channels the event was recorded against. */
+  /** Channels the event was dispatched to (delivered or visibly failed). */
   notified_channels: number;
 }
 
 /**
- * Record a lifecycle event against every one of a contractor's registered
- * channels. Fire-and-forget by design — callers need not await a meaningful
- * outcome, and this never rejects.
+ * Deliver a lifecycle event to a contractor's registered channels via the
+ * CC-095 engine. Fire-and-forget by design — callers need not await a
+ * meaningful outcome, and this never rejects. Translation from the lifecycle
+ * event shape to the engine payload is total: every field maps, nothing is
+ * dropped on the floor.
  */
 export async function notifyContractor(
   contractorId: string,
   event: ContractorNotificationEvent,
 ): Promise<NotifyResult> {
   try {
-    const channels = await getChannelsForContractor(contractorId);
-
-    for (const channel of channels) {
-      // Channel id and type only — never the address (ADR-0002 D9).
-      log("info", "contractor_notification", {
-        contractor_id: contractorId,
-        channel_id: channel.id,
-        channel_type: channel.type,
-        event,
-      });
+    let results: ChannelDeliveryResult[];
+    switch (event.type) {
+      case "offer_received":
+        results = await deliverToContractor(contractorId, "offer_received", {
+          taskId: event.payment_request_id,
+          amountUsdc: event.amount_usdc,
+          ...(event.offer_expiry_unix !== null
+            ? { offerExpiresAt: event.offer_expiry_unix }
+            : {}),
+        });
+        break;
+      case "offer_expiring":
+        results = await deliverToContractor(contractorId, "offer_expiring", {
+          taskId: event.payment_request_id,
+          amountUsdc: event.amount_usdc,
+          offerExpiresAt: event.offer_expiry_unix,
+        });
+        break;
+      case "task_funded":
+        results = await deliverToContractor(contractorId, "task_funded", {
+          taskId: event.payment_request_id,
+          amountUsdc: event.amount_usdc,
+          ...(event.deadline_unix !== undefined
+            ? { deadlineUnix: event.deadline_unix }
+            : {}),
+        });
+        break;
+      case "verdict_signed":
+        results = await deliverToContractor(contractorId, "verdict_signed", {
+          taskId: event.payment_request_id,
+          amountUsdc: event.amount_usdc,
+          ...(event.passed
+            ? { category: "passed" }
+            : { category: "failed" }),
+        });
+        break;
+      case "payment_claimable":
+        results = await deliverToContractor(contractorId, "payment_claimable", {
+          taskId: event.payment_request_id,
+          amountUsdc: event.amount_usdc,
+        });
+        break;
+      case "task_accepted":
+        results = await deliverToContractor(contractorId, "task_accepted", {
+          taskId: event.payment_request_id,
+        });
+        break;
+      case "task_declined":
+        results = await deliverToContractor(contractorId, "task_declined", {
+          taskId: event.payment_request_id,
+        });
+        break;
     }
 
-    return { notified_channels: channels.length };
+    // The engine logs per-channel outcomes itself; this line is the aggregate
+    // the lifecycle path can grep for. Event type only — the payload is task
+    // content and must never reach a log line (ADR-0002 D4).
+    log("info", "contractor_notification", {
+      contractor_id: contractorId,
+      event_type: event.type,
+      notified_channels: results.length,
+      delivered_channels: results.filter((r) => r.outcome === "delivered").length,
+    });
+
+    return { notified_channels: results.length };
   } catch {
-    // Delivery (and its observability) is CC-095's problem. The lifecycle
-    // event that triggered this must succeed regardless.
+    // The engine throws only on a malformed payload — a programming error on
+    // our side, never a delivery fault (those are contained per-channel and
+    // logged at error level by the engine). Either way the lifecycle event
+    // that triggered this must succeed regardless.
     return { notified_channels: 0 };
   }
 }

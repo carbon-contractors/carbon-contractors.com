@@ -123,7 +123,7 @@ describe("reversibility — a worker re-enabling from the dashboard (CC-075)", (
   });
 });
 
-describe("notifyAutoBookingDisabled dispatch (CC-075)", () => {
+describe("notifyAutoBookingDisabled dispatch (CC-075, delivered since CC-095)", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -143,7 +143,32 @@ describe("notifyAutoBookingDisabled dispatch (CC-075)", () => {
     expect(AUTO_BOOKING_DISABLED_MESSAGE).toMatch(/dashboard/i);
   });
 
-  it("attempts every channel and reports undelivered honestly until CC-095 lands", async () => {
+  it("attempts every channel and reports the engine's outcomes honestly", async () => {
+    // The delivery engine is exercised in full elsewhere (notifications-delivery
+    // and notification-dispatch tests). Here it is stubbed at its boundary so
+    // this file keeps its DB-layer focus — the stub mirrors the real
+    // transport-unconfigured behaviour for an email channel with no gateway
+    // set: a visible failure, never a silent skip.
+    const dispatchMod = await import("@/lib/notifications/delivery");
+    vi.spyOn(dispatchMod, "dispatchToChannels").mockResolvedValue([
+      {
+        channelId: "ch-1",
+        channelType: "email",
+        outcome: "failed",
+        attempts: 1,
+        error: "email_transport_unconfigured",
+        addressMasked: "sha256:email",
+      },
+      {
+        channelId: "ch-2",
+        channelType: "telegram",
+        outcome: "failed",
+        attempts: 3,
+        error: "telegram_bot_token_unconfigured",
+        addressMasked: "sha256:tg",
+      },
+    ]);
+
     const attempts = await notifyAutoBookingDisabled({
       worker: { id: CONTRACTOR_ID, wallet: "0xWORKERworkerWORKERworkerWORKERworkerWORK" },
       channels: [
@@ -157,13 +182,11 @@ describe("notifyAutoBookingDisabled dispatch (CC-075)", () => {
     expect(attempts.every((a) => a.delivered === false)).toBe(true);
     expect(attempts.map((a) => a.channel_id)).toEqual(["ch-1", "ch-2"]);
 
-    const event = logSpy.mock.calls
-      .map((c) => String(c[0]))
-      .find((e) => e.includes("worker_notice_dispatched"));
-    expect(event).toBeDefined();
-    expect(event).toContain('"kind":"auto_booking_disabled"');
-    // Channel addresses are PII (ADR-0002 D9) — never in the log line.
-    expect(event).not.toContain("worker@example.com");
-    expect(event).not.toContain("12345");
+    // Nothing at all is logged by the notice path itself — outcomes travel
+    // as structured records returned to the caller (awol.ts logs its own
+    // summary). Channel addresses are PII (ADR-0002 D9) regardless.
+    const logged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).not.toContain("worker@example.com");
+    expect(logged).not.toContain("12345");
   });
 });

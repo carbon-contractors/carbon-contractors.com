@@ -5,6 +5,16 @@ vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: (...args: unknown[]) => mockGetTaskByPaymentId(...args),
 }));
 
+const mockGetHumanByWallet = vi.fn();
+vi.mock("@/lib/db/whitepages", () => ({
+  getHumanByWallet: (...args: unknown[]) => mockGetHumanByWallet(...args),
+}));
+
+const mockNotifyContractor = vi.fn();
+vi.mock("@/lib/notifications/dispatch", () => ({
+  notifyContractor: (...args: unknown[]) => mockNotifyContractor(...args),
+}));
+
 const mockComputeAndSignVerdict = vi.fn();
 vi.mock("@/lib/contracts/verdict-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/contracts/verdict-service")>();
@@ -71,6 +81,10 @@ describe("get_signed_verdict MCP tool (CC-092)", () => {
       signature: "0xsig",
       checks: [{ check: "min_artefacts", passed: true }],
     });
+    // CC-095: the worker lookup succeeds by default so the notification
+    // path is exercised; individual tests override.
+    mockGetHumanByWallet.mockResolvedValue({ id: "worker-uuid", wallet: WORKER_WALLET });
+    mockNotifyContractor.mockResolvedValue({ notified_channels: 1 });
   });
 
   it("requires authentication", async () => {
@@ -122,6 +136,17 @@ describe("get_signed_verdict MCP tool (CC-092)", () => {
     expect(json.signature).toBe("0xsig");
     expect(json.checks).toEqual([{ check: "min_artefacts", passed: true }]);
     expect(json.next_step).toContain("claimWithVerdict");
+
+    // CC-095: a passing verdict opens the worker's pull-payment window — both
+    // events reach the worker's channels.
+    expect(mockNotifyContractor).toHaveBeenCalledWith(
+      "worker-uuid",
+      expect.objectContaining({ type: "verdict_signed", passed: true }),
+    );
+    expect(mockNotifyContractor).toHaveBeenCalledWith(
+      "worker-uuid",
+      expect.objectContaining({ type: "payment_claimable" }),
+    );
   });
 
   it("returns a failing verdict to the agent too — the platform signs what it found", async () => {
@@ -139,6 +164,15 @@ describe("get_signed_verdict MCP tool (CC-092)", () => {
     expect(result.isError).toBeUndefined();
     expect(json.verdict.passed).toBe(false);
     expect(json.next_step).toContain("disputeTask");
+
+    // CC-095: a failing verdict notifies verdict_signed only — there is
+    // nothing for the worker to claim.
+    expect(mockNotifyContractor).toHaveBeenCalledWith(
+      "worker-uuid",
+      expect.objectContaining({ type: "verdict_signed", passed: false }),
+    );
+    const types = mockNotifyContractor.mock.calls.map(([, ev]) => ev.type);
+    expect(types).not.toContain("payment_claimable");
   });
 
   it("surfaces a VerdictInputError to the caller", async () => {
