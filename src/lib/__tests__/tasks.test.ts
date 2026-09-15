@@ -16,7 +16,7 @@ vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
 vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
-import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks, lapseExpiredOffers, countCommittedTasks, findTaskByIdempotencyKey, WORKER_CONCURRENCY_CAP } from "@/lib/db/tasks";
+import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks, lapseExpiredOffers, countCommittedTasks, findTaskByIdempotencyKey, acceptTask, hashDescription, WORKER_CONCURRENCY_CAP } from "@/lib/db/tasks";
 
 function chainable(result: { data: unknown; error: unknown; count?: number }) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -194,6 +194,9 @@ describe("tasks", () => {
       expect.objectContaining({
         status: "accepted",
         offer_expiry_unix: 1234567890,
+        // Auto-booked (born accepted, ADR-0005 D3): the prose pins at creation —
+        // pre-authorisation is consent (CC-084 criterion 5).
+        accepted_description_hash: hashDescription("test"),
       }),
     );
   });
@@ -478,5 +481,116 @@ describe("tasks", () => {
     );
 
     await expect(getPublicTasks()).rejects.toThrow("getPublicTasks failed");
+  });
+
+  // ─── CC-084 criterion 5: the prose pin ──────────────────────────────────────
+
+  it("hashDescription matches the pinned vector — a preimage or encoding change fails here, not in production", () => {
+    // keccak256(toHex("Photograph 8 switchboard bays at 44 Example St.")), the
+    // same idiom as the specHash preimage vector in spec-schema.test.ts.
+    expect(hashDescription("Photograph 8 switchboard bays at 44 Example St.")).toBe(
+      "0x18da0979070846e40b48c38ddf14c96868946ebceb5e0be40be3f7be170c0399",
+    );
+    // Distinct prose → distinct pin. A hash collision here would silently
+    // hide a changed brief from the worker.
+    expect(hashDescription("Photograph 8 switchboard bays at 44 Example St!")).not.toBe(
+      "0x18da0979070846e40b48c38ddf14c96868946ebceb5e0be40be3f7be170c0399",
+    );
+  });
+
+  it("createTask pins the prose on an auto-booked row only — pending rows stay unpinned", async () => {
+    // Auto-booked: born accepted (ADR-0005 D3) — pre-authorisation is consent.
+    const autoChain = chainable({ data: { id: "1", payment_request_id: "pr_a" }, error: null });
+    mockFrom.mockReturnValueOnce(autoChain);
+    await createTask({
+      payment_request_id: "pr_a",
+      from_agent_wallet: "0xAAAA111122223333444455556666777788889999",
+      to_human_wallet: "0xBBBB111122223333444455556666777788889999",
+      task_description: "Auto-booked brief",
+      amount_usdc: 10,
+      deadline_unix: 0,
+      tx_hash: "0xtx",
+      escrow_contract: "0xescrow",
+      status: "accepted",
+    });
+    expect(autoChain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accepted_description_hash: hashDescription("Auto-booked brief"),
+      }),
+    );
+
+    // Pending offer: no consent yet, no pin — acceptTask writes it.
+    const pendingChain = chainable({ data: { id: "2", payment_request_id: "pr_p" }, error: null });
+    mockFrom.mockReturnValueOnce(pendingChain);
+    await createTask({
+      payment_request_id: "pr_p",
+      from_agent_wallet: "0xAAAA111122223333444455556666777788889999",
+      to_human_wallet: "0xBBBB111122223333444455556666777788889999",
+      task_description: "Pending brief",
+      amount_usdc: 10,
+      deadline_unix: 0,
+      tx_hash: "0xtx",
+      escrow_contract: "0xescrow",
+      status: "pending",
+    });
+    expect(pendingChain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ accepted_description_hash: null }),
+    );
+  });
+
+  it("acceptTask writes the pin and the status flip in one guarded statement (CC-084)", async () => {
+    const chain = chainable({ data: [{ payment_request_id: "pr_1" }], error: null });
+    mockFrom.mockReturnValue(chain);
+
+    const result = await acceptTask("pr_1", "The brief the worker read");
+
+    expect(result).toEqual({ ok: true });
+    expect(chain.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "accepted",
+        accepted_description_hash: hashDescription("The brief the worker read"),
+      }),
+    );
+    // The optimistic-concurrency guard: pinned only if the description still
+    // matches what the worker was shown.
+    expect(chain.eq).toHaveBeenCalledWith("status", "pending");
+    expect(chain.eq).toHaveBeenCalledWith("task_description", "The brief the worker read");
+  });
+
+  it("acceptTask reports brief_changed when the description moved but the offer is still pending", async () => {
+    // Update matches nothing (description guard), lookup shows pending row.
+    const updateChain = chainable({ data: [], error: null });
+    const lookupChain = chainable({
+      data: { status: "pending", task_description: "a different brief" },
+      error: null,
+    });
+    mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
+
+    const result = await acceptTask("pr_1", "The brief the worker read");
+
+    expect(result).toEqual({ ok: false, reason: "brief_changed" });
+  });
+
+  it("acceptTask reports wrong_state when the offer is no longer pending", async () => {
+    const updateChain = chainable({ data: [], error: null });
+    const lookupChain = chainable({
+      data: { status: "lapsed", task_description: "The brief the worker read" },
+      error: null,
+    });
+    mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
+
+    const result = await acceptTask("pr_1", "The brief the worker read");
+
+    expect(result).toEqual({ ok: false, reason: "wrong_state", currentStatus: "lapsed" });
+  });
+
+  it("acceptTask reports not_found when the task never existed", async () => {
+    const updateChain = chainable({ data: [], error: null });
+    const lookupChain = chainable({ data: null, error: { code: "PGRST116" } });
+    mockFrom.mockReturnValueOnce(updateChain).mockReturnValueOnce(lookupChain);
+
+    const result = await acceptTask("pr_none", "The brief the worker read");
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
   });
 });

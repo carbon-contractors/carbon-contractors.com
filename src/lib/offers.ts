@@ -12,6 +12,7 @@
 import {
   getTaskByPaymentId,
   updateTaskStatus,
+  acceptTask,
   countCommittedTasks,
   lapseExpiredOffers,
   WORKER_CONCURRENCY_CAP,
@@ -34,6 +35,8 @@ export type OfferResponse =
       /** Present on the concurrency-cap 409. */
       concurrency_cap?: number;
       committed_tasks?: number;
+      /** Present on the brief-changed 409 (CC-084 criterion 5). */
+      brief_changed?: boolean;
     };
 
 /**
@@ -122,12 +125,40 @@ export async function respondToOffer(
         committed_tasks: committed,
       };
     }
-  }
 
-  await updateTaskStatus(
-    paymentRequestId,
-    decision === "accept" ? "accepted" : "declined",
-  );
+    // CC-084 criterion 5: pin the prose the worker is accepting. acceptTask
+    // writes the pin and the status flip in one statement, guarded on the
+    // description the worker read — so an agent edit that raced their decision
+    // surfaces here as a 409 rather than pinning text they never saw.
+    const accepted = await acceptTask(
+      paymentRequestId,
+      task.task_description,
+    );
+    if (!accepted.ok) {
+      if (accepted.reason === "brief_changed") {
+        log("warn", "offer_accept_brief_changed", {
+          payment_request_id: paymentRequestId,
+          worker: task.to_human_wallet,
+        });
+        return {
+          ok: false,
+          httpStatus: 409,
+          error:
+            "The brief changed while you were accepting it. Re-read the new version and accept again — the version you saw is not the one now on the task.",
+          brief_changed: true,
+        };
+      }
+      // wrong_state / not_found after the checks above means a race lost to
+      // another decision or the inline lapse — surface it as the generic 409.
+      return {
+        ok: false,
+        httpStatus: 409,
+        error: `Task is ${accepted.currentStatus ?? "no longer"} an open offer`,
+      };
+    }
+  } else {
+    await updateTaskStatus(paymentRequestId, "declined");
+  }
 
   log("info", decision === "accept" ? "offer_accepted" : "offer_declined", {
     payment_request_id: paymentRequestId,
