@@ -118,7 +118,8 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
         AgentConfirmed, // 0 — completeTask
         ReviewElapsed, // 1 — releaseAfterReview
         PassingVerdict, // 2 — claimWithVerdict
-        ArbitrationTimeout // 3 — releaseAfterArbitration
+        ArbitrationTimeout, // 3 — releaseAfterArbitration
+        OwnerEmergency // 4 — completeTaskByOwner (CC-049; scoped into CC-034)
     }
 
     /**
@@ -367,6 +368,39 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
         if (msg.sender != task.agent) revert NotAgent();
 
         _payOut(taskId, task, task.worker, CompletionRoute.AgentConfirmed);
+    }
+
+    /**
+     * @notice Owner-forced completion — pays the worker when the agent's release path is
+     *         gone (key rotation, loss, or an agent that is an unreachable contract).
+     *
+     * @dev CC-049 scoped this into the mainnet deploy because a fresh deployment is the
+     *      only cheap chance to add it (CC-034). Without it, tasks funded by an agent
+     *      whose key is later rotated or lost can only be settled through
+     *      dispute → resolveDispute, and resolveDispute is onlyOwner — so the recovery
+     *      runbook's answer to "the agent is gone" is "the owner rules a dispute", which
+     *      conflates an operational emergency with a substantive ruling, and burns a
+     *      verdict signature to do it.
+     *
+     *      Same state gates as completeTask: Funded or Delivered. Deliberately NOT
+     *      callable on Disputed or Arbitrating — those states are owned by
+     *      resolveDispute and releaseAfterArbitration, and an emergency path that could
+     *      pre-empt an active arbitration would let the owner overrule a pending ruling.
+     *      A disputed task does not need this to un-strand: the arbitration clock
+     *      (ADR-0006 D3) already pays the worker on timeout.
+     *
+     *      Pays task.worker, fixed at funding — never an arbitrary destination
+     *      (ADR-0001 D9; CC-080 re-stated this property for this exact function). Not
+     *      the agent: paying the agent here would duplicate
+     *      resolveDispute(taskId, false), which already exists.
+     */
+    function completeTaskByOwner(bytes32 taskId) external onlyOwner nonReentrant {
+        Task storage task = tasks[taskId];
+        if (task.state != TaskState.Funded && task.state != TaskState.Delivered) {
+            revert InvalidState(task.state, TaskState.Delivered);
+        }
+
+        _payOut(taskId, task, task.worker, CompletionRoute.OwnerEmergency);
     }
 
     /**
