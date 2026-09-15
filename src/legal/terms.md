@@ -1,4 +1,4 @@
-*Last updated: 23 August 2026*
+*Last updated: 16 September 2026*
 
 These are the terms for using Carbon Contractors. Read [our privacy policy](/privacy) too — it
 covers what we do with your data, this page covers everything else.
@@ -21,6 +21,27 @@ We are not a bank, a payment processor, a broker, or a financial adviser. We do 
 do not custody assets on your behalf, and do not give financial, legal, or tax advice. Nothing on
 this site is an inducement to invest. If a task involves cryptocurrency amounts that matter to you,
 get your own advice on the tax and legal consequences in your jurisdiction.
+
+## Where we sit under Australia's digital asset rules
+
+Australia's new digital asset framework (the Corporations Amendment (Digital Assets
+Framework) Bill 2025, passed April 2026) creates a regulated category of "digital
+asset platform" — broadly, a facility whose operator holds digital tokens, for itself
+or on behalf of someone else. It commences on 9 April 2027.
+
+Stated plainly: we do not believe Carbon Contractors is one. The strongest reason is
+the constraint above — we operate the machinery and referee disputes, but escrowed
+funds can only ever reach the two wallet addresses fixed when the task was funded, so
+nobody, us included, can direct the money anywhere else. That is our assessment of our
+own architecture. It is not legal advice and not a regulator's ruling, and we will put
+it in front of a lawyer before real funds move on mainnet.
+
+The framework also excludes small-scale platforms — annual transaction volume under
+$10 million, and under $5,000 held for any one client at a time. Both numbers are
+tracked automatically as part of the platform's regular invariant checks, and a
+threshold warning reaches the operator before a limit is crossed, not after. If growth
+ever puts either limb at risk, that is a decision point about the platform's
+structure — not a line we cross quietly.
 
 ## Accounts and wallets
 
