@@ -3,6 +3,9 @@
  *
  * GET /api/reputation?wallet=0x...
  * Returns computed reputation score, task history, stake data, and score breakdown.
+ *
+ * build probe cc-040 (2026-09-16): comment-only change to force a non-cached
+ * Vercel preview build; no executable change; safe to delete.
  */
 
 import { NextRequest, NextResponse } from "next/server";
