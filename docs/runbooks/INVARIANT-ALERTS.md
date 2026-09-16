@@ -120,6 +120,48 @@ node --env-file-if-exists=.env.local scripts/audit/run-monitors.mjs --no-alert
 
 ---
 
+### Invariant 5: `verify-uptime` (CC-040)
+* **Invariant:** Production `/api/health` answers HTTP 200 with every subsystem check `ok`, reporting the escrow address this repo pins.
+* **Alert Meaning:** The site is down, degraded (503 names the failing subsystem), or — for the MISCONFIG variant — healthy against the *wrong* escrow.
+* **Kill switch?** **No.** This is availability, not correctness (ADR-0003 D1's operational class). Existing tasks resolve on-chain regardless of the site.
+* **Triage Steps:**
+  1. Distinguish the variant from the alert body:
+     * `FAIL — … 503. Unhealthy: <subsystem>` — the site answers; a named subsystem does not. Fix that subsystem (database → Supabase status; escrow_contract → RPC/chain health; sessions → app restart).
+     * `FAIL — HTTP <n>` — the deployment or edge is broken (bad deploy, redirect loop, coming-soon gate capturing `/api/*`). Check Vercel deployments and roll back if the latest is the cause.
+     * `MISCONFIGURED — production reports escrow X, expected Y` — **the site is UP and this is still urgent.** The deployment's `NEXT_PUBLIC_ESCROW_CONTRACT` has drifted from what this repo monitors. Before any new task funds, determine which address is correct: `curl https://www.carbon-contractors.com/api/health` and compare against `docs/Security-Trust-Disclosure.md`'s deployment table. This is the exact class that let the scheduled monitors watch an empty superseded contract for 15 days (2026-09-01 → 2026-09-16, CC-040).
+  2. `TRANSIENT` after retries means the monitor's network path failed, not the site. Verify by hand: `curl -sS https://www.carbon-contractors.com/api/health`.
+  3. Sustained failure with a green GitHub Actions run means GitHub itself is the problem — that is what the independent external uptime monitor (CC-111) exists to catch.
+
+---
+
+### Invariant 6: `verify-privileged-events` (CC-040)
+* **Invariant:** Every `OwnershipTransferred` / `VerdictSignerUpdated` event in the escrow's history matches the committed allowlist (`scripts/audit/privileged-allowlist.mjs`).
+* **Alert Meaning:** Someone with the owner key moved authority on-chain in a way no PR authorised. This is the owner-compromise detector.
+* **Kill switch?** **Only if compromise is confirmed.** A confirmed unknown owner can pause or redirect everything — that is the one availability-class alert that escalates to §2.
+* **Triage Steps:**
+  1. Read the violation lines — which event, which block, which addresses:
+     ```bash
+     node scripts/audit/verify-privileged-events.mjs
+     ```
+  2. Do you recognise the `newOwner` / `signer` address?
+     * **Yes — it was an authorised rotation done out-of-band:** land a PR adding the event to the allowlist (tx hash, block, decoded args). The monitor goes green on the next run. Add the PR review as the missing step, not the event as an exception.
+     * **No:** treat as key compromise. Follow `docs/Key-Compromise-Recovery.md`. Do NOT pause claims (workers' funds must remain claimable); DO pause intake if the new owner can interfere with verdicts (`setVerdictSigner` → every task in review could auto-release on window close).
+  3. A **DRILL** line in the alert means a synthetic event was injected on purpose — not an incident.
+
+---
+
+### Application error alerts (CC-040 — the `onRequestError` relay)
+* **Alert shape:** `Carbon Contractors application error — <ErrorName> on /api/<route> (<type>)` in the ops webhook.
+* **Alert Meaning:** A request failed past its own error handling — an uncaught exception in a render, route handler, or server action. The structured line (event `request_error_uncaught`, with the error message and digest) is in the Vercel logs; the webhook deliberately carries class + route + digest only.
+* **Kill switch?** **No.** A single uncaught error is a bug, not an incident. The relay dedups identical (error, route) pairs per warm instance for 30 minutes, so a burst is one page, not four hundred.
+* **Triage Steps:**
+  1. In Vercel logs, filter `request_error_uncaught` and match the digest to get the full message and stack.
+  2. Reproduce locally against the same route if possible.
+  3. Escalate to §2 only if the failing route is on the money path (task funding, verdict issuance, claim) AND errors are sustained — a worker who cannot claim sees theft (ADR-0003).
+  4. Message content never reaches the webhook (privacy, CC-009/ADR-0002 D9); the log line is the only place it appears, through the masking-aware logger.
+
+---
+
 ## 4. Recovery & Resumption Protocol
 
 Once the root cause is resolved and verified:

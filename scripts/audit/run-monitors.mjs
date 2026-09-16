@@ -147,6 +147,27 @@ const MONITORS = [
     requires: [],
   },
   {
+    name: "verify-uptime",
+    script: "verify-uptime.mjs",
+    tier: "wake",
+    invariant:
+      "production /api/health answers healthy against the escrow this repo pins (CC-040)",
+    // UPTIME_TARGET_URL defaults to the production URL, so nothing is strictly
+    // required — but EXPECTED_ESCROW must be set in the workflow or the monitor
+    // exits MISCONFIG rather than passing vacuously. External-to-GitHub uptime
+    // (the second, independent path) is a PO action item, not this monitor.
+    requires: [],
+    note: "the GitHub-hosted half of uptime; the independent external check is CC-111",
+  },
+  {
+    name: "verify-privileged-events",
+    script: "verify-privileged-events.mjs",
+    tier: "wake",
+    invariant:
+      "every OwnershipTransferred / VerdictSignerUpdated event matches the committed allowlist",
+    requires: ["NEXT_PUBLIC_ESCROW_CONTRACT", "ESCROW_DEPLOY_BLOCK"],
+  },
+  {
     name: "verify-sanctions",
     script: "verify-sanctions.ts",
     exec: "tsx",

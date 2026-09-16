@@ -75,14 +75,30 @@ jobs:
     env:
       # Public values. See the note above on why these are not secrets.
       NEXT_PUBLIC_BASE_NETWORK: testnet
-      NEXT_PUBLIC_ESCROW_CONTRACT: "0xe80d03688E8fa6270668AD73191d353e522CB1b1"
+      # 0xc6aa…E4d3 is the CC-082 v2 redeploy of 2026-09-01 (Security-Trust-Disclosure),
+      # block 46227900. The previous value 0xe80d… (2026-08-15 deploy) was superseded at
+      # that cutover but this file was never re-pointed — so from 2026-09-01 to
+      # 2026-09-16 every scheduled monitor verified an empty contract and passed
+      # vacuously (verify-escrow-solvency CLEAN against totalLocked 0). The
+      # wrong-escrow class is exactly what the /api/health identity fields were added
+      # to catch; the workflow had the same hole. Any future redeploy MUST update this
+      # block and ESCROW_DEPLOY_BLOCK together (see docs/backlog/CC-040.md).
+      NEXT_PUBLIC_ESCROW_CONTRACT: "0xc6aa99a8226b679C71945dd9545685896a91E4d3"
       NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT: "0x4cdeF542F9361201f9543512eeCd1eE834793203"
       NEXT_PUBLIC_USDC_ADDRESS: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
       VERDICT_SIGNER_ADDRESS: "0xa8931097540e69B474013D294d0bA6A2cC853e4b"
       # CC-070: without this every getLogs query scans from genesis. Re-derive after any
       # redeploy with scripts/audit/find-deploy-block.mjs.
-      ESCROW_DEPLOY_BLOCK: "45494043"
+      ESCROW_DEPLOY_BLOCK: "46227900"
       RPC_MAX_BLOCK_RANGE: "10000"
+      # CC-040: uptime monitor. The production www URL, not the apex — the apex 307s to
+      # www and curl follows it, but stating the final target keeps a future redirect
+      # change from silently becoming "monitor checks the redirect, not the site".
+      UPTIME_TARGET_URL: "https://www.carbon-contractors.com/api/health"
+      # CC-040: pins the escrow production health must report. Must match
+      # NEXT_PUBLIC_ESCROW_CONTRACT above; stated separately so the uptime monitor can
+      # catch the two drifting apart (workflow watching one, deployment on another).
+      EXPECTED_ESCROW: "0xc6aa99a8226b679C71945dd9545685896a91E4d3"
 
       # Secrets. BASE_SEPOLIA_RPC_URL is optional — unset falls back to the public
       # endpoint, which is rate-limited (CC-048) and has no read-your-writes guarantee
