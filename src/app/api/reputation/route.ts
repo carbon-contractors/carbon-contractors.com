@@ -13,6 +13,10 @@ import { getFullReputation } from "@/lib/reputation";
 import { listSlashRecords } from "@/lib/db/slashes";
 import { safeErrorResponse } from "@/lib/errors";
 
+// build probe cc-040 (2026-09-16): exported constant forces a real (non-cached)
+// Vercel build — executable surface change on master's tree; safe to delete.
+export const PROBE_BUILD_FORCED = true;
+
 export async function GET(request: NextRequest) {
   const wallet = request.nextUrl.searchParams.get("wallet");
 
