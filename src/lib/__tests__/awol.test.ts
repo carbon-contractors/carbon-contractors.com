@@ -305,8 +305,8 @@ describe("evaluateAwolAtBooking — the inline auto-booking check", () => {
     });
     expect(mockSetAcceptsAutoBookingForContractor).not.toHaveBeenCalled();
     expect(mockNotifyAutoBookingDisabled).not.toHaveBeenCalled();
-    const events = logSpy.mock.calls.map((c) => String(c[0]));
-    expect(events.some((e) => e.includes("worker_awol_auto_disabled"))).toBe(false);
+    const events = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(events.some((e: string) => e.includes("worker_awol_auto_disabled"))).toBe(false);
   });
 
   it("auto-disables and notifies after 3 consecutive lapsed offers", async () => {
@@ -326,8 +326,8 @@ describe("evaluateAwolAtBooking — the inline auto-booking check", () => {
     });
 
     const event = logSpy.mock.calls
-      .map((c) => String(c[0]))
-      .find((e) => e.includes("worker_awol_auto_disabled"));
+      .map((c: unknown[]) => String(c[0]))
+      .find((e: string) => e.includes("worker_awol_auto_disabled"));
     expect(event).toBeDefined();
     expect(event).toContain('"signal":"lapsed_offers"');
 
@@ -336,7 +336,7 @@ describe("evaluateAwolAtBooking — the inline auto-booking check", () => {
     // realistic one to prove it engaged.
     const HEX_WALLET = "0x1234567890abcdef1234567890abcdef12345678";
     await decideWithHistory(["lapsed", "lapsed", "lapsed"], HEX_WALLET);
-    const logged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    const logged = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
     expect(logged).not.toContain(HEX_WALLET);
     expect(logged).toContain("0x1234...5678");
   });
@@ -380,8 +380,8 @@ describe("evaluateAwolAtBooking — the inline auto-booking check", () => {
 
     expect(decision.triggered).toBe(true);
     expect(mockSetAcceptsAutoBookingForContractor).toHaveBeenCalled();
-    const events = logSpy.mock.calls.map((c) => String(c[0]));
-    expect(events.some((e) => e.includes("worker_awol_notification_failed"))).toBe(true);
+    const events = logSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(events.some((e: string) => e.includes("worker_awol_notification_failed"))).toBe(true);
   });
 
   it("reads the worker's own task history by wallet", async () => {

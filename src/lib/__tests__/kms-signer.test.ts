@@ -75,11 +75,15 @@ const { mockGetPublicKey, mockAsymmetricSign, mockGetVercelOidcToken } =
   }));
 
 vi.mock("@google-cloud/kms", () => ({
-  KeyManagementServiceClient: vi.fn().mockImplementation(() => ({
-    getPublicKey: mockGetPublicKey,
-    asymmetricSign: mockAsymmetricSign,
-    initialize: vi.fn(),
-  })),
+  // vitest 5: an arrow mockImplementation is not constructible — `new` needs
+  // a function expression (which may legally return the mock instance).
+  KeyManagementServiceClient: vi.fn().mockImplementation(function () {
+    return {
+      getPublicKey: mockGetPublicKey,
+      asymmetricSign: mockAsymmetricSign,
+      initialize: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock("@vercel/oidc", () => ({
@@ -87,7 +91,9 @@ vi.mock("@vercel/oidc", () => ({
 }));
 
 vi.mock("google-auth-library", () => ({
-  IdentityPoolClient: vi.fn().mockImplementation(() => ({})),
+  IdentityPoolClient: vi.fn().mockImplementation(function () {
+    return {};
+  }),
 }));
 
 // ── Env stubs ───────────────────────────────────────────────────────────────

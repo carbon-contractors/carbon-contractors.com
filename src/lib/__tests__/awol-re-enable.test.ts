@@ -185,7 +185,7 @@ describe("notifyAutoBookingDisabled dispatch (CC-075, delivered since CC-095)", 
     // Nothing at all is logged by the notice path itself — outcomes travel
     // as structured records returned to the caller (awol.ts logs its own
     // summary). Channel addresses are PII (ADR-0002 D9) regardless.
-    const logged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    const logged = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
     expect(logged).not.toContain("worker@example.com");
     expect(logged).not.toContain("12345");
   });
