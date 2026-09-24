@@ -451,6 +451,20 @@
 
 /* ── Dispute ─────────────────────────────────────────────────────────── */
 
+.reputationExplainer {
+  font-size: 13px;
+  color: var(--cc-text-muted);
+  line-height: 1.5;
+  margin-top: 0.75rem;
+}
+
+.reputationExplainer a {
+  color: var(--cc-blue-bright);
+  text-decoration: underline;
+  text-decoration-color: rgba(60, 138, 255, 0.3);
+  text-underline-offset: 2px;
+}
+
 .disputeSection {
   margin-top: 0.75rem;
   padding-top: 0.75rem;

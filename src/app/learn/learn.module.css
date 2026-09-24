@@ -26,10 +26,10 @@
 }
 
 .subtitle {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--cc-text-secondary);
   line-height: 1.6;
-  max-width: 480px;
+  max-width: 520px;
 }
 
 /* Module card grid */
@@ -86,7 +86,7 @@
 }
 
 .cardDesc {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--cc-text-muted);
   line-height: 1.5;
   margin-bottom: 8px;

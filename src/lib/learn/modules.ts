@@ -39,9 +39,9 @@ export const LEARN_MODULES: LearnModule[] = [
     slug: "spending-your-usdc-in-australia",
     title: "Spending Your USDC in Australia",
     moduleNumber: 4,
-    readTime: "3 min",
+    readTime: "4 min",
     description:
-      "Getting AUD out of USDC, without the week-long wait. Plus what to check before you trust anyone with it.",
+      "Two ways to spend it: crypto cards that convert at checkout, or the classic exchange-and-withdraw. What's available in Australia right now.",
     filename: "module-4-spending-your-usdc-in-australia.md",
   },
   {
