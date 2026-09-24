@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from "wagmi";
+import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from "wagmi";
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
 import { CATEGORIES, validateCategorySelection } from "@/lib/categories";
@@ -29,6 +29,7 @@ import {
 import type { CheckResult } from "@/lib/checker/types";
 import PageShell from "@/components/PageShell";
 import { isNewWorker } from "@/lib/reputation/compute";
+import { chain as appChain } from "@/lib/wallet/providers";
 import styles from "./dashboard.module.css";
 
 // ── ABIs for write operations ───────────────────────────────────────────────
@@ -401,6 +402,8 @@ export default function DashboardPage() {
     Record<string, { ok: boolean; text: string; checks?: CheckResult[] }>
   >({});
   const [stakeStep, setStakeStep] = useState<"idle" | "approving" | "staking" | "unstaking">("idle");
+  const [stakeError, setStakeError] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [rateInput, setRateInput] = useState("");
   const [editCategories, setEditCategories] = useState<string[]>([]);
@@ -429,10 +432,24 @@ export default function DashboardPage() {
   // disable every other control in the panel.
   const [autoBookBusy, setAutoBookBusy] = useState<string | null>(null);
 
-  const { writeContract, writeContractAsync, data: txHash } = useWriteContract();
+  const {
+    writeContract,
+    writeContractAsync,
+    data: txHash,
+    error: writeContractError,
+    reset: resetWriteContract,
+  } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
-  const { isSuccess: txConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
-
+  const {
+    isSuccess: txConfirmed,
+    isError: txFailed,
+    error: txReceiptError,
+  } = useWaitForTransactionReceipt({ hash: txHash });
+  const { data: usdcBalance } = useBalance({
+    address,
+    token: USDC_ADDRESS as `0x${string}`,
+    chainId: appChain.id,
+  });
   const stakeContractAddress = reputation?.stake?.contract as `0x${string}` | undefined;
 
   // CC-010: 0 tasks + 0 stake means "new", not "score of zero".
@@ -455,8 +472,32 @@ export default function DashboardPage() {
   // own native ones on actual contract writes — a session is not a wallet.
   const sessionRef = useRef<{ minting: Promise<boolean> | null }>({ minting: null });
 
+  /**
+   * NOR-342: minting a session needs a signature, and a signature needs a
+   * user gesture. This ref is set by the click handlers that legitimately
+   * own a gesture (an explicit sign-in button, a task action); it stays
+   * false on page load, so no mount effect can ever trigger a wallet
+   * popup that mobile browsers then block — the "forced second login /
+   * This page couldn't load" walkthrough failure.
+   */
+  const userGestureRef = useRef(false);
+
+  /** Silently check whether a session cookie already authenticates us. */
+  const probeSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/auth/session");
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const ensureSession = useCallback(async (): Promise<boolean> => {
     if (!address) return false;
+    // A probe first: with a live session this resolves with no prompt, and
+    // the gesture gate below is never even consulted.
+    if (await probeSession()) return true;
+    if (!userGestureRef.current) return false;
     if (sessionRef.current.minting) return sessionRef.current.minting;
     const mint = (async () => {
       try {
@@ -488,7 +529,7 @@ export default function DashboardPage() {
     })();
     sessionRef.current.minting = mint;
     return mint;
-  }, [address, signMessageAsync]);
+  }, [address, signMessageAsync, probeSession]);
 
   const authHeaders = useCallback((): Record<string, string> => {
     // The session rides the httpOnly SameSite=Strict cookie; this only
@@ -590,9 +631,68 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, [isConnected, address, fetchTasks]);
 
+  // Wallet left: clear the dashboard's wallet-scoped state. When connected,
+  // the NOR-342 probe effect below owns initial loading.
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (!isConnected || !address) {
+      setTasks([]);
+      setReputation(null);
+      setProfile(null);
+      setNeedsSignIn(false);
+      setSessionChecked(false);
+    }
+  }, [isConnected, address]);
+
+
+  // ── NOR-342: probe, don't prompt ──────────────────────────────────────────
+  // A live session loads everything with zero prompts. An absent one shows
+  // the explicit sign-in button instead of a wallet popup on page load.
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    let cancelled = false;
+    setSessionChecked(false);
+    setNeedsSignIn(false);
+    (async () => {
+      const live = await probeSession();
+      if (cancelled) return;
+      if (live) {
+        fetchData();
+        fetchTasks();
+        loadSessions();
+      } else {
+        setNeedsSignIn(true);
+      }
+      setSessionChecked(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, address]);
+
+
+  /**
+   * NOR-342: the explicit, gesture-owned sign-in. Called only from the
+   * "Sign in to see your work" button (and revoke-all's "sign back in"
+   * affordance). One click, one signature, one session — and nothing ever
+   * prompts on page load again.
+   */
+  const handleSignIn = useCallback(async () => {
+    userGestureRef.current = true;
+    setSigningIn(true);
+    try {
+      await ensureSession();
+      setNeedsSignIn(false);
+      await Promise.all([fetchTasks(), fetchData(), loadSessions()]);
+    } finally {
+      setSigningIn(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ensureSession, fetchTasks, fetchData]);
+
 
   // Refresh after tx confirms
   useEffect(() => {
@@ -600,12 +700,54 @@ export default function DashboardPage() {
       setStakeStep("idle");
       setStakeInput("");
       setUnstakeInput("");
+      setStakeError(null);
       fetchData();
     }
   }, [txConfirmed, fetchData]);
 
+  // ── Contract-write failure handling (NOR-345/346) ────────────────────────
+  // Previously nothing read `writeContractError` or the receipt's failure
+  // state: any rejected signature, failed simulation or reverted transaction
+  // left `stakeStep` parked on "Staking…" forever with the inputs disabled —
+  // the exact walkthrough failure. Now every failure path resets the state
+  // machine and shows a translated sentence instead.
+  useEffect(() => {
+    if (!writeContractError) return;
+    setStakeError(
+      explainContractError(
+        writeContractError,
+        "The transaction could not be sent — nothing was changed on-chain. Try again.",
+      ),
+    );
+    setStakeStep("idle");
+    resetWriteContract();
+  }, [writeContractError, resetWriteContract]);
+
+  useEffect(() => {
+    if (!txFailed) return;
+    setStakeError(
+      explainContractError(
+        txReceiptError,
+        "The transaction was sent but failed on-chain — nothing was staked. Try again.",
+      ),
+    );
+    setStakeStep("idle");
+  }, [txFailed, txReceiptError]);
+
+
   function handleStake() {
     if (!stakeContractAddress || !stakeInput) return;
+
+    // NOR-346: never ask for a signature an underfunded wallet can only
+    // honour with a failure. The panel shows the balance, so this guard
+    // firing is legible rather than a mystery.
+    if (stakeExceedsBalance) {
+      setStakeError(
+        "This wallet doesn't hold enough USDC for that stake — see the balance above. Your funds may be in a different wallet than the one you connected.",
+      );
+      return;
+    }
+    setStakeError(null);
     const amountWei = BigInt(Math.round(parseFloat(stakeInput) * 10 ** USDC_DECIMALS));
 
     if (stakeStep === "idle") {
@@ -653,6 +795,21 @@ export default function DashboardPage() {
   const cooldownDate = reputation?.stake?.staked_at
     ? new Date((reputation.stake.staked_at + 7 * 24 * 3600) * 1000)
     : null;
+
+  // ── Stake preflight (NOR-346) ─────────────────────────────────────────────
+  // The walkthrough failure was the bundler refusing an underfunded
+  // UserOperation with "ERC20: transfer amount exceeds balance" — the USDC
+  // sat in a different wallet than the one connected. A read-only balance
+  // query makes that visible BEFORE a signature is requested, and blocks the
+  // attempt that could only fail after one.
+  const usdcBalanceUnits = usdcBalance
+    ? Number(usdcBalance.value) / 10 ** (usdcBalance.decimals ?? USDC_DECIMALS)
+    : null;
+  const stakeExceedsBalance =
+    usdcBalanceUnits !== null &&
+    stakeInput !== "" &&
+    !Number.isNaN(parseFloat(stakeInput)) &&
+    parseFloat(stakeInput) > usdcBalanceUnits;
 
   const escrowContract = process.env.NEXT_PUBLIC_ESCROW_CONTRACT as `0x${string}` | undefined;
 
@@ -1344,10 +1501,18 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (data.ok) {
-        // This session is gone too — the next off-chain action mints a new
-        // one with a single signature.
+        // NOR-347: this session is gone too, so the dashboard reflects that
+        // immediately — signed-out view, and an explicit "sign back in"
+        // rather than the page silently re-authenticating on the next
+        // background fetch (which would read as "sign out everywhere
+        // didn't work" on any other browser, and as a surprise prompt on
+        // this one).
         setSessions([]);
         setSessionsLoaded(true);
+        setNeedsSignIn(true);
+        setTasks([]);
+        // Reputation and profile are public projections — no need to drop
+        // them; the sign-in gate only guards wallet-scoped reads.
       } else {
         setSessionsError(data.error ?? "Failed to revoke sessions");
       }
@@ -1364,13 +1529,6 @@ export default function DashboardPage() {
     setSessionsLoaded(false);
     setSessionsError("");
   }, [address]);
-
-  useEffect(() => {
-    if (isConnected && address) {
-      loadSessions();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, address]);
 
   async function loadChannels() {
     if (!address) return;
@@ -1585,6 +1743,27 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
+            {needsSignIn && !sessionChecked ? null : needsSignIn ? (
+              <div className={styles.hero}>
+                <h2>Worker Dashboard</h2>
+                <p>
+                  Sign in once to see your tasks, reputation and sessions —
+                  one wallet signature, then this browser stays signed in for
+                  30 days.
+                </p>
+                <button
+                  type="button"
+                  className={styles.retryButton}
+                  onClick={handleSignIn}
+                  disabled={signingIn}
+                >
+                  {signingIn
+                    ? "Confirm in wallet..."
+                    : "Sign in to see your work"}
+                </button>
+              </div>
+            ) : (
+              <>
             {loading && <p className={styles.loading}>Loading...</p>}
             {(errors.tasks || errors.reputation) && (
               <div className={styles.fetchErrorBanner}>
@@ -1745,12 +1924,25 @@ export default function DashboardPage() {
                           )}
 
                         <div className={styles.stakeActions}>
+                          {usdcBalanceUnits !== null && (
+                            <p className={styles.balanceNote}>
+                              Connected wallet holds{" "}
+                              <strong>{usdcBalanceUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC</strong>
+                              {usdcBalanceUnits < 20 && " — below the 20 USDC minimum stake"}
+                            </p>
+                          )}
+                          {stakeError && (
+                            <p className={styles.stakeError}>{stakeError}</p>
+                          )}
                           <div className={styles.stakeInputGroup}>
                             <input
                               type="number"
                               placeholder="Amount (min 20)"
                               value={stakeInput}
-                              onChange={(e) => setStakeInput(e.target.value)}
+                              onChange={(e) => {
+                                setStakeInput(e.target.value);
+                                setStakeError(null);
+                              }}
                               className={styles.stakeInput}
                               min="20"
                               step="1"
@@ -2523,6 +2715,8 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+            )}
+              </>
             )}
           </>
         )}

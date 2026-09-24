@@ -104,6 +104,36 @@ export function isWalletRejection(err: unknown): boolean {
   return false;
 }
 
+/**
+ * Substring matches for failures that are NOT custom-error names — the
+ * ERC-4337 bundler path and OpenZeppelin's ERC-20 reverts arrive as English
+ * sentences, not `Name(...)` decodes, so NAME_MATCHERS can never see them.
+ * Each needle below was seen in a real failure (NOR-346: a Base Account
+ * staking attempt with the USDC in a different wallet), not invented.
+ *
+ * Order matters and is preserved at the call site: the ERC-20 needle is the
+ * *cause* inside the bundler's wrapper message, so it must win over the
+ * generic user-operation phrasing — matching the wrapper first would blame
+ * gas when the actual refusal was the token transfer.
+ */
+const MESSAGE_MATCHERS: { needle: string; sentence: string }[] = [
+  {
+    needle: "transfer amount exceeds balance",
+    sentence:
+      "The wallet you connected doesn't hold enough USDC for this — check the balance shown in the panel, and that you connected the wallet your funds are in.",
+  },
+  {
+    needle: "insufficient balance to perform useroperation",
+    sentence:
+      "Your wallet's balance is too low for this action — either the USDC amount or the gas needed to send it. Check the balance shown in the panel.",
+  },
+  {
+    needle: "insufficient funds for gas",
+    sentence:
+      "The wallet doesn't have enough to pay gas for this transaction.",
+  },
+];
+
 /** Walk the cause chain looking for a custom-error name we can translate. */
 function findRevertName(err: unknown): string | null {
   let node = err as {
@@ -140,5 +170,36 @@ export function explainContractError(err: unknown, fallback: string): string {
   if (reason) {
     return KNOWN_REVERTS[reason];
   }
+  // Sentence-shaped failures (bundler / ERC-20) before the fallback: the
+  // ERC-20 needle is listed first and wins when both appear in one message,
+  // so the worker hears "wrong wallet / not enough USDC" rather than "gas".
+  const sentence = findMessageMatch(err);
+  if (sentence) {
+    return sentence;
+  }
   return fallback;
+}
+
+/** Walk the cause chain for a known English-sentence failure (see MESSAGE_MATCHERS). */
+function findMessageMatch(err: unknown): string | null {
+  let node = err as {
+    message?: unknown;
+    shortMessage?: unknown;
+    details?: unknown;
+    cause?: unknown;
+  } | null;
+  let depth = 0;
+  while (node && typeof node === "object" && depth++ < 10) {
+    const lower = [node.message, node.shortMessage, node.details]
+      .filter((v): v is string => typeof v === "string")
+      .join(" ")
+      .toLowerCase();
+    for (const { needle, sentence } of MESSAGE_MATCHERS) {
+      if (lower.includes(needle)) {
+        return sentence;
+      }
+    }
+    node = node.cause as typeof node;
+  }
+  return null;
 }
