@@ -84,10 +84,10 @@
 }
 
 .navTitle {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--cc-text-secondary);
-  line-height: 1.3;
+  line-height: 1.4;
 }
 
 @media (max-width: 480px) {

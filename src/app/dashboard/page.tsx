@@ -1840,6 +1840,17 @@ export default function DashboardPage() {
                           <span>{reputation.tasks.completion_rate}% rate</span>
                         )}
                       </div>
+                      {/* NOR-349: the score needed a sentence of its own — the
+                          PO's walkthrough read the breakdown grid as noise
+                          ("Reputation?"). One plain-language line, the exact
+                          arithmetic, and where to read more. */}
+                      <p className={styles.reputationExplainer}>
+                        Score is 0–100 from four parts: completed ÷ total tasks
+                        (max 40), task volume (max 20), recent activity (max
+                        20), and your stake (max 20). Disputes reduce it.{" "}
+                        <Link href="/learn">See Learn</Link> for how offers
+                        reach you.
+                      </p>
                     </>
                   )}
                 </div>

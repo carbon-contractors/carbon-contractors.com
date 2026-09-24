@@ -1,8 +1,8 @@
 .markdown {
-  line-height: 1.7;
+  line-height: 1.75;
   color: var(--cc-text);
-  font-family: var(--cc-font-mono);
-  font-size: 15px;
+  font-family: var(--cc-font-sans);
+  font-size: 16px;
 }
 
 /* Headings */
@@ -38,18 +38,6 @@
   margin-top: 0;
 }
 
-/* Paragraphs */
-.markdown p {
-  margin: 0.75rem 0;
-  color: var(--cc-text-secondary);
-}
-
-/* Strong/Bold */
-.markdown strong {
-  color: var(--cc-text);
-  font-weight: 600;
-}
-
 /* Links */
 .markdown a {
   color: var(--cc-blue-bright);
@@ -59,8 +47,17 @@
   transition: text-decoration-color 0.15s;
 }
 
-.markdown a:hover {
-  text-decoration-color: var(--cc-blue-bright);
+/* Paragraph text lifted to GitHub-docs primary-prose grey — the NOR-350
+   complaint was grey-on-black strain, not the palette. */
+.markdown p {
+  margin: 0.75rem 0;
+  color: #c9d1d9;
+}
+
+/* Strong/Bold */
+.markdown strong {
+  color: var(--cc-text);
+  font-weight: 600;
 }
 
 /* Lists */

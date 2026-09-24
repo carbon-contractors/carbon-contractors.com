@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
-import { Roboto_Mono } from "next/font/google";
+import { Inter, Roboto_Mono } from "next/font/google";
 import { WalletProviders } from "@/lib/wallet/providers";
 import "./globals.css";
+
+const inter = Inter({
+  variable: "--font-sans",
+  subsets: ["latin"],
+  display: "swap",
+});
 
 const robotoMono = Roboto_Mono({
   variable: "--font-mono",
@@ -52,7 +58,7 @@ export default function RootLayout({
           content="de413dae5b37b5b1b56fab86c0c5acc72bd302ef6aae22d2868058dad9215f291f7f28b1faa16390dd0eeedb6c9ca7f879d10a2d94be692c8b9f7f7601c2b821"
         />
       </head>
-      <body className={robotoMono.variable}>
+      <body className={`${robotoMono.variable} ${inter.variable}`}>
         <WalletProviders>{children}</WalletProviders>
       </body>
     </html>

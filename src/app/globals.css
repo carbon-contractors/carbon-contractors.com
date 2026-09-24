@@ -25,8 +25,15 @@
   --cc-red: #ff4444;
   --cc-yellow: #fbbf24;
 
-  /* Typography — full monospace sitewide */
+  /* Typography — sans for prose/UI (GitHub-docs readability, NOR-350/341),
+     mono kept for code, eyebrows, and numeric labels (Base-brand feel). */
+  --cc-font-sans: var(--font-sans), -apple-system, 'Segoe UI', sans-serif;
   --cc-font-mono: var(--font-mono), 'Roboto Mono', monospace;
+
+  /* NOR-350: muted text lifted toward GitHub's #8b949e — readable on black
+     without pretending it's primary content. */
+  --cc-text-muted: #82898f;
+  --cc-text-faint: #6e7681;
 
   color-scheme: dark;
 }
@@ -47,7 +54,9 @@ body {
 body {
   background: var(--cc-bg);
   color: var(--cc-text);
-  font-family: var(--cc-font-mono);
+  font-family: var(--cc-font-sans);
+  font-size: 16px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
