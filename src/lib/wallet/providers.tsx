@@ -6,7 +6,7 @@ import { base, baseSepolia } from "wagmi/chains";
 import { baseAccount, injected } from "wagmi/connectors";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const chain =
+export const chain =
   process.env.NEXT_PUBLIC_BASE_NETWORK === "mainnet" ? base : baseSepolia;
 
 /**

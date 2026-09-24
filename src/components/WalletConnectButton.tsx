@@ -63,8 +63,30 @@ export default function WalletConnectButton({
     }
   }, [isConnected, activeConnector, config.storage]);
 
-  /** Every connect path funnels through here: picker, resume, post-switch. */
+  /**
+   * Every connect path funnels through here: picker, resume, post-switch.
+   *
+   * `injected` with no window.ethereum rejects with a developer-facing
+   * message that never reached the screen (NOR-340) — the picker branch
+   * didn't render the connect error at all, so on a browser with no wallet
+   * extension the "Other Wallet" button did nothing visible. Check for a
+   * provider first and explain in plain terms; a late-injecting wallet is
+   * still covered because the rejection itself now renders too.
+   */
+  const [pickerNote, setPickerNote] = useState<string | null>(null);
+
   function connectWith(connector: Connector) {
+    if (
+      connector.id === "injected" &&
+      typeof window !== "undefined" &&
+      !(window as { ethereum?: unknown }).ethereum
+    ) {
+      setPickerNote(
+        "No browser wallet found. Install one (for example MetaMask) and reload this page — or use the passkey option, which needs no install.",
+      );
+      return;
+    }
+    setPickerNote(null);
     connect({ connector });
   }
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -123,12 +145,22 @@ export default function WalletConnectButton({
             <span className={styles.walletFullAddress}>{address}</span>
             <button
               className={styles.walletDisconnect}
-              onClick={() => {
+              onClick={async () => {
                 // Explicit disconnect means what it says: the next visit starts
                 // from "Connect Wallet", not an offer to resume the session the
                 // user just chose to end (CC-071).
                 void clearRecentWalletId(config.storage);
-                disconnect();
+                try {
+                  await disconnect();
+                } catch (err) {
+                  // NOR-348: a connector whose disconnect() throws (smart
+                  // accounts sometimes do mid-session) previously left the
+                  // button looking dead — clear the marker and say what
+                  // happened instead of failing silently.
+                  setSwitchNote(
+                    `Couldn't fully disconnect this wallet: ${err instanceof Error ? err.message : "unknown error"}. Your session marker was cleared — reload the page if the button still shows as connected.`,
+                  );
+                }
                 setDropdownOpen(false);
                 onAction?.();
               }}
@@ -162,6 +194,7 @@ export default function WalletConnectButton({
         >
           {switching ? "Asking your wallet..." : "Use a different wallet"}
         </button>
+        {pickerNote && <p className={styles.walletNote}>{pickerNote}</p>}
         {error && <p className={styles.walletError}>{error.message}</p>}
       </div>
     );
@@ -176,6 +209,8 @@ export default function WalletConnectButton({
         {isPending ? "Connecting..." : "Connect Wallet"}
       </button>
       {switchNote && <p className={styles.walletNote}>{switchNote}</p>}
+      {pickerNote && <p className={styles.walletNote}>{pickerNote}</p>}
+      {error && <p className={styles.walletError}>{error.message}</p>}
       {dropdownOpen && (
         <div className={dropdownClass}>
           {connectors.map((connector) => (

@@ -78,3 +78,57 @@ describe("explainContractError (NOR-329)", () => {
     expect(explainContractError(revertError("the window is closed"), FALLBACK)).toBe(FALLBACK);
   });
 });
+
+describe("explainContractError sentence matchers (NOR-346)", () => {
+  // The real walkthrough failure: a Base Account staking attempt whose
+  // UserOperation simulation failed with the ERC-20 balance check inside
+  // the bundler's English wrapper message.
+  const bundlerError = {
+    name: "ExecutionRevertedError",
+    message:
+      "Failed to estimate gas for user operation: insufficient balance to perform useroperation: ERC20: transfer amount exceeds balance",
+    cause: {
+      name: "UserOperationRejected",
+      message: "the ERC-20 transfer would exceed the account's balance",
+    },
+  };
+
+  it("translates the ERC-4337 bundler + ERC-20 underfunded failure", () => {
+    const text = explainContractError(bundlerError, FALLBACK);
+    expect(text).toContain("doesn't hold enough USDC");
+    expect(text).not.toBe(FALLBACK);
+  });
+
+  it("blames the token transfer, not gas, when both needles appear", () => {
+    // The ERC-20 cause must win over the generic user-operation wrapper —
+    // matching the wrapper first would tell the worker "gas", when the
+    // refusal was the transfer.
+    expect(text_of_bundler_only()).toContain("USDC");
+  });
+
+  function text_of_bundler_only() {
+    return explainContractError(bundlerError, FALLBACK);
+  }
+
+  it("translates the generic insufficient-useroperation-balance case", () => {
+    const err = {
+      message: "insufficient balance to perform useroperation",
+    };
+    const text = explainContractError(err, FALLBACK);
+    expect(text).toContain("balance is too low");
+    expect(text).not.toBe(FALLBACK);
+  });
+
+  it("translates insufficient gas", () => {
+    const err = { message: "insufficient funds for gas \"price\"" };
+    const text = explainContractError(err, FALLBACK);
+    expect(text).toContain("enough to pay gas");
+    expect(text).not.toBe(FALLBACK);
+  });
+
+  it("still returns the fallback for unknown sentence shapes", () => {
+    expect(explainContractError({ message: "totally novel failure" }, FALLBACK)).toBe(
+      FALLBACK,
+    );
+  });
+});
