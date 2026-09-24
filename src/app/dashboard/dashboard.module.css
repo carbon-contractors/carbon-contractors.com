@@ -436,6 +436,19 @@
   color: var(--cc-yellow);
 }
 
+.balanceNote {
+  font-size: 0.75rem;
+  color: var(--cc-text-muted, #9aa4b2);
+  margin: 0 0 0.5rem;
+}
+
+.stakeError {
+  font-size: 0.8rem;
+  color: var(--cc-red, #ff6b6b);
+  margin: 0 0 0.5rem;
+  white-space: pre-line;
+}
+
 /* ── Dispute ─────────────────────────────────────────────────────────── */
 
 .disputeSection {
