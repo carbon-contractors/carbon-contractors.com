@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { verdictLine } from "../verdict-line.mjs";
-import { isTransient, shortError } from "../rpc-retry.mjs";
+import { isTransient, shortError, rangeLimitHint } from "../rpc-retry.mjs";
 
 // The exact shape that produced a useless Discord alert on 2026-08-17: viem's message ends
 // with its version footer, and the old fallback returned the last line.
@@ -88,6 +88,36 @@ describe("rpc-retry classification (CC-085)", () => {
     ]) {
       expect(isTransient(new Error(msg)), msg).toBe(false);
     }
+  });
+
+  it("does NOT retry a getLogs range refusal, even wrapped in 'RPC Request failed'", () => {
+    // The exact shape sepolia.base.org returned on every scheduled run 2026-09-15..25:
+    // viem's generic header (which matches the transient list) over a deterministic cap.
+    const err = new Error(
+      "RPC Request failed.\n\nURL: https://sepolia.base.org\nRequest body: {...}\n\n" +
+        "Details: eth_getLogs is limited to a 1,000 range\nVersion: viem@2.55.10",
+    );
+    err.name = "RpcRequestError";
+
+    expect(isTransient(err)).toBe(false);
+    expect(rangeLimitHint(err)).toContain("its cap is 1,000 blocks");
+    expect(rangeLimitHint(err)).toContain("Not transient");
+  });
+
+  it("recognises other providers' range-cap wording, without a stated cap", () => {
+    for (const msg of [
+      "RPC Request failed. Details: block range is too large",
+      "RPC Request failed. Details: exceed maximum block range: 5000",
+      "RPC Request failed. Details: query returned more than 10000 results",
+    ]) {
+      expect(isTransient(new Error(msg)), msg).toBe(false);
+      expect(rangeLimitHint(new Error(msg)), msg).toMatch(/^the RPC provider refuses/);
+    }
+  });
+
+  it("rangeLimitHint is null for anything that is not a range refusal", () => {
+    expect(rangeLimitHint(new Error("HTTP request failed.\nStatus: 429"))).toBeNull();
+    expect(rangeLimitHint(new Error("execution reverted: NotAgent()"))).toBeNull();
   });
 
   it("shortError takes the first line, not viem's version footer", () => {

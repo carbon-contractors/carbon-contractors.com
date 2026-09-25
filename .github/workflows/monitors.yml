@@ -90,7 +90,20 @@ jobs:
       # CC-070: without this every getLogs query scans from genesis. Re-derive after any
       # redeploy with scripts/audit/find-deploy-block.mjs.
       ESCROW_DEPLOY_BLOCK: "46227900"
-      RPC_MAX_BLOCK_RANGE: "10000"
+      # A provider property, not ours (CC-070). The public sepolia.base.org endpoint caps
+      # eth_getLogs at 1,000 blocks as of 2026-09-25 — but at 1,000 the deploy-to-head
+      # sweep is ~1,000 requests per event per monitor and one monitor alone overruns the
+      # job timeout, so lowering this is not the fix: a dedicated endpoint is. Set the repo
+      # variable to that provider's cap alongside BASE_SEPOLIA_RPC_URL. Until then the
+      # sweeping monitors report MISCONFIGURED (range refused), which is the truth.
+      RPC_MAX_BLOCK_RANGE: ${{ vars.RPC_MAX_BLOCK_RANGE || '10000' }}
+      # CC-036 / ADR-0008. The OP Stack SchemaRegistry predeploy — same address on Base and
+      # Base Sepolia (chain-constants.json, verified 2026-08-31). Missing from this file
+      # until 2026-09-25, so verify-eas-schema SKIPped on every scheduled run.
+      EAS_SCHEMA_REGISTRY_ADDRESS: "0x4200000000000000000000000000000000000020"
+      # ADR-0011 (proposed): which run classes post to the webhook immediately. Default
+      # breach-only; misconfig/unchecked withhold the heartbeat and page via its grace.
+      MONITOR_WEBHOOK_ON: ${{ vars.MONITOR_WEBHOOK_ON }}
       # CC-040: uptime monitor. The production www URL, not the apex — the apex 307s to
       # www and curl follows it, but stating the final target keeps a future redirect
       # change from silently becoming "monitor checks the redirect, not the site".

@@ -420,7 +420,22 @@ async function main() {
   if (noAlert) {
     console.log("alerting  suppressed (--no-alert)");
   } else {
-    const wantWebhook = !green || process.env.MONITOR_HEARTBEAT_ON_SUCCESS === "1";
+    // Which classes page immediately (ADR-0011, proposed). Default: breach only — an
+    // invariant observed VIOLATED, i.e. money may be moving wrongly. misconfig and
+    // unchecked mean "we could not look", which is real but not urgent on a single run:
+    // they skip the heartbeat ping instead (below), so the dead-man's switch pages only
+    // once they have persisted past its grace period. Measured before this change:
+    // every run from 2026-09-15 to 2026-09-25 was red, none was a breach, and each one
+    // paged — the fatigue ADR-0003 warned about, delivered by the monitors themselves.
+    // MONITOR_WEBHOOK_ON=breach,misconfig,unchecked restores the old behaviour.
+    const pageOn = new Set(
+      (process.env.MONITOR_WEBHOOK_ON || "breach").split(",").map((s) => s.trim()).filter(Boolean),
+    );
+    const wantWebhook = pageOn.has(kind) || process.env.MONITOR_HEARTBEAT_ON_SUCCESS === "1";
+    if (!green && !wantWebhook) {
+      console.log(`alerting  class '${kind}' does not page (MONITOR_WEBHOOK_ON=${[...pageOn].join(",")}) —`);
+      console.log("          it withholds the heartbeat instead; the dead-man's switch pages if it persists");
+    }
     if (wantWebhook) {
       const res = await postWebhook(body);
       if (!res.attempted) {
@@ -432,7 +447,7 @@ async function main() {
         console.log(`alerting  WEBHOOK DELIVERY FAILED (${res.detail})`);
         deliveryFailed = true;
       }
-    } else {
+    } else if (green) {
       console.log("alerting  all clear — no webhook post (set MONITOR_HEARTBEAT_ON_SUCCESS=1 to change)");
     }
 
@@ -445,11 +460,22 @@ async function main() {
     // because someone tested the webhook makes its own history lie, and the history is
     // the only thing that distinguishes "the schedule stopped" from "everything is fine".
     // Drills exercise path 1. Path 2 proves itself on every real green run.
+    //
+    // Three outcomes, not two (ADR-0011): green pings, breach sends /fail (down now), and
+    // misconfig/unchecked send NOTHING. Silence lets the service's own period + grace
+    // decide — so a monitor that could not look for one run costs nothing, and one that
+    // has not looked for longer than the grace pages exactly once. Set the grace to the
+    // longest "unverified" window you will tolerate (6h suggested).
+    const withhold = !green && kind !== "breach";
     const hb = isDrill
       ? { attempted: false, drill: true }
-      : await pingHeartbeat(green ? "" : "fail");
+      : withhold
+        ? { attempted: false, withheld: true }
+        : await pingHeartbeat(green ? "" : "fail");
     if (isDrill) {
       console.log("alerting  heartbeat skipped — drill runs must not mark the dead-man's switch down");
+    } else if (hb.withheld) {
+      console.log(`alerting  heartbeat WITHHELD (class '${kind}') — no ping, no /fail; the switch's grace decides`);
     } else if (!hb.attempted) {
       console.log("alerting  MONITOR_HEARTBEAT_URL is unset — PATH 2 IS NOT CONFIGURED.");
       console.log("          Scheduled Actions are best-effort and are auto-disabled after 60 days");

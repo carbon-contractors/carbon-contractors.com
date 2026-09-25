@@ -31,7 +31,7 @@
 import { createPublicClient, http, parseAbiItem } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import { readFileSync, existsSync } from "node:fs";
-import { withRpcRetry, isTransient } from "./rpc-retry.mjs";
+import { withRpcRetry, isTransient, shortError, rangeLimitHint } from "./rpc-retry.mjs";
 import { DEFAULT_ALLOWLIST, isAuthorised } from "./privileged-allowlist.mjs";
 
 const events = {
@@ -183,7 +183,9 @@ try {
     console.log(`TRANSIENT — RPC unreachable after retries: ${err instanceof Error ? err.name : String(err)}`);
     return 3;
   }
-  console.log(`MISCONFIGURED — ${err instanceof Error ? err.message : String(err)}`);
+  // First line only: viem's full message carries the request URL, which for a dedicated
+  // endpoint embeds the provider key. Actions masks the secret, but do not lean on that.
+  console.log(`MISCONFIGURED — ${rangeLimitHint(err) ?? shortError(err)}`);
   return 2;
 }
 }
