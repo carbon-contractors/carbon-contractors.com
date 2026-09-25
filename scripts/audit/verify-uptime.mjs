@@ -115,6 +115,27 @@ async function main() {
     );
   }
 
+  if (res.status === 401 || res.status === 403 || res.status === 429) {
+    // Refused at the door, not answered. Measured 2026-09-25: /api/health returned 403 to
+    // every GitHub-hosted run while answering 200 from a residential connection, and
+    // nothing in middleware or the route returns 403 — so the edge refused the runner's
+    // datacenter IP. Reporting that as FAIL put "PAUSE NEW TASK CREATION" on a site that
+    // was up. The site's state is unknown, which is the MISCONFIG class's meaning. The
+    // headers say who refused it (x-vercel-mitigated names a Vercel challenge/deny).
+    const edge = ["x-vercel-mitigated", "x-vercel-challenge-token", "server"]
+      .filter((h) => res.headers.get(h))
+      .map((h) => `${h}: ${h === "x-vercel-challenge-token" ? "present" : res.headers.get(h)}`)
+      .join(", ");
+    return out(
+      2,
+      `MISCONFIGURED — /api/health refused this runner with HTTP ${res.status}` +
+        (edge ? ` (${edge})` : " (no edge headers)") +
+        ". The site was not observed, so its health is UNCHECKED, not failing.",
+      "Usually the CDN's bot protection challenging a datacenter IP. Allow the monitor",
+      "through (a bypass rule for /api/health) rather than debugging the app.",
+    );
+  }
+
   if (res.status !== 200) {
     // A redirect chain that lands somewhere non-200 (e.g. the coming-soon gate
     // capturing /api/* it should not) is a deployment problem, not a subsystem one.

@@ -32,9 +32,47 @@ const TRANSIENT = [
   /internal error/i,
 ];
 
+/**
+ * Provider refusals of an eth_getLogs block span. These arrive wrapped in viem's generic
+ * "RPC Request failed." — which the TRANSIENT list above matches — but retrying the same
+ * oversize range can never succeed. Measured 2026-09-25: sepolia.base.org tightened its
+ * cap from 10,000 (then 2,000) to 1,000 blocks, the workflow still asked for 10,000, and
+ * three monitors reported TRANSIENT on every run for ten days. A deterministic refusal
+ * labelled as a network blip is the alert-fatigue failure ADR-0003 names.
+ */
+const RANGE_LIMIT = [
+  /limited to a ([\d,]+) range/i,
+  /block range (?:is )?(?:too large|exceeds|limit)/i,
+  /exceed(?:s|ed)? (?:the )?max(?:imum)? block range/i,
+  /query returned more than [\d,]+ results/i,
+];
+
+function errText(err) {
+  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+}
+
 export function isTransient(err) {
-  const text = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const text = errText(err);
+  if (RANGE_LIMIT.some((re) => re.test(text))) return false;
   return TRANSIENT.some((re) => re.test(text));
+}
+
+/**
+ * One-line MISCONFIGURED explanation when `err` is a getLogs span refusal, else null.
+ * Names the provider's cap when it states one, so the fix is in the message.
+ */
+export function rangeLimitHint(err) {
+  const text = errText(err);
+  if (!RANGE_LIMIT.some((re) => re.test(text))) return null;
+  const cap = text.match(RANGE_LIMIT[0])?.[1];
+  const asked = process.env.RPC_MAX_BLOCK_RANGE || "10000 (default)";
+  return (
+    `the RPC provider refuses eth_getLogs spans this wide ` +
+    `(${cap ? `its cap is ${cap} blocks; ` : ""}RPC_MAX_BLOCK_RANGE is ${asked}). ` +
+    `Not transient — retrying cannot succeed. ` +
+    `Lower RPC_MAX_BLOCK_RANGE to the cap, or point BASE_SEPOLIA_RPC_URL at a provider ` +
+    `with a wider one.`
+  );
 }
 
 /**

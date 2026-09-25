@@ -1,7 +1,7 @@
 # Invariant Alert Response Runbooks
 
-**Reference:** `ADR-0003` D4, `CC-085`, `CC-086`, `CC-104`  
-**Last Updated:** 2026-09-09  
+**Reference:** `ADR-0003` D4, `ADR-0011` (proposed), `CC-085`, `CC-086`, `CC-104`, `CC-118`  
+**Last Updated:** 2026-09-25  
 
 ---
 
@@ -10,12 +10,19 @@
 Since `CC-104`, every alert states its class in the first line, because one shade of
 Actions red covers four different situations:
 
-| First line says | Class | Meaning | Kill switch? |
-| :-- | :-- | :-- | :-- |
-| `INVARIANT BREACH` | breach | an invariant was **observed violated** | **YES** — §2 |
-| `MONITOR MISCONFIGURED` | misconfig | a monitor cannot run; its invariants are **unchecked** | No — §5 |
-| `UNCHECKED (transport)` | unchecked | monitors ran, could not reach the chain | No — §6 |
-| `all clear` | green | everything verified | No |
+| First line says | Class | Meaning | Kill switch? | Pages you? (since 2026-09-25) |
+| :-- | :-- | :-- | :-- | :-- |
+| `INVARIANT BREACH` | breach | an invariant was **observed violated** | **YES** — §2 | **Immediately** — webhook + heartbeat `/fail` |
+| `MONITOR MISCONFIGURED` | misconfig | a monitor cannot run; its invariants are **unchecked** | No — §5 | Only if it persists past the heartbeat grace |
+| `UNCHECKED (transport)` | unchecked | monitors ran, could not reach the chain | No — §6 | Only if it persists past the heartbeat grace |
+| `all clear` | green | everything verified | No | Never |
+
+**Paging policy (ADR-0011, interim):** only `breach` posts to the webhook. `misconfig` and
+`unchecked` *withhold* the heartbeat ping — no ping and no `/fail` — so the dead-man's
+switch pages once, when coverage has been missing longer than its grace period (6h
+suggested), rather than on every run. `MONITOR_WEBHOOK_ON` (repo variable) restores the
+old everything-pages behaviour. When a page does arrive for a non-breach, the Actions run
+log is where the detail lives until the CC-118 dashboard exists.
 
 The confusion of these classes is not hypothetical: of the 32 failed runs in the 90 days
 to 2026-09-09, **zero were breaches** — most were public-endpoint rate limiting (CC-048)
@@ -128,6 +135,7 @@ node --env-file-if-exists=.env.local scripts/audit/run-monitors.mjs --no-alert
   1. Distinguish the variant from the alert body:
      * `FAIL — … 503. Unhealthy: <subsystem>` — the site answers; a named subsystem does not. Fix that subsystem (database → Supabase status; escrow_contract → RPC/chain health; sessions → app restart).
      * `FAIL — HTTP <n>` — the deployment or edge is broken (bad deploy, redirect loop, coming-soon gate capturing `/api/*`). Check Vercel deployments and roll back if the latest is the cause.
+     * `MISCONFIGURED — /api/health refused this runner with HTTP 401/403/429 (…)` — the site was **not observed**; the edge refused the monitor. Measured 2026-09-25: 403 to every GitHub-hosted run, 200 from a residential connection, nothing in the app returns 403. The headers in parentheses say who refused (`x-vercel-mitigated` = a Vercel challenge/deny). Fix is a bypass rule for `/api/health`, not an app change.
      * `MISCONFIGURED — production reports escrow X, expected Y` — **the site is UP and this is still urgent.** The deployment's `NEXT_PUBLIC_ESCROW_CONTRACT` has drifted from what this repo monitors. Before any new task funds, determine which address is correct: `curl https://www.carbon-contractors.com/api/health` and compare against `docs/Security-Trust-Disclosure.md`'s deployment table. This is the exact class that let the scheduled monitors watch an empty superseded contract for 15 days (2026-09-01 → 2026-09-16, CC-040).
   2. `TRANSIENT` after retries means the monitor's network path failed, not the site. Verify by hand: `curl -sS https://www.carbon-contractors.com/api/health`.
   3. Sustained failure with a green GitHub Actions run means GitHub itself is the problem — that is what the independent external uptime monitor (CC-111) exists to catch.
@@ -204,6 +212,12 @@ an endpoint, an out-of-bounds contract read after a redeploy. The invariant it c
    2026-08-28→29 — the CC-082 redeploy moved the contract; fixed by re-deriving
    `ESCROW_DEPLOY_BLOCK` (CC-070). Current example: `verify-eas-schema` SKIPping on
    missing `EAS_SCHEMA_REGISTRY_ADDRESS`, fixed in CC-104 by wiring the env var.
+   Current example (2026-09-25): `the RPC provider refuses eth_getLogs spans this wide
+   (its cap is 1,000 blocks; RPC_MAX_BLOCK_RANGE is 10000)` on the three sweeping
+   monitors. Until that date this was mislabelled TRANSIENT (§6) because viem wraps it in
+   "RPC Request failed". Lowering the range to 1,000 on the public endpoint makes one
+   monitor alone overrun the 15-minute job — the fix is a dedicated `BASE_SEPOLIA_RPC_URL`
+   with its cap in the `RPC_MAX_BLOCK_RANGE` repo variable.
 3. Fix the configuration (workflow env block, repo secrets, or deploy block), never the
    contract, and re-run §4 step 1.
 4. Do NOT engage the kill switch for this class unless the misconfig has persisted across

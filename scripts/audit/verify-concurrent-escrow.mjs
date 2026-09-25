@@ -54,7 +54,7 @@
 
 import { createPublicClient, http, getAddress, formatUnits, parseAbiItem } from "viem";
 import { base, baseSepolia } from "viem/chains";
-import { withRpcRetry, isTransient, shortError } from "./rpc-retry.mjs";
+import { withRpcRetry, isTransient, shortError, rangeLimitHint } from "./rpc-retry.mjs";
 
 const EVENTS = {
   created: parseAbiItem(
@@ -168,6 +168,11 @@ async function main() {
     if (isTransient(err)) {
       console.error(`TRANSIENT — RPC unreachable after retries: ${shortError(err)}`);
       return 3;
+    }
+    const hint = rangeLimitHint(err);
+    if (hint) {
+      console.error(`MISCONFIGURED — ${hint}`);
+      return 2;
     }
     console.error(`MISCONFIGURED: RPC read failed: ${shortError(err)}`);
     return 2;
