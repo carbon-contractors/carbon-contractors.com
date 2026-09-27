@@ -42,8 +42,22 @@
  * masking is the reviewed path for that (src/lib/logging.ts).
  */
 
-import { createHash } from "node:crypto";
+// No `node:*` imports in this file, ever. Next bundles instrumentation into the Edge
+// middleware as well as the Node server, and Vercel refuses the deploy when the edge
+// bundle references a Node built-in ("The Edge Function _middleware is referencing
+// unsupported modules: node:crypto"). `next build` passes locally and in CI regardless,
+// so the failure only surfaces at Vercel's deploy step: every deploy from #225
+// (2026-09-24) to 2026-09-27 failed this way while CI stayed green. Web Crypto is
+// available in both runtimes.
 import { log } from "@/lib/logging";
+
+/** First 16 hex chars of SHA-256(text), via Web Crypto so it runs on Edge and Node. */
+async function shortDigest(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 16);
+}
 
 export async function register(): Promise<void> {
   // Deliberately nothing. `register()` is required for the module to be loaded at all;
@@ -77,7 +91,7 @@ export async function onRequestError(
     method: request.method,
     // Hash, not message: the webhook is a chat channel, and a digest is enough to
     // correlate with the log line above without shipping message content out.
-    digest: createHash("sha256").update(`${name}:${route}`).digest("hex").slice(0, 16),
+    digest: await shortDigest(`${name}:${route}`),
     error: message,
   });
 

@@ -109,4 +109,34 @@ describe("instrumentation error relay", () => {
     await hook.onRequestError(new Error("boom"), req, ctx);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("logs the same digest the node:crypto version produced", async () => {
+    // Digest moved from node:crypto to Web Crypto (edge bundle fix). Pin the value so
+    // log correlation across the change stays intact: sha256("Error:/api/tasks")[:16].
+    globalThis.fetch = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+    const { log } = await import("@/lib/logging");
+    const hook = await loadHook();
+    await hook.onRequestError(new Error("boom"), req, ctx);
+    expect(log).toHaveBeenCalledWith(
+      "error",
+      "request_error_uncaught",
+      expect.objectContaining({ digest: "691627d3cffee3b7" }),
+    );
+  });
+});
+
+// Vercel rejects the deploy when the Edge middleware bundle references a Node built-in,
+// and Next bundles instrumentation into it. `next build` does not catch this, so CI
+// stayed green while every Vercel deploy from #225 to 2026-09-27 failed. This is the
+// cheapest guard: instrumentation must never import `node:*` (or bare `crypto`, etc.).
+describe("instrumentation stays edge-safe", () => {
+  it("imports no Node built-ins", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src", "instrumentation.ts"), "utf8");
+    const imports = [...src.matchAll(/^\s*import\s[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+    const builtins = new Set(["crypto", "fs", "path", "os", "child_process", "net", "tls", "http", "https", "stream", "buffer", "util", "zlib"]);
+    const offending = imports.filter((s) => s.startsWith("node:") || builtins.has(s));
+    expect(offending).toEqual([]);
+  });
 });
