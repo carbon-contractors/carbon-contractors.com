@@ -21,7 +21,21 @@ function truncateAddress(addr: string): string {
 // be the lookup key.
 const CONNECTOR_LABELS: Record<string, string> = {
   injected: "Other Wallet",
+  walletConnect: "WalletConnect (QR code / mobile wallet)",
 };
+
+/**
+ * wagmi also lists every wallet extension that announces itself (EIP-6963) —
+ * that is where a named "Phantom" or "MetaMask" entry comes from; nothing here
+ * wires them individually. When at least one has announced, the generic
+ * `injected` entry is only a less precise duplicate of it (it grabs whichever
+ * extension owns window.ethereum — Phantom, in the 2026-09-28 walkthrough), so
+ * hide it. With none announced it stays, for older extensions.
+ */
+function visibleConnectors<T extends { id: string; type: string }>(all: readonly T[]): T[] {
+  const announced = all.some((c) => c.type === "injected" && c.id !== "injected");
+  return all.filter((c) => !(announced && c.id === "injected"));
+}
 
 function connectorLabel(connector: { id: string; name: string }): string {
   return CONNECTOR_LABELS[connector.id] ?? connector.name;
@@ -213,7 +227,7 @@ export default function WalletConnectButton({
       {error && <p className={styles.walletError}>{error.message}</p>}
       {dropdownOpen && (
         <div className={dropdownClass}>
-          {connectors.map((connector) => (
+          {visibleConnectors(connectors).map((connector) => (
             <button
               key={connector.uid}
               className={styles.walletDropdownItem}

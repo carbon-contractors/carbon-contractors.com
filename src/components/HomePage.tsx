@@ -1,4 +1,5 @@
 import Link from "next/link";
+import RegisterCta from "@/components/RegisterCta";
 import PageShell from "./PageShell";
 import styles from "./HomePage.module.css";
 
@@ -18,9 +19,7 @@ export default function HomePage() {
           No invoices. No middlemen. Built on Base.
         </p>
         <div className={styles.ctas}>
-          <Link href="/connect" className={styles.primaryBtn}>
-            REGISTER AS A WORKER
-          </Link>
+          <RegisterCta className={styles.primaryBtn} />
           <Link href="/learn" className={styles.secondaryBtn}>
             LEARN HOW IT WORKS
           </Link>

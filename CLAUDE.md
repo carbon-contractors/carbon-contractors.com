@@ -285,10 +285,14 @@ exists rather than reasoning from this file.**
   | Main PC, this clone (repo-local config) | `~/.ssh/id_ed25519_signing`, registered to ajclifft as a Signing Key 2026-09-03 | `244833942+ajclifft@users.noreply.github.com` | no |
   | Main PC, fresh clone (global `.gitconfig`) | `~/.ssh/id_ed25519_sk_signing` (FIDO2) | global email — see below | **yes** |
   | Other machine | `~/.ssh/aarons-key` (does not exist on this PC) | `35355423+Wahzammo@users.noreply.github.com` | no |
+  | Linux PC (CachyOS), added 2026-09-28 | GPG `9FE36B46F25F373F`, registered to Wahzammo (UIDs: gmail + noreply) | `35355423+Wahzammo@users.noreply.github.com` | no |
 
-  The **global** `.gitconfig` email, `aaronjclifft@gmail.com`, resolves to **no** GitHub account at
-  all — `verified=false, no_user` — so a perfectly signed commit lands unverified for a reason that
-  never names the email as the problem. And the inverse bite, measured on PR #183 (2026-09-02):
+  The gmail address `aaronjclifft@gmail.com` resolved to **no** GitHub account until 2026-09-28,
+  so a perfectly signed commit landed unverified for a reason that never named the email as the
+  problem. It is now a verified email on Wahzammo, but it is **private**: a push carrying it is
+  rejected `GH007`. So commit as the noreply address — and for **GPG** (unlike SSH) that address
+  must also be a UID on the key, or the commit lands Unverified. The Linux PC's key carries both.
+  `gh api users/<account>/gpg_keys` shows which emails a key is registered with. And the inverse bite, measured on PR #183 (2026-09-02):
   **a repo-local `user.signingkey` override whose key belongs to no account matching the repo-local
   email produces signed-but-Unverified commits silently** — this clone carried ajclifft's email over
   the bare ed25519 key the day before it was registered, and every commit made with repo config
