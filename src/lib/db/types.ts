@@ -72,7 +72,7 @@ export interface Database {
            */
           offer_expiry_unix: number | null;
           /**
-           * offer_expiring reminder marker (CC-095, migration 024): null/false
+           * offer_expiring reminder marker (CC-095, migration 026): null/false
            * = not yet reminded, true = dispatched. Writable only by the
            * reminder cron's compare-and-set.
            */
@@ -85,7 +85,7 @@ export interface Database {
           /**
            * keccak256 of task_description at acceptance (CC-084 criterion 5).
            * Set once by the accept path (or at creation for auto-booked tasks,
-           * ADR-0005 D3); migration 024's trigger rejects any later change.
+           * ADR-0005 D3); migration 025's trigger rejects any later change.
            */
           accepted_description_hash: string | null;
           /** ISO timestamp of the on-chain block when Funded was confirmed (CC-092). Settable once. */
@@ -135,7 +135,7 @@ export interface Database {
           deadline_unix?: number;
           status?: TaskStatus;
           offer_expiry_unix?: number | null;
-          // Reminder marker (CC-095, migration 024): written only by the
+          // Reminder marker (CC-095, migration 026): written only by the
           // reminder cron's compare-and-set, one row at a time.
           offer_reminder_sent?: boolean | null;
           tx_hash?: string | null;
@@ -144,7 +144,7 @@ export interface Database {
           // migration 016's trigger rejects any change to them, unconditionally. Leaving
           // them out makes that a compile error rather than a runtime exception (CC-084).
           // accepted_description_hash is absent for the same reason: settable exactly
-          // once (migration 024), by createTask's auto-book insert and acceptTask's
+          // once (migration 025), by createTask's auto-book insert and acceptTask's
           // transition write — never a general-purpose update target.
           // funded_at IS included here — unlike the spec columns it starts NULL and is
           // legitimately set once by /api/fund-task's confirmation write (CC-092);

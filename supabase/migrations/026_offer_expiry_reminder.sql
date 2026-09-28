@@ -1,4 +1,4 @@
--- 024_offer_expiry_reminder.sql (CC-095)
+-- 026_offer_expiry_reminder.sql (CC-095) (committed as 024_; renumbered to match production, 2026-09-28)
 --
 -- Once-only marker for the offer_expiring reminder (CC-095's "offer about to
 -- expire" event). A boolean column, not a timestamp: the reminder fires at most

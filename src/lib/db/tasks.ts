@@ -29,7 +29,7 @@ export interface TaskRecord {
   /** When the pending offer lapses; null once accepted or auto-booked (CC-094). */
   offer_expiry_unix: number | null;
   /**
-   * Once-only marker for the offer_expiring reminder (CC-095, migration 024):
+   * Once-only marker for the offer_expiring reminder (CC-095, migration 026):
    * null/false = not yet reminded, true = reminder already dispatched. Set by
    * the reminder cron only.
    */
@@ -234,7 +234,7 @@ export const OFFER_REMINDER_LEAD_SECONDS = 2 * 60 * 60;
 /**
  * Pending offers whose expiry falls inside the reminder window and whose
  * reminder has not been sent (CC-095). The cron's candidate read — the
- * partial index from migration 024 keeps this an index probe.
+ * partial index from migration 026 keeps this an index probe.
  *
  * Content columns are deliberately NOT selected: the reminder payload is
  * built from ids, amounts and the expiry alone. A description would be task
@@ -272,7 +272,7 @@ export interface OfferReminderCandidate {
 }
 
 /**
- * Compare-and-set the reminder marker (CC-095, migration 024). Returns true
+ * Compare-and-set the reminder marker (CC-095, migration 026). Returns true
  * only when this caller's write won the race — two concurrent cron fires
  * (Vercel can overlap runs on the hour boundary) will not both send.
  *
@@ -439,7 +439,7 @@ export async function markTaskFunded(
  *     new brief before deciding; the route maps this to 409.
  *
  * The pin is `hashDescription(task.task_description)` — keccak256 of the prose
- * bytes at the moment of consent. From then on, migration 024's trigger makes it
+ * bytes at the moment of consent. From then on, migration 025's trigger makes it
  * immutable, and the worker's dashboard compares it against the live
  * task_description to say "the brief has changed since you accepted."
  */

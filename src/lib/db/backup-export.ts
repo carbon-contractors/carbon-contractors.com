@@ -115,8 +115,8 @@ export interface TableSpec {
  * to be durable and auditable).
  *
  * Column lists mirror the live schema as verified 2026-09-16. `stake_slashes`
- * (migration 024) is not applied to the production project yet; the exporter
- * treats its absence as `absent`, distinct from `0 rows`, and says so in the
+ * (migration 024) was applied to production after that (confirmed 2026-09-28);
+ * the exporter still treats a missing table as `absent`, distinct from `0 rows`, and says so in the
  * manifest — "table not there yet" and "table empty" are different facts.
  */
 export const TIER1_TABLES: readonly TableSpec[] = [
