@@ -35,7 +35,7 @@ import { r2EndpointHost } from "@/lib/r2";
 
 describe("SigV4 canonicalization (AWS S3 documented example inputs)", () => {
   it("r2EndpointHost derives the account-scoped host", () => {
-    expect(r2EndpointHost("abc123")).toBe("abc123.r2.cloudflaredstorage.com");
+    expect(r2EndpointHost("abc123")).toBe("abc123.r2.cloudflarestorage.com");
   });
 });
 
@@ -73,7 +73,7 @@ describe("SigV4 HMAC chain — reference recomputation", () => {
     );
     // Host is derived, never accepted: URL host is the R2 endpoint.
     expect(calls[0].url).toBe(
-      `https://acct1.r2.cloudflaredstorage.com/${EXAMPLE_BUCKET}/${EXAMPLE_KEY}`,
+      `https://acct1.r2.cloudflarestorage.com/${EXAMPLE_BUCKET}/${EXAMPLE_KEY}`,
     );
     // The payload hash header must equal sha256(body) — the exact value R2
     // will verify server-side.
