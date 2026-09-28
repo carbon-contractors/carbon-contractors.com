@@ -71,6 +71,15 @@ export const LEARN_MODULES: LearnModule[] = [
       "We never ask who you are. That is not the same as nobody being able to work it out — and the record is permanent.",
     filename: "module-7-pseudonymous-is-not-anonymous.md",
   },
+  {
+    slug: "what-the-escrow-can-and-cant-do",
+    title: "What the Escrow Can and Can't Do",
+    moduleNumber: 8,
+    readTime: "5 min",
+    description:
+      "The rules fixed before you start, who decides if work passed, and what the platform can't do with your money — the plain-language side of the Terms.",
+    filename: "module-8-what-the-escrow-can-and-cant-do.md",
+  },
 ];
 
 export function getModuleBySlug(slug: string): LearnModule | undefined {

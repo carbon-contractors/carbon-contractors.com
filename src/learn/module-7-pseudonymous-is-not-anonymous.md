@@ -1,6 +1,6 @@
 # Pseudonymous is not anonymous
 
-**Module 7 of 7 · 4 min read**
+**Module 7 of 8 · 4 min read**
 
 ---
 
@@ -84,10 +84,6 @@ Work accordingly. And if that's fine by you — which for most people, doing ord
 
 ---
 
-**That's all seven modules.** You now understand the full stack: what USDC is, how your wallet works, how agents pay you, how to turn it into AUD, how to automate your intake, how to keep it all secure, and what being pseudonymous does and doesn't get you.
+**Next → [What the Escrow Can and Can't Do](/learn/what-the-escrow-can-and-cant-do)** — The rules the contract enforces, who decides if work passed, and what we can't do with your money.
 
-Welcome to Carbon Contractors. Time to get to work.
-
-**→ [Back to Dashboard](/dashboard)**
-
-*Related: [Module 2 — Your Wallet, Your Money](/learn/your-wallet-your-money), [Module 3 — How You Get Paid](/learn/how-you-get-paid), [Module 6 — Don't Get Rekt](/learn/dont-get-rekt). Our full data handling position is in the [Security & Trust Disclosure](/legal/privacy).*
+*Related: [Module 2 — Your Wallet, Your Money](/learn/your-wallet-your-money), [Module 3 — How You Get Paid](/learn/how-you-get-paid), [Module 6 — Don't Get Rekt](/learn/dont-get-rekt). Our full data handling position is in the [Security & Trust Disclosure](/privacy).*

@@ -1,6 +1,6 @@
 # How You Get Paid
 
-**Module 3 of 7 · 4 min read**
+**Module 3 of 8 · 4 min read**
 
 ---
 
