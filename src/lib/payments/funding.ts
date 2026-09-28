@@ -1,5 +1,6 @@
 /**
- * x402.ts
+ * funding.ts (was x402.ts until CC-103 retired the name — the module never
+ * used the x402 protocol after CC-081; the name promised a payment it never took)
  * Task funding preparation for the Carbon Contractors escrow system.
  *
  * CC-081 Defect 1: this module never takes payment, and must never become an x402
@@ -20,7 +21,7 @@ import { getConfig } from "@/lib/config";
 import { isValidWalletAddress } from "@/lib/validation";
 import type { ParsedSpec } from "@/lib/spec/hash";
 
-export interface X402PaymentRequest {
+export interface FundingOfferRequest {
   from_agent_wallet: string;
   to_human_wallet: string;
   task_description: string;
@@ -57,7 +58,7 @@ export interface X402PaymentRequest {
   idempotency_key?: string;
 }
 
-export interface X402PaymentResponse {
+export interface FundingOfferResponse {
   status: "awaiting_funding";
   payment_request_id: string;
   /** Every argument `escrow.createTask` needs, in ABI order plus addresses. */
@@ -106,15 +107,14 @@ export const MAX_OFFER_EXPIRY_SECONDS = 7 * 24 * 60 * 60;
 export const DEFAULT_OFFER_EXPIRY_SECONDS = 24 * 60 * 60;
 
 /**
- * prepareFunding
- * (kept as `initiateX402Payment` for import compatibility with existing call sites)
+ * createFundingOffer
  *
  * Persists the task to Supabase as "pending" and returns every parameter the agent
  * needs to fund the escrow itself via `USDC.approve` + `escrow.createTask`.
  */
-export async function initiateX402Payment(
-  req: X402PaymentRequest
-): Promise<X402PaymentResponse> {
+export async function createFundingOffer(
+  req: FundingOfferRequest
+): Promise<FundingOfferResponse> {
   if (req.amount_usdc <= 0) {
     throw new Error("amount_usdc must be > 0");
   }
@@ -222,7 +222,7 @@ interface FundingResponseParams {
  * Shared by the initial request and the CC-046 replay path so the two can never
  * drift — an agent retrying with an idempotency key must see the same shape.
  */
-function buildFundingResponse(p: FundingResponseParams): X402PaymentResponse {
+function buildFundingResponse(p: FundingResponseParams): FundingOfferResponse {
   const escrowConfig = getEscrowConfig();
   const taskIdBytes32 = toTaskId(p.payment_request_id);
   const amountWei = BigInt(
@@ -281,13 +281,13 @@ function buildFundingResponse(p: FundingResponseParams): X402PaymentResponse {
  * from a stored task row, via the same builder as the original response. The
  * chain parameters are re-derived from server config, never from the caller.
  */
-export type X402ReplayResponse = Omit<X402PaymentResponse, "status"> & {
+export type FundingOfferReplay = Omit<FundingOfferResponse, "status"> & {
   status: "awaiting_funding" | "already_initiated";
   /** The task row's live status — a replay can land after funding or settlement. */
   task_status: TaskRecord["status"];
 };
 
-export function replayX402Payment(task: TaskRecord): X402ReplayResponse {
+export function replayFundingOffer(task: TaskRecord): FundingOfferReplay {
   const inOfferStage = task.status === "pending" || task.status === "accepted";
   return {
     ...buildFundingResponse({

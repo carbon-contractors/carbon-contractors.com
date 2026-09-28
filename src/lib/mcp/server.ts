@@ -14,7 +14,7 @@ import {
   getHumanById,
   getDistinctCategories,
 } from "@/lib/db/whitepages";
-import { initiateX402Payment, replayX402Payment } from "@/lib/payments/x402";
+import { createFundingOffer, replayFundingOffer } from "@/lib/payments/funding";
 import {
   getTaskByPaymentId,
   updateTaskStatus,
@@ -290,7 +290,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                   text: JSON.stringify({
                     ok: true,
                     idempotent_replay: true,
-                    ...replayX402Payment(existing),
+                    ...replayFundingOffer(existing),
                   }),
                 },
               ],
@@ -425,7 +425,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           });
         }
 
-        const response = await initiateX402Payment({
+        const response = await createFundingOffer({
           from_agent_wallet,
           to_human_wallet: worker.wallet,
           task_description,
@@ -496,7 +496,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                     ok: true,
                     idempotent_replay: true,
                     replayed_after_conflict: true,
-                    ...replayX402Payment(winner),
+                    ...replayFundingOffer(winner),
                   }),
                 },
               ],

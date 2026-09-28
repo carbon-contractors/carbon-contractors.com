@@ -16,27 +16,25 @@ Base is Coinbase's L2, built on the OP Stack. It was chosen deliberately, not by
 
 **Cost.** A USDC transfer on Base costs fractions of a cent. When an AI agent is hiring humans for microtasks — review this PR, verify this address, check this photo — the transaction fees need to be invisible. On Ethereum mainnet, the gas alone could exceed the task payment. Base makes sub-dollar payments economically viable.
 
-**Coinbase rails.** The entire identity and payment stack is Coinbase-native. Smart Wallets use passkeys through Coinbase's infrastructure. AgentKit gives AI agents their own wallets that can sign and broadcast without human intervention. x402 settles payments through Coinbase's payment protocol. Choosing Base means all of these work together without bridging, wrapping, or third-party integrations.
+**Coinbase rails.** The entire identity and payment stack is Coinbase-native. Smart Wallets use passkeys through Coinbase's infrastructure. AgentKit gives AI agents their own wallets that can sign and broadcast without human intervention. Choosing Base means all of these work together without bridging, wrapping, or third-party integrations.
 
 **Onchain UX.** Smart Wallets on Base support passkey creation — a user taps FaceID or a fingerprint and has a wallet. No seed phrases, no browser extensions, no mobile app downloads. This matters because the workers on this platform aren't crypto natives. They're people with skills who want to get paid. The onboarding friction has to be zero.
 
 **Finality.** Base inherits Ethereum's security guarantees while settling in seconds. When an agent locks funds in escrow, the worker can see confirmation almost immediately. When a task is attested as complete, the payout doesn't sit in a mempool.
 
-## What is x402
+## How a task is funded
 
-HTTP status code 402 has been "reserved for future use" since 1999. The x402 protocol finally gives it a purpose: machine-to-machine payments at the HTTP layer.
-
-The flow works like this:
+The agent pays the escrow contract directly, from its own wallet — no payment processor and no platform account in the money path.
 
 1. An AI agent calls `request_human_work` on the MCP server
-2. The server returns a `402 Payment Required` response with a payment header specifying the amount, recipient, and escrow contract
-3. The agent's x402-compatible wallet reads the header, signs the USDC transfer, and broadcasts it to Base
-4. The server verifies the on-chain payment and creates the task
+2. The server records a pending offer and returns every parameter the agent needs: the escrow address, the task id, the spec hash and the amount
+3. The worker accepts the offer (or it was pre-accepted via auto-booking)
+4. The agent calls `USDC.approve` then `escrow.createTask` from its own wallet, then confirms at `POST /api/fund-task`, which only marks the task active once `getTask` reads `Funded` on-chain and matches on worker and amount
 5. On delivery, the worker claims the escrowed funds — a pull-payment, verified against a signed verdict where one applies
 
-No API keys. No Stripe integration. No payment processor taking a cut. The agent's wallet pays directly, and the protocol is the invoice. Any agent with a funded wallet and an MCP client can participate — the payment negotiation happens entirely within the HTTP request/response cycle.
+No API keys. No Stripe integration. No payment processor taking a cut. Any agent with a funded wallet and an MCP client can participate. The agent doesn't need a human to approve a purchase order or enter card details — it reads the price, funds the escrow and gets the work done.
 
-This is what makes the system genuinely autonomous. The agent doesn't need a human to approve a purchase order or enter credit card details. It reads the price, pays the price, and gets the work done.
+(Earlier builds funded tasks through the x402 HTTP-402 payment protocol. It was removed in `CC-081` — an x402 settlement is a bare USDC transfer, which could never call `createTask` — and retired for good in `CC-103`.)
 
 ## Architecture
 
@@ -98,7 +96,7 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 | Database | Supabase (Postgres) |
 | Chain | Base L2 (Sepolia testnet) |
 | Escrow | Solidity (OpenZeppelin v5, Hardhat) |
-| Payments | USDC via x402 protocol |
+| Payments | USDC, agent-funded escrow (`approve` + `createTask`) |
 | Identity | Coinbase Smart Wallet via wagmi + viem (passkeys) |
 | Escrow Ops | Platform signer (viem walletClient) |
 
@@ -112,7 +110,7 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] Coinbase Smart Wallet integration (passkey auth)
 - [x] Worker self-registration flow (wallet signature verification)
 - [x] On-chain USDC escrow contract (Base Sepolia)
-- [x] x402 payment protocol (HTTP 402 → agent auto-pays → escrow funds)
+- [x] Agent-funded escrow (`approve` + `createTask`, confirmed on-chain by `/api/fund-task`) — replaced the x402 flow (CC-081, CC-103)
 - [x] Task lifecycle MCP tools (create → fund → complete)
 - [x] Notification channels with agent-to-agent auto-booking
 - [x] Reputation staking + on-chain history (ReputationStake.sol)

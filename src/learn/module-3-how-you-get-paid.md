@@ -1,4 +1,4 @@
-# How x402 Pays You
+# How You Get Paid
 
 **Module 3 of 7 · 4 min read**
 
@@ -13,52 +13,54 @@ No magic. No hand-waving. Just the flow.
 ## The payment flow
 
 ```
-Agent finds your profile
+Agent finds your profile and sends you an offer
         ↓
-Agent sends an HTTP request to Carbon Contractors
+You read the job and its acceptance criteria — then accept or decline
         ↓
-USDC is locked in escrow (the money is real, it's committed)
+The agent locks the USDC in the escrow contract (the money is real, it's committed)
         ↓
 You get notified — email, webhook, or your preferred channel
         ↓
 You do the work
         ↓
-You submit your deliverable
+You submit your evidence — the proof the acceptance criteria asked for
         ↓
-Task completion is recorded on-chain (proof the work happened)
+The agent has a review window to confirm or dispute
         ↓
 USDC releases from escrow to your wallet
         ↓
 Done. Money in your wallet. Seconds, not days.
 ```
 
-## What is x402?
+## How the money moves
 
-HTTP — the protocol your browser uses to load every webpage — has had a status code reserved for payments since 1997: **402 Payment Required.** It was never implemented. For nearly 30 years, the web had no native way to pay for things at the protocol level.
-
-**x402** finally builds it. It's a payment protocol that lets AI agents include payment directly in HTTP requests. The agent doesn't fill out a form, enter a card number, or log into a bank. It sends a request, the payment is attached, and the work begins.
+There is no invoice and no payment platform in the middle. The hiring agent pays straight into a **smart contract on Base** — the escrow — from its own wallet, before you start. Carbon Contractors never holds the money; the contract does, and the contract's rules decide where it goes.
 
 Think of it like this:
 
-| Traditional hiring | x402 hiring |
+| Traditional hiring | Hiring through Carbon Contractors |
 |---|---|
-| Post a job listing | Agent sends an HTTP request |
+| Post a job listing | Agent sends you an offer |
 | Wait for applications | Your profile matches automatically |
-| Interview, negotiate | Price is set in your profile |
+| Interview, negotiate | Price is set in your profile; the criteria are in the offer |
 | Do the work | Do the work |
-| Send an invoice | Deliverable triggers release |
-| Chase payment for 30 days | USDC hits your wallet in seconds |
-| Maybe get paid | Always get paid — escrow guarantees it |
+| Send an invoice | Submit your evidence |
+| Chase payment for 30 days | USDC released from escrow |
+| Maybe get paid | The money was locked before you started |
 
-The entire negotiation-invoicing-payment cycle collapses into a single transaction.
+The entire negotiation-invoicing-payment cycle collapses into a few on-chain steps.
+
+## What if the agent goes quiet?
+
+Once you've submitted your evidence, the agent has a **review window** — set when the job was funded, somewhere between 12 hours and 14 days. It can confirm and pay you, or dispute. If it does **nothing**, silence works in your favour: when the window closes, you claim the payment yourself from your dashboard. An agent can always choose to pay you; it can't quietly choose not to.
 
 ## Escrow: why you always get paid
 
-When an agent sends a work request, the USDC is locked in a smart contract **before you even start.** This isn't a promise to pay — it's money sitting in a transparent, verifiable escrow that neither party can tamper with.
+Once you accept an offer, the agent locks the USDC in a smart contract **before you even start.** This isn't a promise to pay — it's money sitting in a transparent, verifiable escrow that neither party can tamper with.
 
-- The agent can't pull the funds back once you've started.
-- You can't claim payment without submitting the deliverable.
-- If there's a dispute, the escrow logic handles resolution — no accounts payable department, no emails, no "we'll look into it."
+- The agent can't pull the funds back once the job is funded and underway.
+- You can't claim payment without submitting your evidence.
+- A dispute needs a signed check against the acceptance criteria, not just someone's say-so — and it runs on a fixed clock, so nobody can stall it forever.
 
 The money is committed upfront. You do the work. The money releases. That's the deal, enforced by code.
 
@@ -98,4 +100,4 @@ Three things:
 
 ---
 
-**Next → [Spending Your USDC in Australia](/learn/module-4)** — How to go from USDC in your wallet to tapping your card at the shops.
+**Next → [Spending Your USDC in Australia](/learn/spending-your-usdc-in-australia)** — How to go from USDC in your wallet to tapping your card at the shops.

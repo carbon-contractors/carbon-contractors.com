@@ -27,13 +27,13 @@ export const LEARN_MODULES: LearnModule[] = [
     filename: "module-2-your-wallet-your-money.md",
   },
   {
-    slug: "how-x402-pays-you",
-    title: "How x402 Pays You",
+    slug: "how-you-get-paid",
+    title: "How You Get Paid",
     moduleNumber: 3,
     readTime: "4 min",
     description:
       "The full payment flow — from agent discovery to USDC in your wallet. No middleman.",
-    filename: "module-3-how-x402-pays-you.md",
+    filename: "module-3-how-you-get-paid.md",
   },
   {
     slug: "spending-your-usdc-in-australia",

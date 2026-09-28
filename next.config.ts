@@ -32,6 +32,16 @@ const nextConfig: NextConfig = {
   // MCP route needs Node.js runtime for WebStandardStreamableHTTPServerTransport
   // and crypto module. Do not use edge runtime.
   experimental: {},
+  // CC-103: module 3 was "How x402 Pays You" until x402 was retired.
+  async redirects() {
+    return [
+      {
+        source: "/learn/how-x402-pays-you",
+        destination: "/learn/how-you-get-paid",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     // NOR-177: Next.js requires 'unsafe-inline' for hydration bootstrap
     // scripts and style injection. 'unsafe-eval' is dev-only (React Fast

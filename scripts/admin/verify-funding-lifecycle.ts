@@ -273,8 +273,8 @@ async function runOffer(baseUrl: string, worker: Address) {
   if (offer.ok === false) throw new Error(`request_human_work refused: ${JSON.stringify(offer)}`);
 
   const paymentRequestId = offer.payment_request_id as string;
-  // offer.status is x402's funding-stage wrapper — always "awaiting_funding" or
-  // "already_initiated" (src/lib/payments/x402.ts:242,285), never the offer state.
+  // offer.status is the funding-stage wrapper — always "awaiting_funding" or
+  // "already_initiated" (src/lib/payments/funding.ts:242,285), never the offer state.
   // worker_status carries the real thing: "pending" vs "accepted" (:255).
   const status = offer.worker_status as string;
   console.log(`      payment_request_id: ${paymentRequestId}`);

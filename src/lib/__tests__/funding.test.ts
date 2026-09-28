@@ -24,7 +24,7 @@ vi.stubEnv("NEXT_PUBLIC_BASE_URL", "http://localhost:3000");
 vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
-import { initiateX402Payment } from "@/lib/payments/x402";
+import { createFundingOffer } from "@/lib/payments/funding";
 import { parseAndHashSpec } from "@/lib/spec/hash";
 
 const VALID_SPEC = '{"schema_version":1,"criteria":{"min_artefacts":8}}';
@@ -39,13 +39,13 @@ const BASE_REQUEST = {
   spec: parseAndHashSpec(VALID_SPEC),
 };
 
-describe("x402 payment", () => {
+describe("funding offer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("creates payment request with correct fields", async () => {
-    const result = await initiateX402Payment(BASE_REQUEST);
+    const result = await createFundingOffer(BASE_REQUEST);
 
     expect(result.status).toBe("awaiting_funding");
     expect(result.payment_request_id).toBeTruthy();
@@ -55,7 +55,7 @@ describe("x402 payment", () => {
   });
 
   it("returns every v2 createTask parameter (CC-081 Defect 1)", async () => {
-    const result = await initiateX402Payment(BASE_REQUEST);
+    const result = await createFundingOffer(BASE_REQUEST);
 
     // The six ABI arguments plus the addresses an agent needs to build the call.
     expect(result.task_id_bytes32).toBe("0x" + "ab".repeat(32));
@@ -72,7 +72,7 @@ describe("x402 payment", () => {
   });
 
   it("instructs the agent to fund via approve + createTask, not to pay the endpoint", async () => {
-    const result = await initiateX402Payment(BASE_REQUEST);
+    const result = await createFundingOffer(BASE_REQUEST);
 
     expect(result.instructions).toContain("createTask");
     expect(result.instructions).toContain("approve");
@@ -85,31 +85,31 @@ describe("x402 payment", () => {
 
   it("rejects zero amount", async () => {
     await expect(
-      initiateX402Payment({ ...BASE_REQUEST, amount_usdc: 0 })
+      createFundingOffer({ ...BASE_REQUEST, amount_usdc: 0 })
     ).rejects.toThrow("amount_usdc must be > 0");
   });
 
   it("rejects invalid wallet address", async () => {
     await expect(
-      initiateX402Payment({ ...BASE_REQUEST, from_agent_wallet: "invalid" })
+      createFundingOffer({ ...BASE_REQUEST, from_agent_wallet: "invalid" })
     ).rejects.toThrow("from_agent_wallet must be a valid 0x address");
   });
 
   it("rejects a review window below the contract's 12h floor", async () => {
     await expect(
-      initiateX402Payment({ ...BASE_REQUEST, review_window_seconds: 3600 })
+      createFundingOffer({ ...BASE_REQUEST, review_window_seconds: 3600 })
     ).rejects.toThrow("review_window_seconds");
   });
 
   it("rejects a review window above the contract's 14d ceiling", async () => {
     await expect(
-      initiateX402Payment({ ...BASE_REQUEST, review_window_seconds: 15 * 24 * 60 * 60 })
+      createFundingOffer({ ...BASE_REQUEST, review_window_seconds: 15 * 24 * 60 * 60 })
     ).rejects.toThrow("review_window_seconds");
   });
 
   it("persists the spec commitment so the confirmation endpoint can check it", async () => {
     const { createTask } = await import("@/lib/db/tasks");
-    await initiateX402Payment(BASE_REQUEST);
+    await createFundingOffer(BASE_REQUEST);
 
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -126,7 +126,7 @@ describe("x402 payment", () => {
     const { createTask } = await import("@/lib/db/tasks");
     const before = Math.floor(Date.now() / 1000);
 
-    const result = await initiateX402Payment({ ...BASE_REQUEST, auto_accept: false });
+    const result = await createFundingOffer({ ...BASE_REQUEST, auto_accept: false });
 
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({ status: "pending" }),
@@ -142,7 +142,7 @@ describe("x402 payment", () => {
     const { createTask } = await import("@/lib/db/tasks");
     const before = Math.floor(Date.now() / 1000);
 
-    await initiateX402Payment({ ...BASE_REQUEST, offer_expiry_seconds: 15 * 60 });
+    await createFundingOffer({ ...BASE_REQUEST, offer_expiry_seconds: 15 * 60 });
 
     const [inserted] = (createTask as ReturnType<typeof vi.fn>).mock.calls[0] as [{ offer_expiry_unix: number }];
     expect(inserted.offer_expiry_unix).toBeGreaterThanOrEqual(before + 15 * 60);
@@ -152,7 +152,7 @@ describe("x402 payment", () => {
   it("auto-accepts a worker with accepts_auto_booking — born accepted, no expiry (D3)", async () => {
     const { createTask } = await import("@/lib/db/tasks");
 
-    const result = await initiateX402Payment({ ...BASE_REQUEST, auto_accept: true });
+    const result = await createFundingOffer({ ...BASE_REQUEST, auto_accept: true });
 
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({ status: "accepted", offer_expiry_unix: null }),
@@ -163,26 +163,26 @@ describe("x402 payment", () => {
 
   it("rejects an offer expiry below the 15-minute floor (D4)", async () => {
     await expect(
-      initiateX402Payment({ ...BASE_REQUEST, offer_expiry_seconds: 14 * 60 }),
+      createFundingOffer({ ...BASE_REQUEST, offer_expiry_seconds: 14 * 60 }),
     ).rejects.toThrow("offer_expiry_seconds");
   });
 
   it("rejects an offer expiry above the 7-day ceiling (D4)", async () => {
     await expect(
-      initiateX402Payment({ ...BASE_REQUEST, offer_expiry_seconds: 8 * 24 * 60 * 60 }),
+      createFundingOffer({ ...BASE_REQUEST, offer_expiry_seconds: 8 * 24 * 60 * 60 }),
     ).rejects.toThrow("offer_expiry_seconds");
   });
 
   it("tells the agent not to fund until the worker has accepted (CC-094 gate)", async () => {
-    const pending = await initiateX402Payment({ ...BASE_REQUEST, auto_accept: false });
+    const pending = await createFundingOffer({ ...BASE_REQUEST, auto_accept: false });
     expect(pending.instructions).toContain("Wait for the worker to accept");
 
-    const accepted = await initiateX402Payment({ ...BASE_REQUEST, auto_accept: true });
+    const accepted = await createFundingOffer({ ...BASE_REQUEST, auto_accept: true });
     expect(accepted.instructions).not.toContain("Wait for the worker to accept");
   });
 });
 
-describe("x402 idempotency passthrough and replay (CC-046)", () => {
+describe("funding-offer idempotency passthrough and replay (CC-046)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -190,7 +190,7 @@ describe("x402 idempotency passthrough and replay (CC-046)", () => {
   it("persists the idempotency key and review window on the task row", async () => {
     const { createTask } = await import("@/lib/db/tasks");
 
-    await initiateX402Payment({ ...BASE_REQUEST, idempotency_key: "retry-1" });
+    await createFundingOffer({ ...BASE_REQUEST, idempotency_key: "retry-1" });
 
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -203,7 +203,7 @@ describe("x402 idempotency passthrough and replay (CC-046)", () => {
   it("omits the idempotency key entirely when none was supplied", async () => {
     const { createTask } = await import("@/lib/db/tasks");
 
-    await initiateX402Payment(BASE_REQUEST);
+    await createFundingOffer(BASE_REQUEST);
 
     expect(createTask).toHaveBeenCalledWith(
       expect.not.objectContaining({ idempotency_key: expect.anything() }),
@@ -237,9 +237,9 @@ describe("x402 idempotency passthrough and replay (CC-046)", () => {
 
   it("reconstructs every createTask parameter from a stored row, without writing", async () => {
     const { createTask } = await import("@/lib/db/tasks");
-    const { replayX402Payment } = await import("@/lib/payments/x402");
+    const { replayFundingOffer } = await import("@/lib/payments/funding");
 
-    const replay = replayX402Payment(STORED_ROW);
+    const replay = replayFundingOffer(STORED_ROW);
 
     expect(createTask).not.toHaveBeenCalled();
     expect(replay.payment_request_id).toBe("storedprid");
@@ -261,9 +261,9 @@ describe("x402 idempotency passthrough and replay (CC-046)", () => {
   });
 
   it("reports a replay past the offer stage as already initiated", async () => {
-    const { replayX402Payment } = await import("@/lib/payments/x402");
+    const { replayFundingOffer } = await import("@/lib/payments/funding");
 
-    const replay = replayX402Payment({ ...STORED_ROW, status: "active" });
+    const replay = replayFundingOffer({ ...STORED_ROW, status: "active" });
 
     expect(replay.status).toBe("already_initiated");
     expect(replay.task_status).toBe("active");

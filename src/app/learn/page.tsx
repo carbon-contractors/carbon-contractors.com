@@ -6,7 +6,7 @@ import styles from "./learn.module.css";
 export const metadata = {
   title: "Learn | Carbon Contractors",
   description:
-    "Six modules covering USDC, wallets, x402 payments, and getting paid by AI agents.",
+    "Seven modules covering USDC, wallets, escrow, and getting paid by AI agents.",
 };
 
 export default function LearnHub() {

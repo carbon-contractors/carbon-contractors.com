@@ -90,4 +90,4 @@ Welcome to Carbon Contractors. Time to get to work.
 
 **→ [Back to Dashboard](/dashboard)**
 
-*Related: [Module 2 — Your Wallet, Your Money](/learn/your-wallet-your-money), [Module 3 — How x402 Pays You](/learn/how-x402-pays-you), [Module 6 — Don't Get Rekt](/learn/dont-get-rekt). Our full data handling position is in the [Security & Trust Disclosure](/legal/privacy).*
+*Related: [Module 2 — Your Wallet, Your Money](/learn/your-wallet-your-money), [Module 3 — How You Get Paid](/learn/how-you-get-paid), [Module 6 — Don't Get Rekt](/learn/dont-get-rekt). Our full data handling position is in the [Security & Trust Disclosure](/legal/privacy).*

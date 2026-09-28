@@ -11,10 +11,10 @@ vi.mock("@/lib/db/whitepages", () => ({
   getDistinctCategories: vi.fn(),
 }));
 
-const mockInitiateX402Payment = vi.fn();
-vi.mock("@/lib/payments/x402", () => ({
-  initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
-  replayX402Payment: vi.fn(),
+const mockCreateFundingOffer = vi.fn();
+vi.mock("@/lib/payments/funding", () => ({
+  createFundingOffer: (...args: unknown[]) => mockCreateFundingOffer(...args),
+  replayFundingOffer: vi.fn(),
 }));
 
 const mockLimit = vi.fn();
@@ -119,7 +119,7 @@ describe("MCP structured error semantics (CC-046)", () => {
       availability: "available",
       reputation_score: 80,
     });
-    mockInitiateX402Payment.mockResolvedValue({
+    mockCreateFundingOffer.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
       worker_status: "pending",

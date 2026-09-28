@@ -11,11 +11,11 @@ vi.mock("@/lib/db/whitepages", () => ({
   getDistinctCategories: vi.fn(),
 }));
 
-const mockInitiateX402Payment = vi.fn();
-const mockReplayX402Payment = vi.fn();
-vi.mock("@/lib/payments/x402", () => ({
-  initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
-  replayX402Payment: (...args: unknown[]) => mockReplayX402Payment(...args),
+const mockCreateFundingOffer = vi.fn();
+const mockReplayFundingOffer = vi.fn();
+vi.mock("@/lib/payments/funding", () => ({
+  createFundingOffer: (...args: unknown[]) => mockCreateFundingOffer(...args),
+  replayFundingOffer: (...args: unknown[]) => mockReplayFundingOffer(...args),
 }));
 
 const mockLimit = vi.fn();
@@ -131,13 +131,13 @@ describe("request_human_work idempotency (CC-046)", () => {
       availability: "available",
       reputation_score: 80,
     });
-    mockInitiateX402Payment.mockResolvedValue({
+    mockCreateFundingOffer.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_new",
       worker_status: "pending",
       offer_expiry_unix: 9999999999,
     });
-    mockReplayX402Payment.mockImplementation((row: { payment_request_id: string }) => ({
+    mockReplayFundingOffer.mockImplementation((row: { payment_request_id: string }) => ({
       status: "awaiting_funding",
       payment_request_id: row.payment_request_id,
       worker_status: "pending",
@@ -158,7 +158,7 @@ describe("request_human_work idempotency (CC-046)", () => {
     expect(json.idempotent_replay).toBe(true);
     expect(json.payment_request_id).toBe("pr_existing");
     // No second task, ever — the whole point of the key.
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 
   it("scopes the lookup to the authenticated caller's wallet", async () => {
@@ -189,7 +189,7 @@ describe("request_human_work idempotency (CC-046)", () => {
 
     expect(json.ok).toBe(true);
     expect(json.idempotent_replay).toBeUndefined();
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ idempotency_key: KEY }),
     );
   });
@@ -200,7 +200,7 @@ describe("request_human_work idempotency (CC-046)", () => {
     mockFindTaskByIdempotencyKey
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(EXISTING_ROW);
-    mockInitiateX402Payment.mockRejectedValue(
+    mockCreateFundingOffer.mockRejectedValue(
       new Error('createTask failed (23505): duplicate key value violates unique constraint "tasks_agent_idempotency_key_uidx"'),
     );
 
@@ -211,12 +211,12 @@ describe("request_human_work idempotency (CC-046)", () => {
     expect(json.idempotent_replay).toBe(true);
     expect(json.replayed_after_conflict).toBe(true);
     expect(json.payment_request_id).toBe("pr_existing");
-    expect(mockReplayX402Payment).toHaveBeenCalledWith(EXISTING_ROW);
+    expect(mockReplayFundingOffer).toHaveBeenCalledWith(EXISTING_ROW);
   });
 
   it("surfaces an error when the conflict has no retrievable row", async () => {
     mockFindTaskByIdempotencyKey.mockResolvedValue(null);
-    mockInitiateX402Payment.mockRejectedValue(
+    mockCreateFundingOffer.mockRejectedValue(
       new Error('createTask failed (23505): duplicate key value violates unique constraint "tasks_agent_idempotency_key_uidx"'),
     );
 
@@ -244,7 +244,7 @@ describe("request_human_work idempotency (CC-046)", () => {
 
     expect(json.ok).toBe(true);
     expect(mockFindTaskByIdempotencyKey).not.toHaveBeenCalled();
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.not.objectContaining({ idempotency_key: expect.anything() }),
     );
   });
