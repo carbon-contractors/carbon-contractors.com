@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { explainContractError, isWalletRejection } from "@/lib/contracts/reverts";
+import {
+  explainContractError,
+  explainWriteError,
+  isWalletRejection,
+  isWrongChainError,
+} from "@/lib/contracts/reverts";
 
 /**
  * NOR-329 — the translator is duck-typed on viem's error shapes, so these
@@ -130,5 +135,50 @@ describe("explainContractError sentence matchers (NOR-346)", () => {
     expect(explainContractError({ message: "totally novel failure" }, FALLBACK)).toBe(
       FALLBACK,
     );
+  });
+});
+
+describe("explainWriteError (2026-09-28 walkthrough, NOR-321)", () => {
+  const NET = "Base Sepolia";
+  const FB = "submitWork was not sent.";
+
+  it("names a wrong-network wallet instead of blaming the worker", () => {
+    const err = { name: "SwitchChainError", cause: { code: 4902, message: "Unrecognized chain ID" } };
+    expect(isWrongChainError(err)).toBe(true);
+    const text = explainWriteError(err, FB, NET);
+    expect(text).toContain("different network");
+    expect(text).toContain(NET);
+    expect(text).not.toContain("Cancelled");
+  });
+
+  it("catches viem's chain assertion when the switch did not take", () => {
+    expect(
+      isWrongChainError({
+        name: "ContractFunctionExecutionError",
+        cause: { name: "ChainMismatchError", message: "The current chain of the wallet (id: 1) does not match the target chain" },
+      }),
+    ).toBe(true);
+  });
+
+  it("still reads a declined switch prompt as a cancel, not a network fault", () => {
+    const err = { name: "SwitchChainError", cause: { code: 4001 } };
+    expect(explainWriteError(err, FB, NET)).toContain("Cancelled in your wallet");
+  });
+
+  it("keeps contract translations ahead of the fallback", () => {
+    expect(explainWriteError(revertError("InvalidState(2, 3)"), FB, NET)).toContain("different state");
+  });
+
+  it("appends what the wallet said when nothing translates", () => {
+    const err = { shortMessage: "Internal JSON-RPC error.\nDetails: whatever", cause: {} };
+    expect(explainWriteError(err, FB, NET)).toBe(
+      `${FB} Your wallet reported: "Internal JSON-RPC error."`,
+    );
+    expect(explainWriteError(undefined, FB, NET)).toBe(FB);
+  });
+
+  it("does not flag an ordinary revert or RPC fault as wrong-network", () => {
+    expect(isWrongChainError(revertError("NotWorker()"))).toBe(false);
+    expect(isWrongChainError(new Error("fetch failed"))).toBe(false);
   });
 });

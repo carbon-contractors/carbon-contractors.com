@@ -32,8 +32,42 @@
 }
 
 .loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   color: var(--cc-text-muted);
   margin-top: 2rem;
+}
+
+.spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  border: 2px solid var(--cc-border);
+  border-top-color: var(--cc-blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* The agreed criteria stay visible after acceptance (2026-09-28 walkthrough). */
+.jobDetails {
+  margin-top: 0.75rem;
+}
+
+.jobDetails > summary {
+  cursor: pointer;
 }
 
 /* CC-026: per-endpoint fetch failures, shown with a retry */

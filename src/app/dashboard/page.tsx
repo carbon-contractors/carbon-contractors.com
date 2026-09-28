@@ -11,7 +11,8 @@ import {
 } from "@/lib/checker/evidence-hash";
 import { parseSpecCriteria, parseSpecForDisplay } from "@/lib/spec/display";
 import type { AcceptanceSpec } from "@/lib/spec/schema";
-import { explainContractError } from "@/lib/contracts/reverts";
+import { explainWriteError } from "@/lib/contracts/reverts";
+import { useEnsureAppChain } from "@/lib/wallet/useEnsureAppChain";
 import {
   buildEvidenceBundleJson,
   emptyArtifactDraft,
@@ -339,6 +340,20 @@ function statusClass(status: string): string {
   }
 }
 
+/**
+ * The dashboard's first load is several seconds of session probe, database
+ * reads and per-task on-chain reads (2026-09-28 walkthrough) — show that work
+ * is happening rather than a blank page. role="status" announces it.
+ */
+function LoadingPanel({ label }: { label: string }) {
+  return (
+    <div className={styles.loading} role="status" aria-live="polite">
+      <span className={styles.spinner} aria-hidden="true" />
+      <span>{label}</span>
+    </div>
+  );
+}
+
 /** Which per-task affordance is open — CC-092's three evidence-bundle flows. */
 type TaskAction = "submit" | "claim-early" | "dispute";
 
@@ -355,6 +370,9 @@ export default function DashboardPage() {
   const [reputation, setReputation] = useState<Reputation | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
+  // Tasks load on their own session round trip, apart from `loading`, so the
+  // empty state must wait for them too or "No tasks yet" flashes first.
+  const [tasksLoading, setTasksLoading] = useState(false);
   // CC-026: each endpoint reports its own failure, so a single broken one is
   // visible instead of presenting as "no work available".
   const [errors, setErrors] = useState<{ tasks: string | null; reputation: string | null }>({
@@ -440,6 +458,7 @@ export default function DashboardPage() {
     reset: resetWriteContract,
   } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
+  const ensureAppChain = useEnsureAppChain();
   const {
     isSuccess: txConfirmed,
     isError: txFailed,
@@ -555,6 +574,7 @@ export default function DashboardPage() {
       setTasks([]);
       return;
     }
+    setTasksLoading(true);
     try {
       const res = await fetchWithSession("/api/tasks");
       const data = await res.json();
@@ -587,6 +607,8 @@ export default function DashboardPage() {
       // will not release task content, by design.
       setTasks([]);
       setErrors((prev) => ({ ...prev, tasks: "Sign the verification message to view your tasks" }));
+    } finally {
+      setTasksLoading(false);
     }
   }, [isConnected, address, fetchWithSession]);
 
@@ -714,9 +736,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!writeContractError) return;
     setStakeError(
-      explainContractError(
+      explainWriteError(
         writeContractError,
         "The transaction could not be sent — nothing was changed on-chain. Try again.",
+        appChain.name,
       ),
     );
     setStakeStep("idle");
@@ -726,9 +749,10 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!txFailed) return;
     setStakeError(
-      explainContractError(
+      explainWriteError(
         txReceiptError,
         "The transaction was sent but failed on-chain — nothing was staked. Try again.",
+        appChain.name,
       ),
     );
     setStakeStep("idle");
@@ -751,23 +775,34 @@ export default function DashboardPage() {
     const amountWei = BigInt(Math.round(parseFloat(stakeInput) * 10 ** USDC_DECIMALS));
 
     if (stakeStep === "idle") {
-      // Step 1: Approve USDC
+      // Step 1: Approve USDC — on the app's chain, never whichever network
+      // the wallet happens to be parked on (useEnsureAppChain).
       setStakeStep("approving");
-      writeContract({
-        address: USDC_ADDRESS as `0x${string}`,
-        abi: ERC20_APPROVE_ABI,
-        functionName: "approve",
-        args: [stakeContractAddress, amountWei],
-      });
+      void ensureAppChain()
+        .then(() =>
+          writeContract({
+            chainId: appChain.id,
+            address: USDC_ADDRESS as `0x${string}`,
+            abi: ERC20_APPROVE_ABI,
+            functionName: "approve",
+            args: [stakeContractAddress, amountWei],
+          }),
+        )
+        .catch((err) => {
+          setStakeError(explainWriteError(err, "The approval was not sent.", appChain.name));
+          setStakeStep("idle");
+        });
     }
   }
 
-  // After approval confirmed, do the actual stake
+  // After approval confirmed, do the actual stake. The approve above already
+  // switched chains; chainId here makes viem refuse if the wallet moved since.
   useEffect(() => {
     if (txConfirmed && stakeStep === "approving" && stakeContractAddress && stakeInput) {
       const amountWei = BigInt(Math.round(parseFloat(stakeInput) * 10 ** USDC_DECIMALS));
       setStakeStep("staking");
       writeContract({
+        chainId: appChain.id,
         address: stakeContractAddress,
         abi: STAKE_ABI,
         functionName: "stake",
@@ -780,12 +815,20 @@ export default function DashboardPage() {
     if (!stakeContractAddress || !unstakeInput) return;
     const amountWei = BigInt(Math.round(parseFloat(unstakeInput) * 10 ** USDC_DECIMALS));
     setStakeStep("unstaking");
-    writeContract({
-      address: stakeContractAddress,
-      abi: STAKE_ABI,
-      functionName: "unstake",
-      args: [amountWei],
-    });
+    void ensureAppChain()
+      .then(() =>
+        writeContract({
+          chainId: appChain.id,
+          address: stakeContractAddress,
+          abi: STAKE_ABI,
+          functionName: "unstake",
+          args: [amountWei],
+        }),
+      )
+      .catch((err) => {
+        setStakeError(explainWriteError(err, "The unstake was not sent.", appChain.name));
+        setStakeStep("idle");
+      });
   }
 
   const cooldownReady = reputation?.stake?.staked_at
@@ -1147,7 +1190,9 @@ export default function DashboardPage() {
       [task.id]: { ok: true, text: "Confirm submitWork in your wallet…" },
     }));
     try {
+      await ensureAppChain();
       await writeContractAsync({
+        chainId: appChain.id,
         address: escrowContract,
         abi: SUBMIT_WORK_ABI,
         functionName: "submitWork",
@@ -1171,9 +1216,10 @@ export default function DashboardPage() {
         [task.id]: {
           ok: false,
           // NOR-329: "you cancelled" is not "the chain said no" — keep them apart.
-          text: explainContractError(
+          text: explainWriteError(
             err,
-            "submitWork was not sent — cancelled or rejected in your wallet.",
+            "submitWork was not sent.",
+            appChain.name,
           ),
         },
       }));
@@ -1192,7 +1238,9 @@ export default function DashboardPage() {
       [task.id]: { ok: true, text: "Confirm releaseAfterReview in your wallet…" },
     }));
     try {
+      await ensureAppChain();
       await writeContractAsync({
+        chainId: appChain.id,
         address: escrowContract,
         abi: RELEASE_AFTER_REVIEW_ABI,
         functionName: "releaseAfterReview",
@@ -1207,9 +1255,10 @@ export default function DashboardPage() {
         ...prev,
         [task.id]: {
           ok: false,
-          text: explainContractError(
+          text: explainWriteError(
             err,
-            "Claim was not sent — cancelled or rejected in your wallet.",
+            "Claim was not sent.",
+            appChain.name,
           ),
         },
       }));
@@ -1234,7 +1283,9 @@ export default function DashboardPage() {
       [task.id]: { ok: true, text: "Confirm releaseAfterArbitration in your wallet…" },
     }));
     try {
+      await ensureAppChain();
       await writeContractAsync({
+        chainId: appChain.id,
         address: escrowContract,
         abi: RELEASE_AFTER_ARBITRATION_ABI,
         functionName: "releaseAfterArbitration",
@@ -1249,9 +1300,10 @@ export default function DashboardPage() {
         ...prev,
         [task.id]: {
           ok: false,
-          text: explainContractError(
+          text: explainWriteError(
             err,
-            "Claim was not sent — cancelled or rejected in your wallet.",
+            "Claim was not sent.",
+            appChain.name,
           ),
         },
       }));
@@ -1317,7 +1369,9 @@ export default function DashboardPage() {
         ...prev,
         [task.id]: { ok: true, text: "Passing verdict obtained — confirm claimWithVerdict in your wallet…" },
       }));
+      await ensureAppChain();
       await writeContractAsync({
+        chainId: appChain.id,
         address: escrowContract,
         abi: CLAIM_WITH_VERDICT_ABI,
         functionName: "claimWithVerdict",
@@ -1335,9 +1389,10 @@ export default function DashboardPage() {
           text:
             err instanceof Error && err.message.startsWith("verdict field")
               ? `The verdict response was malformed: ${err.message}`
-              : explainContractError(
+              : explainWriteError(
                   err,
                   "Claim was not sent — cancelled, rejected in your wallet, or the request failed.",
+                  appChain.name,
                 ),
         },
       }));
@@ -1391,7 +1446,9 @@ export default function DashboardPage() {
         ...prev,
         [task.id]: { ok: true, text: "Failing verdict obtained — confirm disputeTask in your wallet…" },
       }));
+      await ensureAppChain();
       await writeContractAsync({
+        chainId: appChain.id,
         address: escrowContract,
         abi: DISPUTE_ABI,
         functionName: "disputeTask",
@@ -1430,9 +1487,10 @@ export default function DashboardPage() {
           text:
             err instanceof Error && err.message.startsWith("verdict field")
               ? `The verdict response was malformed: ${err.message}`
-              : explainContractError(
+              : explainWriteError(
                   err,
                   "Dispute was not sent — cancelled, rejected in your wallet, or the request failed.",
+                  appChain.name,
                 ),
         },
       }));
@@ -1743,7 +1801,9 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {needsSignIn && !sessionChecked ? null : needsSignIn ? (
+            {!sessionChecked && !needsSignIn ? (
+              <LoadingPanel label="Checking your session…" />
+            ) : needsSignIn ? (
               <div className={styles.hero}>
                 <h2>Worker Dashboard</h2>
                 <p>
@@ -1764,7 +1824,9 @@ export default function DashboardPage() {
               </div>
             ) : (
               <>
-            {loading && <p className={styles.loading}>Loading...</p>}
+            {(loading || tasksLoading) && (
+              <LoadingPanel label="Loading your dashboard — reading tasks and on-chain state…" />
+            )}
             {(errors.tasks || errors.reputation) && (
               <div className={styles.fetchErrorBanner}>
                 {errors.tasks && (
@@ -2365,7 +2427,7 @@ export default function DashboardPage() {
             {/* ── Tasks ──────────────────────────────────────────────── */}
             <h2 className={styles.pageTitle}>Your Tasks</h2>
 
-            {!loading && !errors.tasks && tasks.length === 0 && (
+            {!loading && !tasksLoading && !errors.tasks && tasks.length === 0 && (
               <div className={styles.emptyState}>
                 {profile ? (
                   // CC-010: this worker is already listed in the whitepages — never
@@ -2468,6 +2530,40 @@ export default function DashboardPage() {
                         </span>
                       )}
                     </div>
+
+                    {/* ── The deal, after the decision (2026-09-28 walkthrough) ──
+                        NOR-323 showed the criteria only while an offer was
+                        pending, so once accepted the worker lost sight of what
+                        they had agreed to deliver — exactly when they need it. */}
+                    {isWorkerForTask && task.status !== "pending" && (
+                      <details
+                        className={styles.jobDetails}
+                        open={task.status === "accepted" || task.status === "active"}
+                      >
+                        <summary className={styles.specTitle}>
+                          What this job needs
+                        </summary>
+                        {specDisplay.ok ? (
+                          <dl className={styles.specList}>
+                            {specDisplay.rows.map((row) => (
+                              <div key={row.key} className={styles.specRow}>
+                                <dt className={styles.specLabel}>
+                                  {row.label}:{" "}
+                                  <span className={styles.specValue}>{row.value}</span>
+                                </dt>
+                                <dd className={styles.specDesc}>{row.description}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        ) : (
+                          <p className={styles.specWarning}>
+                            The acceptance criteria could not be read (
+                            {specDisplay.reason}). Ask the hiring agent what
+                            evidence it expects before submitting.
+                          </p>
+                        )}
+                      </details>
+                    )}
 
                     {/* ── Pending offer — the deal, before the decision (NOR-323) ── */}
                     {isWorkerForTask && task.status === "pending" && (

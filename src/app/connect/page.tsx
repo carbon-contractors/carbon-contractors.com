@@ -4,8 +4,10 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAccount, useSignMessage } from "wagmi";
+import { useQueryClient } from "@tanstack/react-query";
 import PageShell from "@/components/PageShell";
 import WalletConnectButton from "@/components/WalletConnectButton";
+import { useIsRegistered } from "@/lib/wallet/useIsRegistered";
 import { CATEGORIES, MAX_CATEGORIES } from "@/lib/categories";
 import { MAX_RATE_USDC, rateUsdcError } from "@/lib/validation";
 import styles from "./connect.module.css";
@@ -21,6 +23,8 @@ export default function ConnectPage() {
   const router = useRouter();
   const { address, isConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
+  const alreadyRegistered = useIsRegistered();
+  const queryClient = useQueryClient();
 
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [rateUsdc, setRateUsdc] = useState("");
@@ -88,6 +92,8 @@ export default function ConnectPage() {
       }
 
       setStatus("success");
+      // The nav's REGISTER link and the CTAs key off this lookup.
+      void queryClient.invalidateQueries({ queryKey: ["is-registered"] });
     } catch (err) {
       setStatus("error");
       setErrorMsg(err instanceof Error ? err.message : "Unknown error");
@@ -112,6 +118,20 @@ export default function ConnectPage() {
             </p>
             <div className={styles.heroConnect}>
               <WalletConnectButton />
+            </div>
+          </div>
+        ) : alreadyRegistered && status !== "success" ? (
+          // A listed worker landing here (old bookmark, shared link) gets
+          // pointed at their dashboard, not a second registration form.
+          <div className={styles.hero}>
+            <h2>You&apos;re already registered</h2>
+            <p>
+              This wallet is listed in the whitepages. Your tasks, profile and
+              stake live on your dashboard — edit your services there.
+            </p>
+            <p className={styles.mono}>{address}</p>
+            <div className={styles.heroConnect}>
+              <Link href="/dashboard">Go to your dashboard &rarr;</Link>
             </div>
           </div>
         ) : status === "success" ? (

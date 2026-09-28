@@ -203,3 +203,70 @@ function findMessageMatch(err: unknown): string | null {
   }
   return null;
 }
+
+/**
+ * viem/wagmi class names (and EIP-3326's 4902 "unrecognised chain" code) for a
+ * wallet sitting on the wrong network. The 2026-09-28 walkthrough hit this with
+ * Phantom, which has no Base Sepolia: the prompt opened and closed, and the
+ * worker was told they had cancelled — they hadn't.
+ */
+const CHAIN_ERROR_NAMES = new Set([
+  "ChainMismatchError",
+  "ConnectorChainMismatchError",
+  "ChainNotConfiguredError",
+  "SwitchChainError",
+  "SwitchChainNotSupportedError",
+]);
+
+export function isWrongChainError(err: unknown): boolean {
+  let node = err as { code?: unknown; name?: unknown; message?: unknown; cause?: unknown } | null;
+  let depth = 0;
+  while (node && typeof node === "object" && depth++ < 10) {
+    if (node.code === 4902) return true;
+    if (typeof node.name === "string" && CHAIN_ERROR_NAMES.has(node.name)) return true;
+    if (typeof node.message === "string") {
+      const m = node.message.toLowerCase();
+      if (m.includes("unrecognized chain") || m.includes("does not match the target chain")) {
+        return true;
+      }
+    }
+    node = node.cause as typeof node;
+  }
+  return false;
+}
+
+/** The first human-readable line viem attached, trimmed — for the fallback case only. */
+function errorDetail(err: unknown): string | null {
+  let node = err as { shortMessage?: unknown; message?: unknown; cause?: unknown } | null;
+  let depth = 0;
+  while (node && typeof node === "object" && depth++ < 10) {
+    const text = typeof node.shortMessage === "string" ? node.shortMessage : node.message;
+    if (typeof text === "string" && text.trim()) {
+      const line = text.trim().split("\n")[0];
+      return line.length > 200 ? `${line.slice(0, 197)}...` : line;
+    }
+    node = node.cause as typeof node;
+  }
+  return null;
+}
+
+/**
+ * explainContractError for a dashboard write: adds the wrong-network case, and
+ * when nothing translates, appends what the wallet actually said instead of
+ * letting a generic sentence stand in for an unknown cause. The walkthrough's
+ * "cancelled or rejected in your wallet" was exactly that — a fallback
+ * presented as a diagnosis.
+ */
+export function explainWriteError(err: unknown, fallback: string, networkName: string): string {
+  if (isWalletRejection(err)) return explainContractError(err, fallback);
+  if (isWrongChainError(err)) {
+    return (
+      `Your wallet is on a different network and couldn't switch to ${networkName}, so nothing was sent. ` +
+      `Switch it to ${networkName} in your wallet and try again — some wallets (Phantom, for one) don't support ${networkName} at all; the passkey option or MetaMask do.`
+    );
+  }
+  const text = explainContractError(err, fallback);
+  if (text !== fallback) return text;
+  const detail = errorDetail(err);
+  return detail ? `${fallback} Your wallet reported: "${detail}"` : fallback;
+}
