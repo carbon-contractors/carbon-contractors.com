@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import WalletConnectButton from "./WalletConnectButton";
+import { useIsRegistered } from "@/lib/wallet/useIsRegistered";
 import styles from "./NavBar.module.css";
 
 const NAV_LINKS = [
@@ -15,6 +16,12 @@ const NAV_LINKS = [
 
 export default function NavBar() {
   const [menuOpen, setMenuOpen] = useState(false);
+  // A registered worker has no use for REGISTER — it only led back into a
+  // form they had already completed (2026-09-28 walkthrough).
+  const registered = useIsRegistered();
+  const links = registered
+    ? NAV_LINKS.filter((link) => link.href !== "/connect")
+    : NAV_LINKS;
 
   return (
     <nav className={styles.nav}>
@@ -34,7 +41,7 @@ export default function NavBar() {
         </button>
 
         <div className={`${styles.links} ${menuOpen ? styles.linksOpen : ""}`}>
-          {NAV_LINKS.map((link) => (
+          {links.map((link) => (
             <Link
               key={link.href}
               href={link.href}

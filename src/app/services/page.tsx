@@ -1,4 +1,4 @@
-import Link from "next/link";
+import RegisterCta from "@/components/RegisterCta";
 import PageShell from "@/components/PageShell";
 import {
   CATEGORY_DETAILS,
@@ -115,9 +115,7 @@ export default function ServicesPage() {
 
         <div className={styles.cta}>
           <p className={styles.ctaText}>Ready to get started?</p>
-          <Link href="/connect" className={styles.ctaButton}>
-            REGISTER AS A WORKER
-          </Link>
+          <RegisterCta className={styles.ctaButton} />
         </div>
       </div>
     </PageShell>
