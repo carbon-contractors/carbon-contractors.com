@@ -32,7 +32,7 @@ made.
 | [ADR-0007](ADR-0007-adjudication-tier-and-arbitrator-isolation.md) | The adjudication tier — value-weighted review, and what an arbitrator may see | accepted | `funds_control_aml_gating.md` Track D |
 | [ADR-0008](ADR-0008-completion-attestations.md) | Completion attestations — a signature the worker holds, not a transaction we send | **proposed** | `CC-036` |
 | [ADR-0009](ADR-0009-session-auth-and-signing-hygiene.md) | Session auth and signing hygiene — sign once at connect, then only when the chain is touched | accepted | `NOR-322` (CC-101) |
-| [ADR-0010](ADR-0010-evidence-upload-presigned-agent-bucket.md) | Evidence upload — pre-signed writes into the agent's bucket, not platform storage | **proposed** | `NOR-334` (CC-101) |
+| [ADR-0010](ADR-0010-evidence-upload-presigned-agent-bucket.md) | Evidence upload — pre-signed writes into the agent's bucket, not platform storage | **accepted** 2026-09-28 | `NOR-334` (CC-101) |
 | [ADR-0011](ADR-0011-watch-surface-and-paging-policy.md) | The watch surface — a stateful ops dashboard, and a page only when action is needed | **proposed** | `CC-118`; amends `ADR-0003` D5; supersedes `CC-048` |
 | [ADR-0012](ADR-0012-agent-api-host-split.md) | Two front doors — a bot-friendly API host for agents, a protected website for humans | **proposed** | edge bot protection blocking agents (2026-09-27); amends `ADR-0006` D6 |
 

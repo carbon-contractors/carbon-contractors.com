@@ -1,10 +1,10 @@
 # ADR-0010 — Evidence upload: pre-signed writes into the agent's bucket, not platform storage
 
-- **Status:** proposed
+- **Status:** accepted (2026-09-28)
 - **Date:** 2026-09-03
 - **Issue:** `NOR-334` (Linear; split from `NOR-327`), backlog `CC-101`
 - **Depends on:** `ADR-0001` (D4, D5), `ADR-0002` (D2.2, D3, D4, D5, D9), `ADR-0003` (D2), `ADR-0009` (worker sessions)
-- **Deciders:** Aaron Clifft (pending)
+- **Deciders:** Aaron Clifft — accepted 2026-09-28
 
 ## Context
 
@@ -31,7 +31,7 @@ So "platform-hosted bucket" is not a neutral convenience feature. It amends an a
 rewrites a public claim, and changes the platform's regulatory posture. This ADR treats that as the
 alternative to be rejected, and proposes the mechanism that keeps every accepted decision intact.
 
-## Decision (proposed)
+## Decision
 
 ### D1 — The platform still never holds evidence bytes (reaffirm D3; reject platform storage)
 
@@ -137,7 +137,13 @@ bundle.
 
 ## Open items (for the PO)
 
-1. **Ratify D1** — this forecloses platform-hosted evidence as a product option. Everything else
+**Acceptance, 2026-09-28.** Aaron accepted this ADR as written, D1 included, during the NOR-321
+walkthrough follow-up. His framing, from the walkthrough: workers should be able to "just take a
+photo on their phone and upload that as evidence" (the gig-economy expectation), and short-lived
+platform-side storage was considered and set aside in favour of this design. Items 2 and 3 below
+remain open and are settled at implementation time.
+
+1. ~~**Ratify D1**~~ **Ratified 2026-09-28.** — this forecloses platform-hosted evidence as a product option. Everything else
    follows from it.
 2. Agent onboarding UX ownership: who writes the bucket-setup recipe, and does
    `request_human_work` validation warn when `evidence_bucket` is absent but criteria require
