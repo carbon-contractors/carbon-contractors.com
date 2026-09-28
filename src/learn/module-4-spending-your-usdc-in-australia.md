@@ -82,4 +82,4 @@ Three things:
 
 ---
 
-**Next → [Let Your Agent Handle It](/learn/module-5)** — Automate your notification channel so you never miss a job.
+**Next → [Let Your Agent Handle It](/learn/let-your-agent-handle-it)** — Automate your notification channel so you never miss a job.

@@ -79,4 +79,4 @@ Three things:
 
 ---
 
-**Next → [Don't Get Rekt: Security Hardening](/learn/module-6)** — Protect your identity, your wallet, and your attack surface as a crypto contractor.
+**Next → [Don't Get Rekt: Security Hardening](/learn/dont-get-rekt)** — Protect your identity, your wallet, and your attack surface as a crypto contractor.

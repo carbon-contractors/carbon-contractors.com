@@ -68,4 +68,4 @@ Three things:
 
 ---
 
-**Next → [How x402 Pays You](/learn/module-3)** — What happens when an AI agent hires you and the payment hits your wallet.
+**Next → [How You Get Paid](/learn/how-you-get-paid)** — What happens when an AI agent hires you and the payment hits your wallet.

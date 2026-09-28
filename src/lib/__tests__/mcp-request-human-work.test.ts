@@ -13,11 +13,11 @@ vi.mock("@/lib/db/whitepages", () => ({
   getDistinctCategories: vi.fn(),
 }));
 
-const mockInitiateX402Payment = vi.fn();
+const mockCreateFundingOffer = vi.fn();
 const mockCountCommittedTasks = vi.fn();
-vi.mock("@/lib/payments/x402", () => ({
-  initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
-  replayX402Payment: vi.fn(),
+vi.mock("@/lib/payments/funding", () => ({
+  createFundingOffer: (...args: unknown[]) => mockCreateFundingOffer(...args),
+  replayFundingOffer: vi.fn(),
 }));
 
 const mockLimit = vi.fn();
@@ -112,7 +112,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
       availability: "available",
       reputation_score: 80,
     });
-    mockInitiateX402Payment.mockResolvedValue({
+    mockCreateFundingOffer.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
       worker_status: "pending",
@@ -130,7 +130,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     expect(result.isError).toBe(true);
     expect(json.ok).toBe(false);
     expect(json.error).toContain("Authentication required");
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
     expect(mockGetHumanByWallet).not.toHaveBeenCalled();
   });
 
@@ -138,7 +138,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     const { result } = await callRequestHumanWork();
 
     expect(result.isError).toBeUndefined();
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ from_agent_wallet: AGENT_WALLET }),
     );
   });
@@ -146,7 +146,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
   it("derives review_window_seconds from the agent's chosen window (CC-081 Defect 1)", async () => {
     await callRequestHumanWork({ ...VALID_ARGS, review_window_hours: 72 });
 
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ review_window_seconds: 72 * 3600 }),
     );
   });
@@ -162,7 +162,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     expect(declared).toContain("to_human_wallet"); // guards against a vacuous pass
     expect(declared).not.toContain("from_agent_wallet");
     // ...and even when smuggled past the schema it never reaches the task row.
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ from_agent_wallet: AGENT_WALLET }),
     );
   });
@@ -174,7 +174,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
 
     expect(result.isError).toBe(true);
     expect(json.error).toContain("registered worker");
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 
   it("persists the wallet as stored in humans, not as the caller cased it", async () => {
@@ -183,7 +183,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     await callRequestHumanWork();
 
     expect(mockGetHumanByWallet).toHaveBeenCalledWith(WORKER_WALLET);
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ to_human_wallet: WORKER_WALLET.toLowerCase() }),
     );
   });
@@ -196,7 +196,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
     expect(mockLimit).toHaveBeenCalledWith(AGENT_WALLET.toLowerCase());
     expect(result.isError).toBe(true);
     expect(json.retry_after_s).toBe(1800);
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 
   it("checks authentication before spending a rate-limit token", async () => {
@@ -215,7 +215,7 @@ describe("request_human_work MCP tool (CC-081 Defect 4)", () => {
       AGENT_WALLET,
       "retry-1",
     );
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ idempotency_key: "retry-1" }),
     );
   });
@@ -235,7 +235,7 @@ describe("request_human_work acceptance spec (CC-084)", () => {
       availability: "available",
       reputation_score: 80,
     });
-    mockInitiateX402Payment.mockResolvedValue({
+    mockCreateFundingOffer.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
       worker_status: "pending",
@@ -249,7 +249,7 @@ describe("request_human_work acceptance spec (CC-084)", () => {
   it("passes the parsed spec and its hash through to the payment request", async () => {
     await callRequestHumanWork({ ...VALID_ARGS, acceptance_spec: VALID_SPEC });
 
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({
         spec: expect.objectContaining({
           preimage: VALID_SPEC, // verbatim — never reserialised
@@ -268,7 +268,7 @@ describe("request_human_work acceptance spec (CC-084)", () => {
 
     expect(result.isError).toBe(true);
     expect(json.error).toContain("acceptance_spec is required");
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 
   it("declares acceptance_spec as required in the tool schema", async () => {
@@ -300,7 +300,7 @@ describe("request_human_work acceptance spec (CC-084)", () => {
 
     expect(result.isError).toBe(true);
     expect(json.error).toContain("acceptance_spec is invalid");
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 
   it("rejects an unsupported schema version with a usable message", async () => {
@@ -311,7 +311,7 @@ describe("request_human_work acceptance spec (CC-084)", () => {
 
     expect(result.isError).toBe(true);
     expect(json.error).toContain("unsupported schema_version 99");
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 });
 
@@ -327,7 +327,7 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
       availability: "available",
       reputation_score: 80,
     });
-    mockInitiateX402Payment.mockResolvedValue({
+    mockCreateFundingOffer.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
       worker_status: "pending",
@@ -351,7 +351,7 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
 
     await callRequestHumanWork();
 
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ auto_accept: false }),
     );
   });
@@ -364,7 +364,7 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
 
     await callRequestHumanWork();
 
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ auto_accept: true }),
     );
     // Skip-count check only happens on the auto path.
@@ -381,13 +381,13 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
 
     expect(result.isError).toBe(true);
     expect(json.error).toContain("concurrency cap");
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 
   it("passes the agent-set offer expiry through, bounded at the schema layer (D4)", async () => {
     await callRequestHumanWork({ ...VALID_ARGS, offer_expiry_minutes: 30 });
 
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ offer_expiry_seconds: 30 * 60 }),
     );
   });
@@ -395,7 +395,7 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
   it("defaults the offer expiry to 24 hours (ADR-0005 D4 open item, resolved)", async () => {
     await callRequestHumanWork();
 
-    expect(mockInitiateX402Payment).toHaveBeenCalledWith(
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
       expect.objectContaining({ offer_expiry_seconds: 24 * 60 * 60 }),
     );
   });

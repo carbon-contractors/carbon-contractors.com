@@ -32,13 +32,13 @@ export default function ComingSoon() {
 
           <p className={styles.tagline}>
             Human work on crypto rails.<br />
-            <b>USDC payments</b> · <b>Base</b> · <b>x402 protocol</b>
+            <b>USDC payments</b> · <b>Base</b> · <b>Non-custodial escrow</b>
           </p>
         </main>
 
         <div className={styles.meta}>
           <div className={styles.pill}>USDC · BASE</div>
-          <div className={styles.pill}>x402 PROTOCOL</div>
+          <div className={styles.pill}>NON-CUSTODIAL ESCROW</div>
           <div className={styles.pill}>COINBASE SMART WALLET</div>
           <div className={styles.pill}>HAAS</div>
         </div>

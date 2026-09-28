@@ -20,10 +20,10 @@ vi.mock("@/lib/db/whitepages", () => ({
   getDistinctCategories: vi.fn(),
 }));
 
-const mockInitiateX402Payment = vi.fn();
-vi.mock("@/lib/payments/x402", () => ({
-  initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
-  replayX402Payment: vi.fn(),
+const mockCreateFundingOffer = vi.fn();
+vi.mock("@/lib/payments/funding", () => ({
+  createFundingOffer: (...args: unknown[]) => mockCreateFundingOffer(...args),
+  replayFundingOffer: vi.fn(),
 }));
 
 const mockLimit = vi.fn();
@@ -112,7 +112,7 @@ describe("request_human_work sanctions screening (CC-099)", () => {
       availability: "available",
       reputation_score: 80,
     });
-    mockInitiateX402Payment.mockResolvedValue({
+    mockCreateFundingOffer.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
       worker_status: "pending",
@@ -149,7 +149,7 @@ describe("request_human_work sanctions screening (CC-099)", () => {
     expect(json.error).toContain("restricted under sanctions compliance");
     expect(mockLimit).not.toHaveBeenCalled();
     expect(mockGetHumanByWallet).not.toHaveBeenCalled();
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 
   it("rejects a sanctioned target worker before any task row is created", async () => {
@@ -164,7 +164,7 @@ describe("request_human_work sanctions screening (CC-099)", () => {
     expect(result.isError).toBe(true);
     expect(json.code).toBe("SANCTIONED_WALLET");
     expect(json.retryable).toBe(false);
-    expect(mockInitiateX402Payment).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
     expect(mockNotifyContractor).not.toHaveBeenCalled();
   });
 
@@ -219,6 +219,6 @@ describe("request_human_work sanctions screening (CC-099)", () => {
     const { result } = await callRequestHumanWork();
 
     expect(result.isError).toBeUndefined();
-    expect(mockInitiateX402Payment).toHaveBeenCalledTimes(1);
+    expect(mockCreateFundingOffer).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 
 // Canonical host — same constant as src/app/layout.tsx. Deliberately NOT
-// NEXT_PUBLIC_BASE_URL: that env is the x402 fund URL and defaults to localhost (CC-013).
+// NEXT_PUBLIC_BASE_URL: that env is the agent-facing base URL and defaults to localhost (CC-013).
 export const SITE_URL = "https://carbon-contractors.com";
 
 // Same predicate as middleware.ts and src/app/page.tsx: the gate fails closed and is

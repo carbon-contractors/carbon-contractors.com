@@ -41,10 +41,10 @@ vi.mock("@/lib/db/whitepages", () => ({
   getDistinctCategories: vi.fn(),
 }));
 
-const mockInitiateX402Payment = vi.fn();
-vi.mock("@/lib/payments/x402", () => ({
-  initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
-  replayX402Payment: vi.fn(),
+const mockCreateFundingOffer = vi.fn();
+vi.mock("@/lib/payments/funding", () => ({
+  createFundingOffer: (...args: unknown[]) => mockCreateFundingOffer(...args),
+  replayFundingOffer: vi.fn(),
 }));
 
 const mockLimit = vi.fn();
@@ -408,7 +408,7 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     mockGetChannelsForContractor.mockResolvedValue([channel()]);
     mockSetAcceptsAutoBookingForContractor.mockResolvedValue(1);
     mockNotifyAutoBookingDisabled.mockResolvedValue([]);
-    mockInitiateX402Payment.mockResolvedValue({
+    mockCreateFundingOffer.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
     });
@@ -433,7 +433,7 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     expect(mockGetChannelsForContractor).toHaveBeenCalledWith(WORKER_ID);
     // worker.wallet comes from humans, stored lowercase (migration 014).
     expect(mockGetTasksByWallet).toHaveBeenCalledWith(WORKER_WALLET.toLowerCase());
-    expect(mockInitiateX402Payment).toHaveBeenCalledTimes(1);
+    expect(mockCreateFundingOffer).toHaveBeenCalledTimes(1);
   });
 
   it("when triggered, the offer proceeds as manual acceptance and says so", async () => {
@@ -444,7 +444,7 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     const { result, json } = await callRequestHumanWork();
 
     expect(result.isError).toBeUndefined();
-    expect(mockInitiateX402Payment).toHaveBeenCalledTimes(1); // the hire is not blocked
+    expect(mockCreateFundingOffer).toHaveBeenCalledTimes(1); // the hire is not blocked
     expect(mockSetAcceptsAutoBookingForContractor).toHaveBeenCalledWith(WORKER_ID, false);
     expect(mockNotifyAutoBookingDisabled).toHaveBeenCalledTimes(1);
     expect(json.worker_auto_booking_disabled).toBe(true);
@@ -470,7 +470,7 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     const { result, json } = await callRequestHumanWork();
 
     expect(result.isError).toBeUndefined();
-    expect(mockInitiateX402Payment).toHaveBeenCalledTimes(1);
+    expect(mockCreateFundingOffer).toHaveBeenCalledTimes(1);
     expect(json.worker_auto_booking_disabled).toBeUndefined();
   });
 });

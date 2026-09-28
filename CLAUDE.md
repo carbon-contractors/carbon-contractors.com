@@ -25,7 +25,8 @@ If you find something stale, correct it and carry on — that is maintenance, no
 ## What this is
 
 Carbon Contractors — a Human-as-a-Service marketplace on Base. AI agents discover human workers over
-MCP, fund tasks with USDC through x402, and the escrow contract releases payment on completion.
+MCP, fund tasks by paying USDC straight into the escrow contract from their own wallets
+(`approve` + `createTask` — x402 was retired, `CC-103`), and the escrow releases payment on completion.
 Next.js 16 App Router on Vercel, Supabase off-chain, Solidity on Base Sepolia. `README.md` has the
 product narrative.
 

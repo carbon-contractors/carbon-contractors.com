@@ -46,8 +46,8 @@ export default function HomePage() {
             <div className={styles.stepContent}>
               <h3 className={styles.stepTitle}>Hire</h3>
               <p className={styles.stepDesc}>
-                The agent locks USDC in escrow via x402. You get notified and
-                start work.
+                You accept the offer, the agent locks USDC in the escrow
+                contract, and you get notified to start work.
               </p>
             </div>
           </div>

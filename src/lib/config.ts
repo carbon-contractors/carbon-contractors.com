@@ -124,7 +124,7 @@ const envSchema = z.object({
   // ── USDC contract address (required — differs per network) ────────────────
   NEXT_PUBLIC_USDC_ADDRESS: z.string().min(1),
 
-  // ── x402 / Platform ───────────────────────────────────────────────────────
+  // ── Platform ──────────────────────────────────────────────────────────────
   NEXT_PUBLIC_BASE_URL: envOptional(z.string().default("http://localhost:3000")),
   PLATFORM_WALLET_ADDRESS: envOptional(z.string().optional()),
 

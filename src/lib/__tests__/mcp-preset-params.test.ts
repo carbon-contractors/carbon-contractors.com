@@ -11,10 +11,10 @@ vi.mock("@/lib/db/whitepages", () => ({
   getDistinctCategories: vi.fn(),
 }));
 
-const mockInitiateX402Payment = vi.fn();
-vi.mock("@/lib/payments/x402", () => ({
-  initiateX402Payment: (...args: unknown[]) => mockInitiateX402Payment(...args),
-  replayX402Payment: vi.fn(),
+const mockCreateFundingOffer = vi.fn();
+vi.mock("@/lib/payments/funding", () => ({
+  createFundingOffer: (...args: unknown[]) => mockCreateFundingOffer(...args),
+  replayFundingOffer: vi.fn(),
 }));
 
 const mockLimit = vi.fn();
@@ -125,7 +125,7 @@ describe("MCP pre-set chain parameters (CC-046)", () => {
       availability: "available",
       reputation_score: 80,
     });
-    mockInitiateX402Payment.mockResolvedValue({
+    mockCreateFundingOffer.mockResolvedValue({
       status: "awaiting_funding",
       payment_request_id: "pr_1",
       worker_status: "pending",
@@ -154,7 +154,7 @@ describe("MCP pre-set chain parameters (CC-046)", () => {
 
   it("smuggled chain parameters are dropped, never reaching the task creation call", async () => {
     // Even past the schema (direct handler invocation), a caller-supplied
-    // escrow/USDC/chain/rpc value must never reach initiateX402Payment —
+    // escrow/USDC/chain/rpc value must never reach createFundingOffer —
     // the handler destructures only the known arguments.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const server = createMcpServer({ callerWallet: AGENT_WALLET }) as any;
@@ -167,8 +167,8 @@ describe("MCP pre-set chain parameters (CC-046)", () => {
       rpc_url: "https://evil.example/rpc",
     });
 
-    expect(mockInitiateX402Payment).toHaveBeenCalledTimes(1);
-    const call = mockInitiateX402Payment.mock.calls[0][0];
+    expect(mockCreateFundingOffer).toHaveBeenCalledTimes(1);
+    const call = mockCreateFundingOffer.mock.calls[0][0];
     expect(call).not.toHaveProperty("chain_id");
     expect(call).not.toHaveProperty("escrow_contract");
     expect(call).not.toHaveProperty("usdc_address");

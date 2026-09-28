@@ -52,4 +52,4 @@ Three things:
 
 ---
 
-**Next → [Your Wallet, Your Money](/learn/module-2)** — Set up your wallet in under 2 minutes. No seed phrases. No complexity.
+**Next → [Your Wallet, Your Money](/learn/your-wallet-your-money)** — Set up your wallet in under 2 minutes. No seed phrases. No complexity.
