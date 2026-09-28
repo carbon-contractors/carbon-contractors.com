@@ -1,7 +1,12 @@
-*Last updated: 16 September 2026*
+*Last updated: 28 September 2026*
 
 These are the terms for using Carbon Contractors. Read [our privacy policy](/privacy) too — it
 covers what we do with your data, this page covers everything else.
+
+This page is the binding version. For a plain-language walkthrough of how the platform works, see
+[Learn](/learn) — in particular [How You Get Paid](/learn/how-you-get-paid) and
+[What the Escrow Can and Can't Do](/learn/what-the-escrow-can-and-cant-do). If anything there
+differs from this page, this page applies.
 
 ## What this is
 
@@ -24,24 +29,16 @@ get your own advice on the tax and legal consequences in your jurisdiction.
 
 ## Where we sit under Australia's digital asset rules
 
-Australia's new digital asset framework (the Corporations Amendment (Digital Assets
-Framework) Bill 2025, passed April 2026) creates a regulated category of "digital
-asset platform" — broadly, a facility whose operator holds digital tokens, for itself
-or on behalf of someone else. It commences on 9 April 2027.
+We do not believe Carbon Contractors is a "digital asset platform" under the Corporations Amendment
+(Digital Assets Framework) Bill 2025 (commencing 9 April 2027), because escrowed funds can only
+ever reach the two wallet addresses fixed when a task is funded — nobody, including us, can direct
+them elsewhere. This is our own assessment, not legal advice or a regulator's ruling, and will be
+reviewed by a lawyer before real funds move on mainnet.
 
-Stated plainly: we do not believe Carbon Contractors is one. The strongest reason is
-the constraint above — we operate the machinery and referee disputes, but escrowed
-funds can only ever reach the two wallet addresses fixed when the task was funded, so
-nobody, us included, can direct the money anywhere else. That is our assessment of our
-own architecture. It is not legal advice and not a regulator's ruling, and we will put
-it in front of a lawyer before real funds move on mainnet.
-
-The framework also excludes small-scale platforms — annual transaction volume under
-$10 million, and under $5,000 held for any one client at a time. Both numbers are
-tracked automatically as part of the platform's regular invariant checks, and a
-threshold warning reaches the operator before a limit is crossed, not after. If growth
-ever puts either limb at risk, that is a decision point about the platform's
-structure — not a line we cross quietly.
+We monitor the framework's small-scale exclusion limits (annual transaction volume under
+$10 million; under $5,000 held for any one client at a time) and are warned before either is
+reached. We will not cross either limit without first deciding how the platform must be
+restructured.
 
 ## Accounts and wallets
 
@@ -59,56 +56,38 @@ contract does — nobody can, that's the point of it being on-chain.
 
 ## How escrow, delivery and disputes work
 
-1. **Funding.** The hiring agent locks USDC in the `CarbonEscrow` contract from its own wallet, and
-   at the same moment commits a hash of the **acceptance criteria** — the machine-checkable
-   definition of done. Those criteria are fixed from that point and are shown to you before you
-   accept the job. The written brief alongside them can be clarified later; the criteria cannot.
-2. **Delivery.** You submit your work by recording a hash of it on-chain. That starts a **review
-   window**, set by the agent when it funded the task, and bounded by the contract to between 12
-   hours and 14 days.
-3. **Early payment.** The agent can release payment at any time.
-4. **Automatic release.** If the review window closes and no valid failing verdict has been
-   presented, **you can claim the payment.** Silence does not cost you the job.
-5. **Verdicts.** Whether the work met the criteria is decided by a published, deterministic checker —
-   no AI judgement, no discretion — and the result is signed. Anyone can re-run it against the same
-   inputs and get the same answer. A passing verdict lets you claim immediately.
-6. **Disputes.** Either party can dispute, but **only by presenting a signed failing verdict**. There
-   is no "I just don't accept it" dispute, because that would let the paying side both withhold
-   payment and refuse to justify it.
-7. **Arbitration.** A disputed task is resolved on-chain, to one of the two wallets fixed when the
-   task was funded — the worker's or the agent's. Nowhere else is reachable, by us or by anyone.
-8. **No delivery.** If you never submit and the deadline passes, the agent claims their own refund.
+1. **Funding.** The hiring agent locks USDC in the `CarbonEscrow` contract from its own wallet and
+   commits a hash of the **acceptance criteria** at the same time. The criteria are shown to you
+   before you accept and cannot change afterwards; the written brief may be clarified.
+2. **Delivery.** You submit by recording a hash of your evidence on-chain, which starts a **review
+   window** set by the agent at funding (12 hours to 14 days, enforced by the contract).
+3. **Early payment.** The agent may release payment at any time.
+4. **Automatic release.** If the review window closes without a valid failing verdict being
+   presented, you may claim the payment.
+5. **Verdicts.** Whether work meets the criteria is decided by a published, deterministic checker —
+   no AI judgement and no discretion — and the result is signed. Anyone can re-run the check
+   against the same inputs. A passing verdict lets you claim immediately.
+6. **Disputes.** Either party may dispute, but only by presenting a signed failing verdict.
+7. **Arbitration.** A disputed task is resolved on-chain to one of the two wallets fixed at funding —
+   the worker's or the agent's.
+8. **No delivery.** If you do not submit before the deadline, the agent may claim a refund.
 
-**Payment is pulled, not pushed.** When a task resolves in your favour the money does not arrive by
-itself — you claim it, from your own wallet, paying your own (very small) transaction fee. Money
-sitting unclaimed in escrow is normal, not lost, and not taken.
+**Payment is pulled, not pushed.** A party entitled to funds claims them from the contract from
+their own wallet and pays the transaction fee. Unclaimed funds remain in escrow until claimed.
 
 ## What we can and cannot do
 
-Being direct about this, because an escrow you can't check is just a promise.
+**We cannot:** send escrowed funds anywhere other than the two wallet addresses fixed at funding;
+refund, claw back or cancel a task in flight; or reverse a completed payment or edit anything
+on-chain. These limits are enforced by the deployed contract's code, not by policy.
 
-**We cannot:**
+**We can:** operate the checker and sign verdicts; decline to sign a failing verdict (in which case
+the review window closes and the worker may claim payment); and resolve a disputed task to one of
+the two wallets fixed at funding.
 
-- send escrowed funds anywhere other than the two wallet addresses fixed when the task was funded —
-  not to ourselves, not to a third party, not under an order. It is not a policy, it is what the
-  deployed contract's code permits;
-- refund, claw back, or cancel a task that is in flight;
-- reverse a completed payment, or edit anything already on-chain.
-
-**We can, and you should know it:**
-
-- **sign the verdicts.** Today we operate the checker and hold the signing key, so we are the
-  referee. What that role is limited to is publishing a *falsifiable* result — the rules and the
-  inputs are published and anyone can re-run them and show us wrong. It is bounded, not absent, and
-  we would rather say so than imply the platform has been removed from the picture entirely;
-- **decline to sign.** If we don't sign a failing verdict, the review window closes and the worker is
-  paid. That bias is deliberate: our inaction should never be able to take money off someone who
-  delivered;
-- **resolve a disputed task** to one of those two addresses, as above.
-
-The technical detail behind all of this is published in the repository, including the reasoning and
-the things we have got wrong: see [`docs/adr/`](https://github.com/carbon-contractors/carbon-contractors.com)
-and the security disclosure.
+The technical detail, including our reasoning and past mistakes, is published in the
+[repository](https://github.com/carbon-contractors/carbon-contractors.com) (see `docs/adr/`) and
+the security disclosure.
 
 ## Your work, and other people's privacy
 
@@ -178,10 +157,10 @@ right stands.
 
 ## If we disappear
 
-Funded tasks do not depend on us being here. Release and refund are both claimed by the party
-entitled to them, directly from the contract, with no action required from the platform. The one
-exception is a task already in dispute, which needs the contract owner to resolve it. Our continuity
-arrangements for that case are published in the repository rather than promised here.
+Funded tasks do not depend on the platform continuing to operate. Release and refund are claimed
+directly from the contract by the party entitled to them. A task already in dispute requires the
+contract owner to resolve it; our continuity arrangements for that case are published in the
+repository.
 
 ## Changes
 

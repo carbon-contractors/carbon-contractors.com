@@ -1,6 +1,6 @@
 # Don't Get Rekt: Hardening Your Attack Surface as a Crypto Contractor
 
-**Module 6 of 7 · 5 min read**
+**Module 6 of 8 · 5 min read**
 
 ---
 
