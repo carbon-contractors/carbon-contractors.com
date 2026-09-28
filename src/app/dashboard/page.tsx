@@ -212,7 +212,7 @@ interface Task {
   acceptance_spec: string | null;
   /**
    * keccak256 of the task_description the worker accepted (CC-084 criterion 5).
-   * Null before acceptance (or on tasks created before migration 024). When set
+   * Null before acceptance (or on tasks created before migration 025). When set
    * and different from the live description's hash, the worker sees that the
    * brief changed since they accepted.
    */

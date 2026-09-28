@@ -1,4 +1,4 @@
--- 024_accepted_description_hash.sql
+-- 025_accepted_description_hash.sql (committed as 024_; renumbered to match production, 2026-09-28)
 -- CC-084 acceptance criterion 5, second half: "Prose edits are append-only and the
 -- accepted version is pinned to the worker's acceptance."
 --

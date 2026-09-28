@@ -13,7 +13,7 @@
  *
  * ## Exactly once per offer
  *
- * Migration 024's offer_reminder_sent marker, set by compare-and-set
+ * Migration 026's offer_reminder_sent marker, set by compare-and-set
  * (markOfferReminderSent) BEFORE dispatch: overlapping cron runs race, and the
  * loser sees zero rows updated and skips. The ordering also means a crash after
  * the marker write but before dispatch loses the reminder — the honest failure,
