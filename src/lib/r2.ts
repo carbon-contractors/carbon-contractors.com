@@ -84,8 +84,14 @@ function uriEncodeSegment(value: string): string {
   return out;
 }
 
+/**
+ * `<account>.r2.cloudflarestorage.com` — Cloudflare's documented S3 endpoint.
+ * It read "cloudflaredstorage" (one letter off, a domain that does not resolve)
+ * from CC-107 until 2026-09-28, and the unit test asserted the same misspelling,
+ * so every check passed while every real push would have failed at DNS.
+ */
 export function r2EndpointHost(accountId: string): string {
-  return `${accountId}.r2.cloudflaredstorage.com`;
+  return `${accountId}.r2.cloudflarestorage.com`;
 }
 
 /** Canonical URI: slash-separated, each segment encoded, e.g.
