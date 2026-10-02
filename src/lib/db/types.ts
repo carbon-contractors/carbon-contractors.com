@@ -331,6 +331,33 @@ export interface Database {
         };
         Relationships: [];
       };
+      // ADR-0010: the agent's write-only evidence-bucket credential, KMS
+      // envelope-encrypted. Service-role only; deleted at terminal task state
+      // by trigger; migration 027.
+      task_upload_credentials: {
+        Row: {
+          payment_request_id: string;
+          provider: "s3" | "gcs";
+          credential_envelope: string;
+          max_upload_bytes: number;
+          created_at: string;
+        };
+        Insert: {
+          payment_request_id: string;
+          provider: "s3" | "gcs";
+          credential_envelope: string;
+          max_upload_bytes: number;
+          created_at?: string;
+        };
+        Update: {
+          payment_request_id?: string;
+          provider?: "s3" | "gcs";
+          credential_envelope?: string;
+          max_upload_bytes?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       tasks_public: {

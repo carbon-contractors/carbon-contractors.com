@@ -14,6 +14,10 @@ import type { AcceptanceSpec } from "@/lib/spec/schema";
 import { explainWriteError } from "@/lib/contracts/reverts";
 import { useEnsureAppChain } from "@/lib/wallet/useEnsureAppChain";
 import {
+  UPLOAD_ACCEPT_ATTRIBUTE,
+  checkUploadRequest,
+} from "@/lib/evidence/upload-policy";
+import {
   buildEvidenceBundleJson,
   emptyArtifactDraft,
   type EvidenceArtifactDraft,
@@ -221,6 +225,11 @@ interface Task {
   escrow_contract: string | null;
   created_at: string;
   on_chain: OnChainState | null;
+  /**
+   * ADR-0010: the per-file cap when the hiring agent gave a bucket for
+   * platform-minted uploads; null means the worker pastes links instead.
+   */
+  evidence_upload_max_bytes?: number | null;
 }
 
 interface ReputationBreakdown {
@@ -391,6 +400,10 @@ export default function DashboardPage() {
   // NOR-328: the bundle hash actually committed on-chain per task, so the
   // claim-early form can prove a match instead of hoping.
   const [submittedHashes, setSubmittedHashes] = useState<Record<string, string>>({});
+  // ADR-0010: per-artefact upload progress, keyed `${taskId}:${index}`.
+  const [uploadState, setUploadState] = useState<
+    Record<string, { busy: boolean; ok: boolean; text: string }>
+  >({});
 
   // Drafts survive reloads — they live in this browser only, keyed per wallet.
   // The platform still stores nothing (CC-083), so there is no retention ripple.
@@ -885,6 +898,79 @@ export default function DashboardPage() {
   }
 
   /**
+   * ADR-0010: upload one file straight from this browser into the hiring
+   * agent's bucket. The platform signs a one-file, ten-minute grant and never
+   * sees the bytes; the resulting URI and type fill the artefact's fields.
+   */
+  async function handleEvidenceUpload(task: Task, index: number, file: File) {
+    const slot = `${task.id}:${index}`;
+    const cap = task.evidence_upload_max_bytes ?? 0;
+    const check = checkUploadRequest(file.type, file.size, cap);
+    if (!check.ok) {
+      setUploadState((prev) => ({ ...prev, [slot]: { busy: false, ok: false, text: check.error } }));
+      return;
+    }
+    setUploadState((prev) => ({ ...prev, [slot]: { busy: true, ok: true, text: "Uploading…" } }));
+    try {
+      const grantRes = await fetchWithSession("/api/evidence/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payment_request_id: task.payment_request_id,
+          filename: file.name,
+          content_type: check.contentType,
+          size_bytes: check.sizeBytes,
+        }),
+      });
+      const grant = await grantRes.json();
+      if (!grant.ok) {
+        setUploadState((prev) => ({
+          ...prev,
+          [slot]: { busy: false, ok: false, text: grant.error ?? "Couldn't get an upload link." },
+        }));
+        return;
+      }
+      const put = await fetch(grant.upload_url, {
+        method: "PUT",
+        headers: grant.headers,
+        body: file,
+      });
+      if (!put.ok) {
+        setUploadState((prev) => ({
+          ...prev,
+          [slot]: {
+            busy: false,
+            ok: false,
+            text: `The hiring agent's storage refused the upload (HTTP ${put.status}). Try again, or paste a link instead.`,
+          },
+        }));
+        return;
+      }
+      setEvidenceDrafts((prev) => ({
+        ...prev,
+        [task.id]: (prev[task.id] ?? []).map((d, i) =>
+          i === index ? { ...d, uri: grant.uri, mimeType: check.contentType } : d,
+        ),
+      }));
+      setUploadState((prev) => ({
+        ...prev,
+        [slot]: { busy: false, ok: true, text: `Uploaded ${file.name}. The link below points at it.` },
+      }));
+    } catch {
+      // A network failure on the PUT is usually the bucket's CORS not allowing
+      // this site — say what to do, not what broke.
+      setUploadState((prev) => ({
+        ...prev,
+        [slot]: {
+          busy: false,
+          ok: false,
+          text: "The upload didn't go through — check your connection and try again, or paste a link instead.",
+        },
+      }));
+    }
+  }
+
+  /**
    * NOR-327: the structured evidence form, shared by the three evidence-bundle
    * flows. The task's spec decides which optional fields appear — the form
    * mirrors the deal the same way the offer card's criteria rows do, from the
@@ -950,6 +1036,38 @@ export default function DashboardPage() {
                 Remove
               </button>
             </div>
+            {/* Only before submitWork: once Delivered the bundle is frozen (ADR-0010 D4). */}
+            {task.evidence_upload_max_bytes && task.on_chain?.state === "Funded" ? (
+              <div className={styles.uploadRow}>
+                <label className={styles.uploadButton}>
+                  {uploadState[`${task.id}:${i}`]?.busy
+                    ? "Uploading…"
+                    : d.uri
+                      ? "Replace with a new photo or file"
+                      : "Take a photo or choose a file"}
+                  <input
+                    type="file"
+                    accept={UPLOAD_ACCEPT_ATTRIBUTE}
+                    className={styles.uploadInput}
+                    disabled={uploadState[`${task.id}:${i}`]?.busy}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) void handleEvidenceUpload(task, i, file);
+                    }}
+                  />
+                </label>
+                {uploadState[`${task.id}:${i}`] && (
+                  <p
+                    className={
+                      uploadState[`${task.id}:${i}`].ok ? styles.uploadNote : styles.uploadError
+                    }
+                  >
+                    {uploadState[`${task.id}:${i}`].text}
+                  </p>
+                )}
+              </div>
+            ) : null}
             <label className={styles.artefactLabel}>
               Link to the artefact (URI)
               <input

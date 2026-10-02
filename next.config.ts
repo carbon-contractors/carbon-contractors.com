@@ -28,6 +28,12 @@ const walletConnectConnect = [
 const walletConnectFrames =
   "https://verify.walletconnect.com https://verify.walletconnect.org https://secure.walletconnect.com https://secure.walletconnect.org";
 
+// ADR-0010: the worker's browser PUTs evidence straight into the hiring agent's
+// bucket. Only the host shapes upload-policy.ts will sign for: AWS regional
+// virtual-hosted, Cloudflare R2, and GCS's XML API. No other storage host.
+const evidenceUploadConnect =
+  "https://*.amazonaws.com https://*.r2.cloudflarestorage.com https://storage.googleapis.com";
+
 const nextConfig: NextConfig = {
   // MCP route needs Node.js runtime for WebStandardStreamableHTTPServerTransport
   // and crypto module. Do not use edge runtime.
@@ -71,7 +77,7 @@ const nextConfig: NextConfig = {
               styleSrc,
               "img-src 'self' data: https:",
               "font-src 'self' data: https://fonts.reown.com",
-              `connect-src 'self' https://*.supabase.co https://sepolia.base.org https://mainnet.base.org wss://*.supabase.co https://cca-lite.coinbase.com ${walletConnectConnect}`,
+              `connect-src 'self' https://*.supabase.co https://sepolia.base.org https://mainnet.base.org wss://*.supabase.co https://cca-lite.coinbase.com ${walletConnectConnect} ${evidenceUploadConnect}`,
               `frame-src https://keys.coinbase.com ${walletConnectFrames}${vercelToolbarSrc}`,
               "frame-ancestors 'none'",
             ].join("; "),
