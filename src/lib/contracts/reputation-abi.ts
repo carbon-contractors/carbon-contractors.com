@@ -1,11 +1,11 @@
 /**
  * reputation-stake-abi.ts
  *
- * GENERATED FILE — do not edit by hand.
- * Regenerate with:  npm run compile && npm run gen:abi
- *
- * Source: contracts/ReputationStake.sol
- * Generator: scripts/gen-abi.mjs
+ * FROZEN — no longer generated (NOR-537 F2). contracts/ReputationStake.sol was removed
+ * because slash() paid worker USDC to the platform owner, a third destination that breaks
+ * the two-outcome escrow claim. This is the last generated ABI, kept only so the read-side
+ * app code (reputation.ts, /api/reputation, MCP) can still decode the Sepolia contract
+ * recorded in chain-constants.json until that code is removed. Delete this file with it.
  */
 
 export const REPUTATION_STAKE_ABI = [

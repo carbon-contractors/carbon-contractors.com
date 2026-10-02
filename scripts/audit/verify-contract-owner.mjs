@@ -115,7 +115,6 @@ let readError = null;
 
 for (const [name, address] of [
   ["CarbonEscrow", process.env.NEXT_PUBLIC_ESCROW_CONTRACT],
-  ["ReputationStake", process.env.NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT],
 ]) {
   console.log(`\n    ── ${name} @ ${address ?? "(not configured)"}`);
   if (!address) continue;

@@ -412,7 +412,7 @@ src/lib/contracts/     signer.ts (KMS or raw key), kms-signer.ts, escrow.ts (rea
 src/lib/config.ts      Zod env schema. Validation is LAZY — missing vars surface as 500s at
                        request time, not as a boot failure.
 src/lib/categories.ts  The 10 service categories, max 2 per worker
-contracts/             CarbonEscrow.sol (v2, CC-082), ReputationStake.sol
+contracts/             CarbonEscrow.sol (v2, CC-082). ReputationStake.sol was removed (NOR-537 F2)
                        mocks/ is test-only — never deployed to a live network
 test/                  Hardhat/mocha contract tests. `npm run test:contracts`
 supabase/migrations/   001-026, applied by hand in order. Add new ones, never edit an applied one.
