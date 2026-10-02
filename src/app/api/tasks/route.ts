@@ -28,6 +28,7 @@ import { verifyChallengeSignature } from "@/lib/auth/wallet-challenge";
 import { sessionWalletFromRequest } from "@/lib/auth/session";
 import { isValidWalletAddress } from "@/lib/validation";
 import { log } from "@/lib/logging";
+import { getUploadCaps } from "@/lib/db/upload-credentials";
 import { safeErrorResponse } from "@/lib/errors";
 
 export async function GET(req: NextRequest) {
@@ -101,6 +102,25 @@ export async function GET(req: NextRequest) {
       log("info", "tasks_fetched", { count: tasks.length, authenticated: false });
     }
 
+    // ADR-0010: which of the caller's own active tasks take platform-minted
+    // uploads, and the per-file cap. Worker side only, active only — the
+    // public projection never learns a credential exists. A lookup failure
+    // degrades to "paste a link", never to a failed task list.
+    let uploadCaps = new Map<string, number>();
+    if (authenticated && callerWallet) {
+      const eligible = tasks
+        .filter((t) => t.to_human_wallet === callerWallet && t.status === "active")
+        .map((t) => t.payment_request_id)
+        .filter((id): id is string => typeof id === "string");
+      try {
+        uploadCaps = await getUploadCaps(eligible);
+      } catch (err) {
+        log("warn", "upload_caps_lookup_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     // Enrich with on-chain state where possible
     const escrowConfig = getEscrowConfig();
     const enriched = await Promise.all(
@@ -140,7 +160,13 @@ export async function GET(req: NextRequest) {
             onChain = null;
           }
         }
-        return { ...task, on_chain: onChain };
+        return {
+          ...task,
+          on_chain: onChain,
+          evidence_upload_max_bytes: task.payment_request_id
+            ? uploadCaps.get(task.payment_request_id) ?? null
+            : null,
+        };
       }),
     );
 
