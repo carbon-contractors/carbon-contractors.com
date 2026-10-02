@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -80,7 +80,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  * arbitrary destination is reachable by anyone, owner included. That holds against a
  * compromised owner key, and it is the property the regulatory position rests on.
  */
-contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
+contract CarbonEscrow is Ownable2Step, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable usdc;
@@ -99,6 +99,12 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
     ///         arbitration starts the worker has already delivered and waited out a full
     ///         review window.
     uint32 public constant ARBITRATION_WINDOW = 7 days;
+
+    /// @notice Upper bound on how far ahead the agent may set the delivery deadline (NOR-537
+    ///         F7). Without it an agent could set a deadline decades out, leaving a task in
+    ///         Funded with no exit for the worker (who cannot claim) and none for the agent
+    ///         (who cannot expire). 90 days is the longest a task may sit undelivered.
+    uint64 public constant MAX_DEADLINE_HORIZON = 90 days;
 
     enum TaskState {
         None, // 0
@@ -225,6 +231,8 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
     error InvalidWorker();
     error ZeroAmount();
     error DeadlinePassed();
+    error DeadlineTooFar();
+    error ZeroSpecHash();
     error InvalidReviewWindow();
     error InvalidState(TaskState current, TaskState expected);
     error NotParty();
@@ -275,9 +283,10 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
      * @param amount USDC amount (6 decimals on Base)
      * @param deadline Unix timestamp after which an unsubmitted task can be expired
      * @param reviewWindow Seconds after submission the agent has to act, MIN..MAX
-     * @param specHash Commitment to the acceptance criteria (ADR-0001 D3/D4). May be zero
-     *        for a task with no machine-checkable spec; the app layer, not the contract,
-     *        is where a spec is made mandatory.
+     * @param specHash Commitment to the acceptance criteria (ADR-0001 D3/D4). Must be
+     *        non-zero (NOR-537 F6): the definition of done is fixed at creation, and a task
+     *        with no committed spec has none to fix, so a direct call cannot bypass the
+     *        app layer's spec requirement.
      */
     function createTask(
         bytes32 taskId,
@@ -291,6 +300,8 @@ contract CarbonEscrow is Ownable, ReentrancyGuard, EIP712 {
         if (worker == address(0)) revert InvalidWorker();
         if (amount == 0) revert ZeroAmount();
         if (deadline <= block.timestamp) revert DeadlinePassed();
+        if (deadline > block.timestamp + MAX_DEADLINE_HORIZON) revert DeadlineTooFar();
+        if (specHash == bytes32(0)) revert ZeroSpecHash();
         if (reviewWindow < MIN_REVIEW_WINDOW || reviewWindow > MAX_REVIEW_WINDOW) {
             revert InvalidReviewWindow();
         }

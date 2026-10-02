@@ -46,6 +46,13 @@ export const CARBON_ESCROW_ABI = [
   },
   {
     "inputs": [],
+    "name": "acceptOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "ARBITRATION_WINDOW",
     "outputs": [
       {
@@ -440,6 +447,19 @@ export const CARBON_ESCROW_ABI = [
   },
   {
     "inputs": [],
+    "name": "MAX_DEADLINE_HORIZON",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_REVIEW_WINDOW",
     "outputs": [
       {
@@ -467,6 +487,19 @@ export const CARBON_ESCROW_ABI = [
   {
     "inputs": [],
     "name": "owner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pendingOwner",
     "outputs": [
       {
         "internalType": "address",
@@ -865,6 +898,25 @@ export const CARBON_ESCROW_ABI = [
     "inputs": [
       {
         "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferStarted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "bytes32",
         "name": "taskId",
         "type": "bytes32"
@@ -1101,6 +1153,11 @@ export const CARBON_ESCROW_ABI = [
   },
   {
     "inputs": [],
+    "name": "DeadlineTooFar",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ECDSAInvalidSignature",
     "type": "error"
   },
@@ -1300,6 +1357,11 @@ export const CARBON_ESCROW_ABI = [
   {
     "inputs": [],
     "name": "ZeroSigner",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroSpecHash",
     "type": "error"
   }
 ] as const;
