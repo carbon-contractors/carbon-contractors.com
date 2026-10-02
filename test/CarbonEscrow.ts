@@ -238,6 +238,80 @@ describe("CarbonEscrow — deployment", () => {
 
 // ── createTask ────────────────────────────────────────────────────────────────
 
+/**
+ * Walks deployed bytecode as opcodes, skipping PUSH immediates (so data bytes that happen to
+ * equal 0xf4/0xff are not misread) and the trailing CBOR metadata. Returns the mnemonics found.
+ */
+function forbiddenOpcodes(deployed: string): string[] {
+  const bytes = Buffer.from(deployed.replace(/^0x/, ""), "hex");
+  // Solidity appends CBOR metadata; its length is in the final two bytes.
+  const metaLen = bytes.readUInt16BE(bytes.length - 2) + 2;
+  const code = bytes.subarray(0, bytes.length - metaLen);
+  const found = new Set<string>();
+  for (let i = 0; i < code.length; i++) {
+    const op = code[i];
+    if (op >= 0x60 && op <= 0x7f) i += op - 0x5f; // PUSH1..PUSH32 carry 1..32 data bytes
+    else if (op === 0xf4) found.add("DELEGATECALL");
+    else if (op === 0xff) found.add("SELFDESTRUCT");
+    else if (op === 0xf2) found.add("CALLCODE");
+  }
+  return [...found];
+}
+
+describe("CarbonEscrow — no upgrade or destruct path in the bytecode (NOR-537 F8)", () => {
+  it("contains no DELEGATECALL, CALLCODE or SELFDESTRUCT", async () => {
+    const { escrow } = await loadFixture(deployFixture);
+    const code = await ethers.provider.getCode(await escrow.getAddress());
+    expect(code.length).to.be.greaterThan(2);
+    expect(forbiddenOpcodes(code)).to.deep.equal([]);
+  });
+
+  it("the scanner itself catches each forbidden opcode (mutation guard)", () => {
+    // PUSH1 0x00 then the opcode, then a 2-byte metadata trailer of length 0.
+    const wrap = (op: string) => `0x6000${op}000000`;
+    expect(forbiddenOpcodes(wrap("f4"))).to.deep.equal(["DELEGATECALL"]);
+    expect(forbiddenOpcodes(wrap("ff"))).to.deep.equal(["SELFDESTRUCT"]);
+    expect(forbiddenOpcodes(wrap("f2"))).to.deep.equal(["CALLCODE"]);
+    // A PUSH immediate that equals 0xff is data, not an opcode.
+    expect(forbiddenOpcodes("0x60ff00000000")).to.deep.equal([]);
+  });
+});
+
+describe("CarbonEscrow — two-step ownership (NOR-537)", () => {
+  it("transferOwnership alone does not move ownership", async () => {
+    const { escrow, deployer, outsider } = await loadFixture(deployFixture);
+    await escrow.connect(deployer).transferOwnership(outsider.address);
+    expect(await escrow.owner()).to.equal(deployer.address);
+    expect(await escrow.pendingOwner()).to.equal(outsider.address);
+  });
+
+  it("a mistyped recipient cannot take ownership and the owner keeps control", async () => {
+    const { escrow, deployer, outsider, worker } = await loadFixture(deployFixture);
+    await escrow.connect(deployer).transferOwnership(outsider.address);
+    // Only the named pending owner may accept.
+    await expect(escrow.connect(worker).acceptOwnership()).to.be.revertedWithCustomError(
+      escrow,
+      "OwnableUnauthorizedAccount",
+    );
+    // The owner can correct the mistake by naming someone else.
+    await escrow.connect(deployer).transferOwnership(worker.address);
+    expect(await escrow.pendingOwner()).to.equal(worker.address);
+    expect(await escrow.owner()).to.equal(deployer.address);
+  });
+
+  it("the pending owner completes the transfer with acceptOwnership", async () => {
+    const { escrow, deployer, outsider } = await loadFixture(deployFixture);
+    await escrow.connect(deployer).transferOwnership(outsider.address);
+    await escrow.connect(outsider).acceptOwnership();
+    expect(await escrow.owner()).to.equal(outsider.address);
+    expect(await escrow.pendingOwner()).to.equal(ethers.ZeroAddress);
+    // The old owner has lost its powers.
+    await expect(
+      escrow.connect(deployer).setVerdictSigner(deployer.address, true),
+    ).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
+  });
+});
+
 describe("CarbonEscrow — createTask", () => {
   it("moves USDC into escrow, records the commitment, and emits", async () => {
     const { escrow, usdc, agent, worker } = await loadFixture(deployFixture);
@@ -333,10 +407,32 @@ describe("CarbonEscrow — createTask", () => {
     await fund(escrow, agent, worker, { reviewWindow: max, taskId: ethers.id("max") });
   });
 
-  it("accepts a zero specHash — the app layer mandates a spec, not the contract", async () => {
+  it("rejects a zero specHash — a direct call cannot skip the committed spec (NOR-537 F6)", async () => {
+    const { escrow, usdc, agent, worker } = await loadFixture(deployFixture);
+    await expect(
+      fund(escrow, agent, worker, { specHash: ZERO_BYTES32 }),
+    ).to.be.revertedWithCustomError(escrow, "ZeroSpecHash");
+    // Nothing moved: the revert happens before the transfer.
+    expect(await escrow.totalLocked()).to.equal(0n);
+    expect(await usdc.balanceOf(await escrow.getAddress())).to.equal(0n);
+  });
+
+  it("bounds the delivery deadline to MAX_DEADLINE_HORIZON (NOR-537 F7)", async () => {
     const { escrow, agent, worker } = await loadFixture(deployFixture);
-    await fund(escrow, agent, worker, { specHash: ZERO_BYTES32 });
-    expect((await escrow.getTask(TASK_ID)).specHash).to.equal(ZERO_BYTES32);
+    const horizon = Number(await escrow.MAX_DEADLINE_HORIZON());
+    expect(horizon).to.equal(90 * 24 * 60 * 60);
+
+    // Past the horizon reverts.
+    await expect(
+      fund(escrow, agent, worker, { deadlineOffset: horizon + 60, taskId: ethers.id("far") }),
+    ).to.be.revertedWithCustomError(escrow, "DeadlineTooFar");
+
+    // Comfortably inside the horizon is accepted. Not asserted at the exact boundary:
+    // `fund` reads time.latest() and the createTask block lands a second or more later.
+    await fund(escrow, agent, worker, {
+      deadlineOffset: horizon - 3600,
+      taskId: ethers.id("near"),
+    });
   });
 
   it("reverts when the agent has not approved enough USDC", async () => {
