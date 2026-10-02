@@ -1262,6 +1262,17 @@ export const CARBON_ESCROW_ABI = [
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "PlatformCannotBeParty",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "ReentrancyGuardReentrantCall",
     "type": "error"

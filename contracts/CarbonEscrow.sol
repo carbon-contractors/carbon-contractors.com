@@ -233,6 +233,7 @@ contract CarbonEscrow is Ownable2Step, ReentrancyGuard, EIP712 {
     error DeadlinePassed();
     error DeadlineTooFar();
     error ZeroSpecHash();
+    error PlatformCannotBeParty(address account);
     error InvalidReviewWindow();
     error InvalidState(TaskState current, TaskState expected);
     error NotParty();
@@ -298,6 +299,14 @@ contract CarbonEscrow is Ownable2Step, ReentrancyGuard, EIP712 {
     ) external nonReentrant {
         if (tasks[taskId].state != TaskState.None) revert TaskAlreadyExists();
         if (worker == address(0)) revert InvalidWorker();
+        // NOR-537 F1: the owner rules disputes and a verdict signer decides who may dispute,
+        // so neither may be a party. Otherwise the platform could be agent or worker on a
+        // task it also judges. Checked at creation only: a signer added later cannot be
+        // checked against tasks already open, so a signer change must be reviewed for that.
+        if (msg.sender == owner() || acceptedSigners[msg.sender]) {
+            revert PlatformCannotBeParty(msg.sender);
+        }
+        if (worker == owner() || acceptedSigners[worker]) revert PlatformCannotBeParty(worker);
         if (amount == 0) revert ZeroAmount();
         if (deadline <= block.timestamp) revert DeadlinePassed();
         if (deadline > block.timestamp + MAX_DEADLINE_HORIZON) revert DeadlineTooFar();

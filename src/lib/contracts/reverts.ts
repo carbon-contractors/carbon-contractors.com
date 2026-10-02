@@ -29,6 +29,12 @@ const KNOWN_REVERTS: Record<string, string> = {
   ZeroAmount: "The amount must be greater than zero.",
   DeadlinePassed:
     "The task's deadline has passed, so this can no longer be done.",
+  DeadlineTooFar:
+    "The deadline is more than 90 days away, which is the longest the contract allows.",
+  ZeroSpecHash:
+    "The task has no committed acceptance spec — a task can't be created without one.",
+  PlatformCannotBeParty:
+    "The platform's own owner and verdict-signer addresses can't fund or take a task, because they also judge disputes.",
   InvalidReviewWindow:
     "The review window is outside the allowed range (12 hours to 14 days).",
   InvalidState:
