@@ -29,12 +29,6 @@ const TARGETS = [
     exportName: "CARBON_ESCROW_ABI",
     source: "contracts/CarbonEscrow.sol",
   },
-  {
-    artifact: "artifacts/contracts/ReputationStake.sol/ReputationStake.json",
-    out: "src/lib/contracts/reputation-abi.ts",
-    exportName: "REPUTATION_STAKE_ABI",
-    source: "contracts/ReputationStake.sol",
-  },
 ];
 
 /** Stable ordering so a recompile never reshuffles the file and creates a noise diff. */

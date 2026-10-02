@@ -1,11 +1,11 @@
 /**
  * admin/transfer-escrow-ownership.ts
  *
- * CC-059 — transfers ownership of CarbonEscrow and ReputationStake from the
+ * CC-059 — transfers ownership of CarbonEscrow from the
  * raw local deployer key to the GCP KMS/HSM-derived signing address.
  *
  * This is a ONE-WAY, IRREVERSIBLE on-chain action: once the HSM address owns
- * these contracts, the local DEPLOYER_PRIVATE_KEY can no longer arbitrate
+ * this contract, the local DEPLOYER_PRIVATE_KEY can no longer arbitrate
  * disputes. Do not run this with CONFIRM=true until `npm run verify:kms` (or
  * an equivalent check against a live Vercel deployment) has confirmed the KMS
  * key can actually produce valid signatures — see CC-059's "Fix" section.
@@ -16,7 +16,7 @@
  *        WOULD happen. Sends no transactions.
  *
  *   CONFIRM=true npx hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia
- *     -> actually calls transferOwnership() on both contracts.
+ *     -> actually calls transferOwnership() on the escrow.
  *
  * (Hardhat 3's `run` task validates CLI arguments strictly against its own
  * defined parameters and rejects anything else — the Hardhat 2-era
@@ -24,9 +24,8 @@
  * env var instead.)
  *
  * Requires in .env.local:
- *   DEPLOYER_PRIVATE_KEY=0x...        (must be the CURRENT owner of both contracts)
+ *   DEPLOYER_PRIVATE_KEY=0x...        (must be the CURRENT owner of the escrow)
  *   NEXT_PUBLIC_ESCROW_CONTRACT=0x...
- *   NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT=0x...
  */
 
 import { network } from "hardhat";
@@ -74,10 +73,8 @@ function addressFromPem(path: string, ethers: EthersLike): string {
 }
 
 const ESCROW_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_CONTRACT;
-const STAKE_ADDRESS = process.env.NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT;
 
 if (!ESCROW_ADDRESS) throw new Error("NEXT_PUBLIC_ESCROW_CONTRACT must be set in .env.local");
-if (!STAKE_ADDRESS) throw new Error("NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT must be set in .env.local");
 
 const CONFIRM = process.env.CONFIRM === "true";
 
@@ -90,7 +87,7 @@ interface TransferResult {
 
 async function transferOne(
   ethers: EthersLike,
-  contractName: "CarbonEscrow" | "ReputationStake",
+  contractName: "CarbonEscrow",
   address: string,
   newOwner: string,
   deployerAddress: string,
@@ -201,8 +198,6 @@ async function main() {
       : "\n*** DRY RUN — no transactions will be sent. Set CONFIRM=true to execute. ***",
   );
 
-  // Sequential, not parallel — both transactions come from the same signer
-  // and must not race on nonce assignment.
   const escrowResult = await transferOne(
     ethers,
     "CarbonEscrow",
@@ -211,23 +206,16 @@ async function main() {
     hsmAddress,
     deployer.address,
   );
-  const stakeResult = await transferOne(
-    ethers,
-    "ReputationStake",
-    STAKE_ADDRESS as string,
-    hsmAddress,
-    deployer.address,
-  );
 
   console.log("\n" + "=".repeat(60));
   console.log("SUMMARY");
   console.log("=".repeat(60));
-  for (const r of [escrowResult, stakeResult]) {
+  for (const r of [escrowResult]) {
     const suffix = r.skipped ? " (already transferred)" : r.dryRun ? " (dry run)" : "";
     console.log(`  ${r.name}: ${r.ok ? "OK" : "FAILED"}${suffix}`);
   }
 
-  if (!escrowResult.ok || !stakeResult.ok) {
+  if (!escrowResult.ok) {
     process.exitCode = 1;
   }
 }

@@ -19,7 +19,6 @@
     "compile": "hardhat compile",
     "gen:abi": "node scripts/gen-abi.mjs",
     "deploy:sepolia": "hardhat run scripts/deploy/escrow.ts --network baseSepolia",
-    "deploy:reputation": "hardhat run scripts/deploy/reputation-stake.ts --network baseSepolia",
     "transfer:ownership": "hardhat run scripts/admin/transfer-escrow-ownership.ts --network baseSepolia",
     "test": "vitest run",
     "test:watch": "vitest",
