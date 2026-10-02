@@ -277,6 +277,67 @@ describe("CarbonEscrow — no upgrade or destruct path in the bytecode (NOR-537 
   });
 });
 
+describe("CarbonEscrow — the platform cannot be a party (NOR-537 F1)", () => {
+  it("rejects the owner as funder", async () => {
+    const { escrow, usdc, deployer, worker } = await loadFixture(deployFixture);
+    await usdc.mint(deployer.address, AMOUNT);
+    await usdc.connect(deployer).approve(await escrow.getAddress(), AMOUNT);
+    await expect(fund(escrow, deployer, worker))
+      .to.be.revertedWithCustomError(escrow, "PlatformCannotBeParty")
+      .withArgs(deployer.address);
+  });
+
+  it("rejects an accepted verdict signer as funder", async () => {
+    const { escrow, usdc, verdictSigner, worker } = await loadFixture(deployFixture);
+    await usdc.mint(verdictSigner.address, AMOUNT);
+    await usdc.connect(verdictSigner).approve(await escrow.getAddress(), AMOUNT);
+    await expect(fund(escrow, verdictSigner, worker))
+      .to.be.revertedWithCustomError(escrow, "PlatformCannotBeParty")
+      .withArgs(verdictSigner.address);
+  });
+
+  it("rejects the owner or a signer as the worker", async () => {
+    const { escrow, agent, deployer, verdictSigner } = await loadFixture(deployFixture);
+    await expect(fund(escrow, agent, deployer, { taskId: ethers.id("w1") }))
+      .to.be.revertedWithCustomError(escrow, "PlatformCannotBeParty")
+      .withArgs(deployer.address);
+    await expect(fund(escrow, agent, verdictSigner, { taskId: ethers.id("w2") }))
+      .to.be.revertedWithCustomError(escrow, "PlatformCannotBeParty")
+      .withArgs(verdictSigner.address);
+    expect(await escrow.totalLocked()).to.equal(0n);
+  });
+
+  it("applies to a signer added later, and lifts when the signer is removed", async () => {
+    const { escrow, usdc, deployer, agent, worker, outsider } = await loadFixture(deployFixture);
+    await usdc.mint(outsider.address, AMOUNT);
+    await usdc.connect(outsider).approve(await escrow.getAddress(), AMOUNT);
+    await escrow.connect(deployer).setVerdictSigner(outsider.address, true);
+    await expect(fund(escrow, outsider, worker)).to.be.revertedWithCustomError(
+      escrow,
+      "PlatformCannotBeParty",
+    );
+    await escrow.connect(deployer).setVerdictSigner(outsider.address, false);
+    await fund(escrow, outsider, worker); // an ordinary address again
+    // Ordinary parties are unaffected throughout.
+    await fund(escrow, agent, worker, { taskId: ethers.id("ok") });
+  });
+
+  it("follows ownership: the new owner is blocked, the old owner is released", async () => {
+    const { escrow, usdc, deployer, worker, outsider } = await loadFixture(deployFixture);
+    await escrow.connect(deployer).transferOwnership(outsider.address);
+    await escrow.connect(outsider).acceptOwnership();
+    await usdc.mint(outsider.address, AMOUNT);
+    await usdc.connect(outsider).approve(await escrow.getAddress(), AMOUNT);
+    await expect(fund(escrow, outsider, worker)).to.be.revertedWithCustomError(
+      escrow,
+      "PlatformCannotBeParty",
+    );
+    await usdc.mint(deployer.address, AMOUNT);
+    await usdc.connect(deployer).approve(await escrow.getAddress(), AMOUNT);
+    await fund(escrow, deployer, worker, { taskId: ethers.id("old") });
+  });
+});
+
 describe("CarbonEscrow — two-step ownership (NOR-537)", () => {
   it("transferOwnership alone does not move ownership", async () => {
     const { escrow, deployer, outsider } = await loadFixture(deployFixture);
