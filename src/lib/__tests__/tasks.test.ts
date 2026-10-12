@@ -90,6 +90,14 @@ describe("tasks", () => {
     expect(updateChain.in).toHaveBeenCalledWith("status", ["active", "disputed"]);
   });
 
+  it("updateTaskStatus allows active → expired (funded, nothing delivered, agent reclaimed — CC-080)", async () => {
+    const updateChain = chainable({ data: [{ payment_request_id: "abc" }], error: null });
+    mockFrom.mockReturnValueOnce(updateChain);
+
+    await updateTaskStatus("abc", "expired");
+    expect(updateChain.in).toHaveBeenCalledWith("status", expect.arrayContaining(["active"]));
+  });
+
   it("updateTaskStatus rejects invalid state transitions", async () => {
     // Atomic update returns no rows (status didn't match allowed sources)
     const updateChain = chainable({ data: [], error: null });

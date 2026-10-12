@@ -328,6 +328,10 @@ export async function countCommittedTasks(wallet: string): Promise<number> {
  * the worker consented (or pre-authorised auto-booking, D3). `declined` and
  * `lapsed` are terminal: offers that never became tasks, and no money was
  * ever involved.
+ *
+ * `completed` and `expired` from a funded row are written by the settlement
+ * sync (./settlement-sync.ts) once the chain says so — never on a tool call
+ * (CC-080).
  */
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   pending: [],                                    // initial state only (via createTask)
@@ -337,7 +341,9 @@ const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   active: ["accepted"],                           // funded — and only from consent (D2)
   completed: ["active", "disputed"],              // work done or dispute resolved in worker's favor
   disputed: ["active", "pending"],                // either party flags
-  expired: ["disputed", "pending", "accepted"],   // dispute resolved in agent's favor, or timeout
+  // From `active`: a funded task whose deadline passed with nothing delivered, and
+  // the agent reclaimed it (expireTask is only reachable from Funded, ADR-0001 D1).
+  expired: ["active", "disputed", "pending", "accepted"], // reclaimed, dispute resolved in agent's favor, or timeout
 };
 
 export async function updateTaskStatus(
