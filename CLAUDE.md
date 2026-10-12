@@ -151,7 +151,7 @@ exists rather than reasoning from this file.**
   "Agent resolves its own dispute" was explicitly rejected.
   **Arbitration now has no app or MCP surface at all**, deliberately: the owner resolves via
   `scripts/admin/verify-escrow-lifecycle.ts` with the KMS key until the adjudication tier exists.
-  → `ADR-0001` D2, `ADR-0007` (proposed), `CC-081` Defect 2
+  → `ADR-0001` D2, `ADR-0007` (accepted 2026-08-26), `CC-081` Defect 2
 - **The arbitration clock is live on Sepolia, and on no other network.**
   `ARBITRATION_WINDOW = 7 days` (`ADR-0006` D3 + Amendment 1), stamped by `disputeTask` and claimed
   by the worker through `releaseAfterArbitration`. Deployed 2026-09-01 and confirmed on chain, not
@@ -415,7 +415,7 @@ src/lib/categories.ts  The 10 service categories, max 2 per worker
 contracts/             CarbonEscrow.sol (v2, CC-082). ReputationStake.sol was removed (NOR-537 F2)
                        mocks/ is test-only — never deployed to a live network
 test/                  Hardhat/mocha contract tests. `npm run test:contracts`
-supabase/migrations/   001-026, applied by hand in order. Add new ones, never edit an applied one.
+supabase/migrations/   001-027, applied by hand in order. Add new ones, never edit an applied one.
                        Numbers are unique and gapless — the duplicate 018 pair was renumbered by
                        CC-111 (2026-09-16) to match what production actually applied. The live
                        project's supabase_migrations.schema_migrations is the record of what is
