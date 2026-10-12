@@ -450,6 +450,11 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     expect(json.worker_auto_booking_disabled).toBe(true);
     expect(json.awol_signal).toBe("lapsed_offers");
     expect(json.acceptance).toBe("manual");
+    // ...and it really is manual: the row is created pending, with an expiry,
+    // not 'accepted' behind a response that says otherwise.
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: false, offer_expiry_seconds: 24 * 60 * 60 }),
+    );
   });
 
   it("when not triggered, the response carries no AWOL fields", async () => {
@@ -462,6 +467,10 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     expect(json.worker_auto_booking_disabled).toBeUndefined();
     expect(json.acceptance).toBeUndefined();
     expect(mockSetAcceptsAutoBookingForContractor).not.toHaveBeenCalled();
+    // Evaluated and clear — the one case that auto-accepts.
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: true }),
+    );
   });
 
   it("an unreadable AWOL state fails safe to manual acceptance without blocking the hire", async () => {
@@ -472,5 +481,21 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     expect(result.isError).toBeUndefined();
     expect(mockCreateFundingOffer).toHaveBeenCalledTimes(1);
     expect(json.worker_auto_booking_disabled).toBeUndefined();
+    // Fail safe means a pending offer, not an auto-booking nobody vetted.
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: false }),
+    );
+  });
+
+  it("the concurrency cap still refuses an auto-bookable worker before the AWOL check (D5)", async () => {
+    mockCountCommittedTasks.mockResolvedValue(3);
+    mockGetTasksByWallet.mockResolvedValue([]);
+
+    const { result, json } = await callRequestHumanWork();
+
+    expect(result.isError).toBe(true);
+    expect(json.error).toContain("concurrency cap");
+    expect(mockGetTasksByWallet).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 });

@@ -149,16 +149,49 @@ describe("funding offer", () => {
     expect(inserted.offer_expiry_unix).toBeLessThanOrEqual(before + 15 * 60 + 2);
   });
 
-  it("auto-accepts a worker with accepts_auto_booking — born accepted, no expiry (D3)", async () => {
+  it("auto-accepts a worker with accepts_auto_booking — born accepted, with a funding deadline (D3/D4)", async () => {
     const { createTask } = await import("@/lib/db/tasks");
+    const before = Math.floor(Date.now() / 1000);
 
     const result = await createFundingOffer({ ...BASE_REQUEST, auto_accept: true });
 
+    // An 'accepted' row counts towards the D5 cap. With a NULL expiry
+    // lapseExpiredOffers never touched it, so three bookings an agent never
+    // funded blocked the worker for good — the row must carry the default
+    // expiry, which is now the agent's deadline to fund.
     expect(createTask).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "accepted", offer_expiry_unix: null }),
+      expect.objectContaining({ status: "accepted" }),
     );
+    const [inserted] = (createTask as ReturnType<typeof vi.fn>).mock.calls[0] as [{ offer_expiry_unix: number | null }];
+    expect(inserted.offer_expiry_unix).not.toBeNull();
+    expect(inserted.offer_expiry_unix).toBeGreaterThanOrEqual(before + 24 * 60 * 60);
+    expect(inserted.offer_expiry_unix).toBeLessThanOrEqual(before + 24 * 60 * 60 + 2);
     expect(result.worker_status).toBe("accepted");
-    expect(result.offer_expiry_unix).toBeNull();
+    expect(result.offer_expiry_unix).toBe(inserted.offer_expiry_unix);
+  });
+
+  it("honours an agent-set expiry on an auto-accepted offer too (D4)", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+    const before = Math.floor(Date.now() / 1000);
+
+    await createFundingOffer({ ...BASE_REQUEST, auto_accept: true, offer_expiry_seconds: 2 * 60 * 60 });
+
+    const [inserted] = (createTask as ReturnType<typeof vi.fn>).mock.calls[0] as [{ offer_expiry_unix: number }];
+    expect(inserted.offer_expiry_unix).toBeGreaterThanOrEqual(before + 2 * 60 * 60);
+    expect(inserted.offer_expiry_unix).toBeLessThanOrEqual(before + 2 * 60 * 60 + 2);
+  });
+
+  it("bounds an auto-accepted offer's expiry exactly as a manual one's — no 7-day-plus parking (D4)", async () => {
+    const { createTask } = await import("@/lib/db/tasks");
+
+    await expect(
+      createFundingOffer({ ...BASE_REQUEST, auto_accept: true, offer_expiry_seconds: 8 * 24 * 60 * 60 }),
+    ).rejects.toThrow("offer_expiry_seconds");
+    await expect(
+      createFundingOffer({ ...BASE_REQUEST, auto_accept: true, offer_expiry_seconds: 14 * 60 }),
+    ).rejects.toThrow("offer_expiry_seconds");
+    // Rejected before any row is written.
+    expect(createTask).not.toHaveBeenCalled();
   });
 
   it("rejects an offer expiry below the 15-minute floor (D4)", async () => {
@@ -179,6 +212,21 @@ describe("funding offer", () => {
 
     const accepted = await createFundingOffer({ ...BASE_REQUEST, auto_accept: true });
     expect(accepted.instructions).not.toContain("Wait for the worker to accept");
+  });
+
+  it("tells an auto-booked agent to fund before the expiry or the booking lapses (D4)", async () => {
+    const accepted = await createFundingOffer({ ...BASE_REQUEST, auto_accept: true });
+
+    expect(accepted.instructions).toContain(`Deadline: unix ${accepted.offer_expiry_unix}`);
+    expect(accepted.instructions).toContain("or the booking lapses");
+  });
+
+  it("tells a manual-offer agent the same expiry also bounds funding after acceptance (D4)", async () => {
+    const pending = await createFundingOffer({ ...BASE_REQUEST, auto_accept: false });
+
+    expect(pending.instructions).toContain(`Deadline: unix ${pending.offer_expiry_unix}`);
+    expect(pending.instructions).toContain("The worker must accept AND you must fund and confirm");
+    expect(pending.instructions).toContain("or the offer lapses");
   });
 });
 
@@ -257,6 +305,36 @@ describe("funding-offer idempotency passthrough and replay (CC-046)", () => {
     expect(replay.worker_status).toBe("pending");
     expect(replay.status).toBe("awaiting_funding");
     expect(replay.task_status).toBe("pending");
+    expect(replay.instructions).toContain("createTask");
+  });
+
+  it("replays an auto-booked row with its funding deadline (CC-094)", async () => {
+    const { replayFundingOffer } = await import("@/lib/payments/funding");
+
+    const replay = replayFundingOffer({
+      ...STORED_ROW,
+      status: "accepted",
+      accepted_description_hash: "0x" + "cd".repeat(32),
+    });
+
+    expect(replay.status).toBe("awaiting_funding");
+    expect(replay.worker_status).toBe("accepted");
+    expect(replay.offer_expiry_unix).toBe(1840000000);
+    expect(replay.instructions).toContain("Deadline: unix 1840000000");
+    expect(replay.instructions).toContain("or the booking lapses");
+  });
+
+  it("replays a legacy auto-booked row with no expiry without inventing a deadline", async () => {
+    const { replayFundingOffer } = await import("@/lib/payments/funding");
+
+    const replay = replayFundingOffer({
+      ...STORED_ROW,
+      status: "accepted",
+      offer_expiry_unix: null,
+    });
+
+    expect(replay.offer_expiry_unix).toBeNull();
+    expect(replay.instructions).not.toContain("Deadline:");
     expect(replay.instructions).toContain("createTask");
   });
 

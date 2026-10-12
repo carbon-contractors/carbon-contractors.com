@@ -26,7 +26,11 @@ export interface TaskRecord {
   amount_usdc: number;
   deadline_unix: number;
   status: TaskStatus;
-  /** When the pending offer lapses; null once accepted or auto-booked (CC-094). */
+  /**
+   * When the offer lapses unless funded (CC-094 / ADR-0005 D4) — set on every
+   * new row, auto-booked included, and kept through acceptance. Null only on
+   * rows auto-booked before auto-booked rows carried a deadline.
+   */
   offer_expiry_unix: number | null;
   /**
    * Once-only marker for the offer_expiring reminder (CC-095, migration 026):
@@ -82,7 +86,11 @@ export interface CreateTaskInput {
    * otherwise the row is born 'pending' — an offer awaiting their decision.
    */
   status?: TaskStatus;
-  /** Required with status 'pending' — when the offer lapses (ADR-0005 D4). */
+  /**
+   * When the offer lapses unless funded (ADR-0005 D4). createFundingOffer sets
+   * it for 'accepted' rows too — an auto-booked row counts towards the D5 cap,
+   * so without it an unfunded booking would hold the worker forever.
+   */
   offer_expiry_unix?: number | null;
   /** CC-046: stored verbatim; unique per agent (migration 021). */
   idempotency_key?: string | null;
@@ -194,10 +202,11 @@ export async function getTaskByPaymentId(
 
 /**
  * Lapse offers whose expiry has passed (CC-094 / ADR-0005 D4). Evaluates both
- * `pending` offers and `accepted` tasks the agent never funded — the latter
- * frees a worker who consented from an agent that walked away, and is safe
- * because no money was ever locked. Called inline on inspection, not from a
- * cron: a flag only read at booking time is pure overhead (CC-075 precedent).
+ * `pending` offers and `accepted` tasks the agent never funded — the latter,
+ * auto-booked rows included, frees a worker who consented from an agent that
+ * walked away, and is safe because no money was ever locked. Called inline on
+ * inspection, not from a cron: a flag only read at booking time is pure
+ * overhead (CC-075 precedent).
  *
  * Best-effort by design — a failure here must not take down the read that
  * triggered it; the offer simply lapses on the next inspection.

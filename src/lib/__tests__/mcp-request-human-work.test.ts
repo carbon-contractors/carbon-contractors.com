@@ -72,6 +72,15 @@ vi.mock("@/lib/awol", () => ({
   evaluateAwolAtBooking: (...args: unknown[]) => mockEvaluateAwolAtBooking(...args),
 }));
 
+/** The AWOL check ran against an auto-bookable worker and did not trigger. */
+const AWOL_EVALUATED_CLEAR = {
+  evaluated: true,
+  triggered: false,
+  signal: null,
+  consecutiveLapsedOffers: 0,
+  consecutiveExpiredTasks: 0,
+};
+
 const AGENT_WALLET = "0xAGENTagentAGENTagentAGENTagentAGENTagent";
 const WORKER_WALLET = "0xWORKERworkerWORKERworkerWORKERworkerWORK";
 
@@ -361,6 +370,9 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
       { id: "ch1", type: "email", address: "redacted", accepts_auto_booking: false },
       { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
     ]);
+    // Auto-accept needs a positive AWOL result: the check ran against an
+    // auto-bookable worker and did not trigger (CC-075).
+    mockEvaluateAwolAtBooking.mockResolvedValueOnce(AWOL_EVALUATED_CLEAR);
 
     await callRequestHumanWork();
 
@@ -422,10 +434,66 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
     expect(mockNotifyContractor).toHaveBeenCalledTimes(1);
   });
 
+  it("does not auto-accept when the AWOL check did not evaluate the worker (CC-075)", async () => {
+    // evaluateAwolAtBooking re-reads the channels; evaluated:false there means
+    // the worker turned auto-booking off between the two reads. Their latest
+    // answer wins — the offer waits for them.
+    mockGetChannelsForContractor.mockResolvedValue([
+      { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
+    ]);
+
+    await callRequestHumanWork();
+
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: false }),
+    );
+  });
+
+  it("passes the agent's expiry on the auto path too — it is the funding deadline (D4)", async () => {
+    mockGetChannelsForContractor.mockResolvedValue([
+      { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
+    ]);
+    mockEvaluateAwolAtBooking.mockResolvedValueOnce(AWOL_EVALUATED_CLEAR);
+
+    await callRequestHumanWork({ ...VALID_ARGS, offer_expiry_minutes: 90 });
+
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: true, offer_expiry_seconds: 90 * 60 }),
+    );
+  });
+
+  it("tells the worker the expiry of a pending offer, but not an auto-booked row's funding deadline", async () => {
+    await callRequestHumanWork();
+    expect(mockNotifyContractor).toHaveBeenLastCalledWith(
+      "human-uuid",
+      expect.objectContaining({ type: "offer_received", offer_expiry_unix: 9999999999 }),
+    );
+
+    mockGetChannelsForContractor.mockResolvedValue([
+      { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
+    ]);
+    mockEvaluateAwolAtBooking.mockResolvedValueOnce(AWOL_EVALUATED_CLEAR);
+    mockCreateFundingOffer.mockResolvedValueOnce({
+      status: "awaiting_funding",
+      payment_request_id: "pr_2",
+      worker_status: "accepted",
+      offer_expiry_unix: 9999999999,
+    });
+
+    await callRequestHumanWork();
+
+    // The worker has nothing to answer: "accept before X" would be wrong.
+    expect(mockNotifyContractor).toHaveBeenLastCalledWith(
+      "human-uuid",
+      expect.objectContaining({ type: "offer_received", payment_request_id: "pr_2", offer_expiry_unix: null }),
+    );
+  });
+
   it("also records the auto-booked commitment on the auto path", async () => {
     mockGetChannelsForContractor.mockResolvedValue([
       { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
     ]);
+    mockEvaluateAwolAtBooking.mockResolvedValueOnce(AWOL_EVALUATED_CLEAR);
 
     await callRequestHumanWork();
 

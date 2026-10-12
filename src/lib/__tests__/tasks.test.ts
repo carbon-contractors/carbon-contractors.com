@@ -16,7 +16,7 @@ vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "key");
 vi.stubEnv("NEXT_PUBLIC_BASE_NETWORK", "testnet");
 vi.stubEnv("NEXT_PUBLIC_USDC_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e");
 
-import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks, lapseExpiredOffers, countCommittedTasks, findTaskByIdempotencyKey, acceptTask, hashDescription, WORKER_CONCURRENCY_CAP } from "@/lib/db/tasks";
+import { getTaskByPaymentId, updateTaskStatus, markTaskFunded, getReputationSummary, createTask, getTasksByWallet, getTasksForParties, getPublicTasks, lapseExpiredOffers, countCommittedTasks, findTaskByIdempotencyKey, acceptTask, hashDescription, getOffersNeedingReminder, markOfferReminderSent, WORKER_CONCURRENCY_CAP } from "@/lib/db/tasks";
 
 function chainable(result: { data: unknown; error: unknown; count?: number }) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
@@ -30,6 +30,8 @@ function chainable(result: { data: unknown; error: unknown; count?: number }) {
   chain.in = vi.fn(self);
   chain.not = vi.fn(self);
   chain.lte = vi.fn(self);
+  chain.gt = vi.fn(self);
+  chain.neq = vi.fn(self);
   chain.order = vi.fn(self);
   chain.limit = vi.fn(self);
   chain.gte = vi.fn(self);
@@ -349,6 +351,23 @@ describe("tasks", () => {
     mockFrom.mockReturnValue(chain);
 
     await expect(lapseExpiredOffers()).resolves.toBe(0);
+  });
+
+  it("the offer_expiring reminder scan and its claim only ever touch pending offers (CC-095)", async () => {
+    // Auto-booked rows are born 'accepted' and now carry an expiry (the agent's
+    // funding deadline, CC-094). The worker has nothing to answer, so neither
+    // the candidate read nor the compare-and-set may widen past 'pending'.
+    const scan = chainable({ data: [], error: null });
+    mockFrom.mockReturnValue(scan);
+    await getOffersNeedingReminder(1_800_000_000);
+    expect(scan.eq).toHaveBeenCalledWith("status", "pending");
+    expect(scan.in).not.toHaveBeenCalled();
+
+    const claim = chainable({ data: [{ payment_request_id: "a" }], error: null });
+    mockFrom.mockReturnValue(claim);
+    await markOfferReminderSent("a");
+    expect(claim.eq).toHaveBeenCalledWith("status", "pending");
+    expect(claim.in).not.toHaveBeenCalled();
   });
 
   it("countCommittedTasks counts accepted+active rows for the D5 cap", async () => {
