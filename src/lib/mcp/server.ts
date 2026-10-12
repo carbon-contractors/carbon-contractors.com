@@ -20,6 +20,7 @@ import {
   updateTaskStatus,
   countCommittedTasks,
   findTaskByIdempotencyKey,
+  lapseExpiredOffers,
   WORKER_CONCURRENCY_CAP,
 } from "@/lib/db/tasks";
 import { getFullReputation } from "@/lib/reputation";
@@ -381,6 +382,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // it waits for them and lapses at expiry (D4).
         const channels = await getChannelsForContractor(worker.id);
         const autoAccept = channels.some((c) => c.accepts_auto_booking);
+
+        // D4: lapse expired offers before anything below reads task rows. The
+        // cap counts 'accepted' rows straight from the table, so an auto-booking
+        // the agent never funded would otherwise keep holding the worker past
+        // its expiry until some unrelated reader happened to lapse it — on a
+        // quiet site, indefinitely. It also lets the AWOL check see an expired
+        // pending offer as 'lapsed'. Best-effort and never throws, as in
+        // respondToOffer.
+        await lapseExpiredOffers();
 
         // D5: the concurrency cap applies at auto-accept time too. A worker at
         // the cap of accepted+active tasks cannot take another; booking them

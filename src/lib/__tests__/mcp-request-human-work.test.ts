@@ -25,11 +25,13 @@ vi.mock("@/lib/ratelimit", () => ({
   taskCreationRateLimiter: { limit: (...args: unknown[]) => mockLimit(...args) },
 }));
 
+const mockLapseExpiredOffers = vi.fn();
 vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: vi.fn(),
   updateTaskStatus: vi.fn(),
   countCommittedTasks: (...args: unknown[]) => mockCountCommittedTasks(...args),
   findTaskByIdempotencyKey: vi.fn().mockResolvedValue(null),
+  lapseExpiredOffers: (...args: unknown[]) => mockLapseExpiredOffers(...args),
   WORKER_CONCURRENCY_CAP: 3,
 }));
 
@@ -345,6 +347,7 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
     mockGetChannelsForContractor.mockResolvedValue([]);
     mockNotifyContractor.mockResolvedValue({ notified_channels: 1 });
     mockCountCommittedTasks.mockResolvedValue(0);
+    mockLapseExpiredOffers.mockResolvedValue(0);
   });
 
   it("reads the worker's channels — the flag becomes a gate, not metadata (D3)", async () => {
@@ -394,6 +397,24 @@ describe("request_human_work offer lifecycle (CC-094 / ADR-0005)", () => {
     expect(result.isError).toBe(true);
     expect(json.error).toContain("concurrency cap");
     expect(mockCreateFundingOffer).not.toHaveBeenCalled();
+  });
+
+  it("lapses expired offers before counting the worker's commitments (D4+D5)", async () => {
+    // The cap reads 'accepted' rows straight from the table. An auto-booking
+    // the agent never funded must stop counting at its expiry — not whenever
+    // some unrelated reader next happens to lapse it.
+    mockGetChannelsForContractor.mockResolvedValue([
+      { id: "ch2", type: "telegram", address: "redacted", accepts_auto_booking: true },
+    ]);
+    mockEvaluateAwolAtBooking.mockResolvedValueOnce(AWOL_EVALUATED_CLEAR);
+
+    await callRequestHumanWork();
+
+    expect(mockLapseExpiredOffers).toHaveBeenCalledTimes(1);
+    const [lapsedAt] = mockLapseExpiredOffers.mock.invocationCallOrder;
+    expect(lapsedAt).toBeLessThan(mockCountCommittedTasks.mock.invocationCallOrder[0]);
+    // ...and before the AWOL check reads the worker's history.
+    expect(lapsedAt).toBeLessThan(mockEvaluateAwolAtBooking.mock.invocationCallOrder[0]);
   });
 
   it("passes the agent-set offer expiry through, bounded at the schema layer (D4)", async () => {

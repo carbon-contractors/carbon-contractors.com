@@ -21,6 +21,7 @@ vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: vi.fn(),
   updateTaskStatus: vi.fn(),
   countCommittedTasks: (...args: unknown[]) => mockCountCommittedTasks(...args),
+  lapseExpiredOffers: vi.fn().mockResolvedValue(0),
   WORKER_CONCURRENCY_CAP: 3,
 }));
 

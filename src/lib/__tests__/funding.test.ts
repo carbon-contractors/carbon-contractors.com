@@ -221,6 +221,15 @@ describe("funding offer", () => {
     expect(accepted.instructions).toContain("or the booking lapses");
   });
 
+  it("tells the agent how to recover USDC funded into a task that lapsed anyway", async () => {
+    const accepted = await createFundingOffer({ ...BASE_REQUEST, auto_accept: true });
+
+    // expireTask is agent-only and refunds directly once the deadline passes.
+    expect(accepted.instructions).toContain(
+      `escrow.expireTask("${accepted.task_id_bytes32}") from this wallet refunds it`,
+    );
+  });
+
   it("tells a manual-offer agent the same expiry also bounds funding after acceptance (D4)", async () => {
     const pending = await createFundingOffer({ ...BASE_REQUEST, auto_accept: false });
 
@@ -347,4 +356,20 @@ describe("funding-offer idempotency passthrough and replay (CC-046)", () => {
     expect(replay.task_status).toBe("active");
     expect(replay.worker_status).toBe("accepted"); // the offer stage is behind it
   });
+
+  it.each(["declined", "lapsed", "active", "completed"] as const)(
+    "does not tell a replay of a %s row that the worker is booked and to fund it",
+    async (status) => {
+      const { replayFundingOffer } = await import("@/lib/payments/funding");
+
+      // The expiry is still in the future, which is what made the line appear:
+      // a declined offer replayed within 24h would be told to fund a task that
+      // /api/fund-task then refuses, locking the USDC until deadline_unix.
+      const replay = replayFundingOffer({ ...STORED_ROW, status, offer_expiry_unix: 1840000000 });
+
+      expect(replay.status).toBe("already_initiated");
+      expect(replay.instructions).not.toContain("Deadline:");
+      expect(replay.instructions).not.toContain("The worker is booked");
+    },
+  );
 });

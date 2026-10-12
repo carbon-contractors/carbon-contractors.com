@@ -219,6 +219,7 @@ export async function createFundingOffer(
     spec: req.spec,
     worker_status: initialStatus,
     offer_expiry_unix: offerExpiryUnix,
+    in_offer_stage: true,
   });
 }
 
@@ -232,6 +233,14 @@ interface FundingResponseParams {
   spec: { preimage: string; hash: string; version: number; hasNoCriteria?: boolean };
   worker_status: "accepted" | "pending";
   offer_expiry_unix: number | null;
+  /**
+   * False on a replay of a row past the offer stage (declined, lapsed, active,
+   * …). Its expiry no longer binds anything, so the Deadline line is left out:
+   * on a declined or lapsed row it would tell the agent the worker is booked
+   * and to fund a task /api/fund-task then refuses, locking the USDC until
+   * deadline_unix.
+   */
+  in_offer_stage: boolean;
 }
 
 /**
@@ -279,12 +288,13 @@ function buildFundingResponse(p: FundingResponseParams): FundingOfferResponse {
       // ADR-0005 D4: one clock covers the whole offer stage. A pending offer
       // the worker accepted still lapses at the same expiry if it is not funded,
       // and so does an auto-booked one (CC-094) — say so up front.
-      ...(p.offer_expiry_unix !== null
+      ...(p.in_offer_stage && p.offer_expiry_unix !== null
         ? [
             p.worker_status === "pending"
               ? `Deadline: unix ${p.offer_expiry_unix}. The worker must accept AND you must fund and confirm (steps 1-3) before then, or the offer lapses.`
               : `Deadline: unix ${p.offer_expiry_unix}. The worker is booked, but you must fund and confirm (steps 1-3) before then, or the booking lapses.`,
             `   A lapsed task releases the worker and /api/fund-task refuses it even if the escrow is funded — do not fund close to the deadline.`,
+            `   USDC funded into a lapsed task stays locked until deadline_unix; then escrow.expireTask("${taskIdBytes32}") from this wallet refunds it.`,
           ]
         : []),
       ...(p.worker_status === "pending"
@@ -331,6 +341,7 @@ export function replayFundingOffer(task: TaskRecord): FundingOfferReplay {
       },
       worker_status: task.status === "pending" ? "pending" : "accepted",
       offer_expiry_unix: task.offer_expiry_unix,
+      in_offer_stage: inOfferStage,
     }),
     status: inOfferStage ? "awaiting_funding" : "already_initiated",
     task_status: task.status,
