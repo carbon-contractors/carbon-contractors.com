@@ -1,6 +1,9 @@
 # CC-098 — Lawyer instruction brief: AUSTRAC AML/CTF Tranche 2 classification of Carbon Contractors
 
-Prepared 2026-09-16. This is an instruction brief for an Australian lawyer with AML/CTF (AUSTRAC)
+Prepared 2026-09-16. **Revised 2026-10-12** to correct four statements found wrong or overstated by
+the NOR-537 code audit (`docs/audits/2026-10-regulatory-claims-audit.md`): signer/owner separation,
+the fixed-destination claim as it applies to `ReputationStake`, what verdicts verify, and
+`completeTaskByOwner` deployment status. This is an instruction brief for the same purpose as before. It is an instruction brief for an Australian lawyer with AML/CTF (AUSTRAC)
 practice. It is written to be self-contained: every platform fact is stated here with its
 in-repo source, so counsel does not need repo access to reason about the architecture.
 
@@ -43,24 +46,66 @@ contract (`contracts/CarbonEscrow.sol`, v2) and audit record:
    `CC-081` Defect 1).
 2. **Destinations are fixed at funding, by bytecode.** Every settlement path pays either
    `task.worker` or refunds `task.agent` — the two addresses recorded on-chain when the task
-   was funded. No function, including the owner's, can direct funds to any other destination
-   (`ADR-0001` D9; verified by the `CC-037` trust-boundary audit). The contract has no sweep,
-   rescue, or `receive`.
-3. **The platform holds one privileged role: dispute resolution.** The contract owner (a
-   non-exportable key in Google Cloud's HSM, attestation published in-repo) can, in a
-   *disputed* task only, choose which of the two fixed addresses receives the funds
-   (`resolveDispute`, `onlyOwner`, `CarbonEscrow.sol:540`), and can force payment to the
-   worker in an emergency (`completeTaskByOwner`, `CarbonEscrow.sol:397`). The owner cannot
-   reach the disputed state unilaterally: a dispute requires a party to present a
-   cryptographically signed failing verdict from the platform's separate verdict-signer key
-   (`CarbonEscrow.sol:474`), whose rules and inputs are published and re-runnable
-   (`ADR-0001` D2/D5). An arbitration clock binds the owner too: past a 7-day window,
+   was funded. In `CarbonEscrow` no function, including the owner's, can direct funds to any
+   other destination (`ADR-0001` D9; verified by the `CC-037` trust-boundary audit and
+   re-checked by source review in NOR-537). The contract has no sweep, rescue, `receive`,
+   proxy, pause, `delegatecall` or `selfdestruct`. **This statement is scoped to the escrow
+   contract only — see item 3a for the separate staking contract, which does not have this
+   property.**
+3. **The platform holds two privileged roles: dispute resolution and verdict signing.**
+   The contract owner (a non-exportable key in Google Cloud's HSM, attestation published
+   in-repo) can, in a *disputed* task only, choose which of the two fixed addresses receives
+   the funds (`resolveDispute`, `onlyOwner`, `CarbonEscrow.sol:540`), and can force payment
+   to the worker from the `Funded` or `Delivered` state (`completeTaskByOwner`,
+   `CarbonEscrow.sol:397`) without any evidence check. The owner can also add or remove
+   accepted verdict signers (`setVerdictSigner`, `:630`). A dispute requires a party to
+   present a cryptographically signed *failing* verdict from an accepted verdict signer
+   (`CarbonEscrow.sol:474`); the checker that produces verdicts is published and re-runnable
+   (`ADR-0001` D2/D5). An arbitration clock binds the owner: past a 7-day window,
    `resolveDispute` reverts and the worker is paid (`ADR-0006` D3).
-4. **Most settlement paths need no platform action at all.** The worker claims payment
-   directly (`releaseAfterReview`, `claimWithVerdict`); the agent confirms or refunds directly
+   - **Today the owner key and the verdict-signer key are the same key** (Base Sepolia;
+     `chain-constants.json` `verdictSignerSeparation.separated: false`). The platform
+     therefore controls both the gate into a dispute and the ruling on it. Separating them,
+     and moving ownership to a 2-of-4 Safe, is required before mainnet (`ADR-0006` D2,
+     `CC-090`) but is **not yet done**. An earlier draft of this brief called the signer
+     "separate"; that was wrong for the current deployment.
+   - **What the platform could do with those keys, bounded by the fixed destinations:** pay
+     the named worker of any delivered task, or refund the named agent of a disputed task.
+     It cannot send escrowed USDC to a third address. Because any address may fund a task,
+     a platform-controlled agent wallet could in principle obtain a failing verdict and win
+     its own dispute against a worker; this is a conflict-of-interest risk, not a custody
+     capability, and is mitigated only by key separation and the Safe.
+   - **`completeTaskByOwner` deployment status is unconfirmed.** It was added to the source
+     on 2026-09-16, after the current Base Sepolia escrow was deployed (2026-09-01). Treat
+     it as part of the intended mainnet design, not as a verified feature of the testnet
+     deployment, until `scripts/audit/verify-escrow-deployment.mjs` confirms the selector.
+3a. **A second contract, `ReputationStake`, does move funds to the platform.** Workers may
+   stake USDC (minimum 20) as a trust signal. The owner can `slash(worker, amount)`
+   (`contracts/ReputationStake.sol:123`), which transfers the slashed USDC **to the owner
+   address**, at the owner's sole discretion and with no on-chain link to a dispute outcome.
+   Unstaking is by the worker after a 7-day cooldown. This contract is deployed on Base
+   Sepolia, has no automated test suite, and is outside the escrow's fixed-destination
+   property. Its mainnet treatment is undecided (options: remove slashing, route slashed
+   funds to a non-platform destination, or keep it as disclosed). Counsel should assume it
+   is in scope until that decision is made (see Q2a).
+4. **Most settlement paths need no platform action at all, and most do not evaluate the
+   work.** The worker claims payment directly (`releaseAfterReview` once the agent's review
+   window of 12 hours to 14 days elapses with no failing verdict; `releaseAfterArbitration`
+   if a dispute times out; `claimWithVerdict` with a platform-signed passing verdict). Only
+   `claimWithVerdict` involves any assessment of the submission. Silence favours the worker
+   by design (`ADR-0001` D6). The agent confirms or refunds directly
    (`completeTask`, `expireTask` — both pull-payments). The platform's keys are not in the
    normal money path (`CC-082` proved a full paid lifecycle on testnet with no platform
    transaction anywhere in it).
+4a. **What "verification" means here.** Acceptance criteria are committed on-chain as a hash
+   at funding and cannot be changed (the human-readable description is not covered by the
+   hash). Verdicts come from a deterministic off-chain checker run over an *evidence record*
+   supplied by the worker (file references plus declared metadata such as capture time,
+   GPS and perceptual hashes). The on-chain hash covers that record, not the underlying
+   files, and the smart contract verifies only the signature on a verdict, not the
+   evaluation. The platform does not independently verify that work was performed. The
+   contract also permits a task with no acceptance criteria (the application layer requires
+   them); such a task resolves in the worker's favour.
 5. **No fee.** The platform charges nothing today. No personal revenue accrues until the
    project proves viable (recorded position, `ADR-0002` Amendment 1 A1.2).
 6. **No identity verification.** The platform is pseudonymous by design — wallets only, no
@@ -108,8 +153,10 @@ updated 10 Jul 2026) — the candidates, with our facts against each:
   as part of a multi-signature or other multi-person arrangement"**.
   - *For scope:* the platform deploys and owns the contract that holds the USDC for the
     task's duration; the owner's `resolveDispute`/`completeTaskByOwner` authority (§2.3) is
-    discretion over which of two parties receives funds; the verdict-signer key exercises
-    settlement authority even in the non-disputed fast path.
+    discretion over which of two parties receives funds; the verdict-signer key (currently
+    the same key as the owner) exercises settlement authority even in the non-disputed fast
+    path; and `ReputationStake.slash` (§2.3a) lets the owner take staked worker USDC to
+    itself.
   - *Against scope:* the platform holds no private key capable of moving the funds anywhere
     but the two fixed addresses; "controlling or managing" is defined by AUSTRAC as the
     ability to "hold, trade, transfer or spend … according to the owner or user's
@@ -158,13 +205,20 @@ If yes, which items, and is the correct characterisation safekeeping, transfer a
 or both?
 
 **Q2 — The custody line.** Does the combination of (a) destinations fixed at funding by
-bytecode, (b) no platform key able to reach any third-party destination, but (c) owner
-authority to choose between the two fixed destinations in a dispute, and (d) a separate
-platform key signing the verdicts that gate the fast path — take the platform over the line
+bytecode, (b) no platform key able to reach any third-party destination *from the escrow*,
+but (c) owner authority to choose between the two fixed destinations in a dispute, and
+(d) a platform key signing the verdicts that gate the fast path (today the same key as the
+owner; planned to be separated and placed behind a 2-of-4 Safe) — take the platform over the line
 of "managing or controlling" virtual assets under 46A, or of "accepting instructions to
 transfer" under items 29–30? We are specifically interested in how AUSTRAC's multi-signature
 note (§4, 46A) interacts with a deterministic smart-contract escrow with bounded owner
 discretion.
+
+**Q2a — The staking contract.** `ReputationStake` holds worker-staked USDC and lets the
+platform owner transfer slashed amounts to itself (§2.3a). Is that, independently of the
+escrow, a safekeeping service (46A) or otherwise a registrable activity? Would any of the
+three remedies in §2.3a (remove slashing; route slashed funds away from the platform; keep
+and disclose) change the answer?
 
 **Q3 — Business and geography.** Is a pre-revenue, pre-launch, sole-operator platform
 "carrying on a business as a VASP" (§5)? Confirm the geographical link analysis.
@@ -223,6 +277,8 @@ and can be packaged for counsel on request:
   deployment record.
 - `docs/carbon-contractors-escrow-signer-1-CAVIUM_V2_COMPRESSED-attestation.dat` + `.pub` —
   the HSM attestation for the verdict-signer key (non-exportability evidence).
+- `docs/audits/2026-10-regulatory-claims-audit.md` — NOR-537 claim-by-claim code audit behind the
+  2026-10-12 corrections.
 - `docs/backlog/CC-099.md` — sanctions/PEP screening as shipped.
 - `docs/Security-Trust-Disclosure.md` — the platform's published trust posture.
 
