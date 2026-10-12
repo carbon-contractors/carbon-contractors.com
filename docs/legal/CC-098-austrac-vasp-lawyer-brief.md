@@ -70,14 +70,19 @@ contract (`contracts/CarbonEscrow.sol`, v2) and audit record:
      "separate"; that was wrong for the current deployment.
    - **What the platform could do with those keys, bounded by the fixed destinations:** pay
      the named worker of any delivered task, or refund the named agent of a disputed task.
-     It cannot send escrowed USDC to a third address. Because any address may fund a task,
-     a platform-controlled agent wallet could in principle obtain a failing verdict and win
-     its own dispute against a worker; this is a conflict-of-interest risk, not a custody
-     capability, and is mitigated only by key separation and the Safe.
-   - **`completeTaskByOwner` deployment status is unconfirmed.** It was added to the source
-     on 2026-09-16, after the current Base Sepolia escrow was deployed (2026-09-01). Treat
-     it as part of the intended mainnet design, not as a verified feature of the testnet
-     deployment, until `scripts/audit/verify-escrow-deployment.mjs` confirms the selector.
+     It cannot send escrowed USDC to a third address. The source (NOR-537 mainnet fixes)
+     now rejects `createTask` when the funder is the owner or an accepted verdict signer, or
+     when the named worker is, so the signing keys themselves cannot be a party to a task and
+     win their own dispute. A separate platform-controlled wallet is not blocked by this, so
+     the conflict-of-interest risk reduces to that wallet plus key separation and the Safe.
+   - **The deployed Base Sepolia escrow does not have the mainnet fixes.**
+     `verify-escrow-deployment.mjs` (run 2026-10-12 against `0xc6aa…E4d3`) reports
+     `completeTaskByOwner`, the 90-day deadline bound (`MAX_DEADLINE_HORIZON`), the
+     owner/signer-cannot-be-a-party guard and two-step ownership (`pendingOwner`) all
+     **absent** from the live bytecode. They are in the source and will be in the mainnet
+     deployment, so statements about them describe the intended mainnet design, not the
+     testnet contract. A required non-zero `specHash` is in the same set (source only; not
+     probed by the script).
 3a. **No stake of any kind.** An earlier testnet contract, `ReputationStake`, let workers lock
    USDC as a trust signal and let the owner `slash` it to the owner's own address. That was a
    discretionary third destination for users' USDC, found in the NOR-537 audit. It has been
