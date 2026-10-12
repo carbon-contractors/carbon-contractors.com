@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
 
 /**
- * CC-094 / ADR-0005 — the worker's offer decision endpoints. Both require the
- * CC-093 wallet challenge-response signature; only the offered worker
- * (to_human_wallet) may answer; the ADR-0005 D5 concurrency cap gates accepts;
- * and an expired offer reads 'lapsed' (inline sweep) and can never be answered.
+ * CC-094 / ADR-0005 — the worker's offer decision endpoints. Both require an
+ * ADR-0009 session or the CC-093 wallet challenge-response signature; only the
+ * offered worker (to_human_wallet) may answer; the ADR-0005 D5 concurrency cap
+ * gates accepts; and an expired offer reads 'lapsed' (inline sweep) and can
+ * never be answered.
  */
 
 const mockGetTaskByPaymentId = vi.fn();
@@ -37,6 +38,11 @@ vi.mock("@/lib/auth/wallet-challenge", () => ({
   verifyChallengeSignature: (...args: unknown[]) => mockVerifyChallengeSignature(...args),
 }));
 
+const mockSessionWallet = vi.fn();
+vi.mock("@/lib/auth/session", () => ({
+  sessionWalletFromRequest: (...args: unknown[]) => mockSessionWallet(...args),
+}));
+
 vi.mock("@/lib/logging", () => ({ log: vi.fn() }));
 
 const WORKER_WALLET = "0x1234567890abcdef1234567890abcdef12345678";
@@ -46,6 +52,15 @@ const AUTH_HEADERS = {
   "x-caller-wallet": WORKER_WALLET,
   "x-caller-signature": "0xsig",
   "x-caller-nonce": "nonce",
+};
+
+// What the dashboard sends: the httpOnly session cookie and nothing else.
+const SESSION_ONLY = { cookie: "cc_session=ccs_raw" };
+
+const SIGNATURE_REQUIRED = {
+  ok: false,
+  error:
+    "Wallet signature required. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
 };
 
 function openOffer(overrides: Record<string, unknown> = {}) {
@@ -82,6 +97,7 @@ async function postDecline(opts: Parameters<typeof makeRequest>[1] = {}) {
 describe("offer decision endpoints (CC-094)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSessionWallet.mockResolvedValue(null);
     mockVerifyChallengeSignature.mockResolvedValue(WORKER_WALLET);
     mockLapseExpiredOffers.mockResolvedValue(0);
     mockGetTaskByPaymentId.mockResolvedValue(openOffer());
@@ -118,6 +134,56 @@ describe("offer decision endpoints (CC-094)", () => {
     const res = await postAccept({ headers: AUTH_HEADERS });
     expect(res.status).toBe(403);
     expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+  });
+
+  // ─── Session auth (ADR-0009, CC-112) ──────────────────────────────────────
+  // The dashboard sends the session cookie and no challenge headers, so the
+  // session must be read before the headers are demanded.
+
+  it("accepts on the session cookie alone, as the session wallet (CC-112)", async () => {
+    mockSessionWallet.mockResolvedValue(WORKER_WALLET);
+
+    const res = await postAccept({ headers: SESSION_ONLY });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("accepted");
+    expect(mockVerifyChallengeSignature).not.toHaveBeenCalled();
+    expect(mockAcceptTask).toHaveBeenCalled();
+  });
+
+  it("declines on the session cookie alone, as the session wallet (CC-112)", async () => {
+    mockSessionWallet.mockResolvedValue(WORKER_WALLET);
+
+    const res = await postDecline({ headers: SESSION_ONLY });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("declined");
+    expect(mockVerifyChallengeSignature).not.toHaveBeenCalled();
+    expect(mockUpdateTaskStatus).toHaveBeenCalledWith("pr_1", "declined");
+  });
+
+  it("holds a session to the offered worker — another wallet's session is 403", async () => {
+    mockSessionWallet.mockResolvedValue(OTHER_WALLET);
+
+    const res = await postAccept({ headers: SESSION_ONLY });
+
+    expect(res.status).toBe(403);
+    expect(mockAcceptTask).not.toHaveBeenCalled();
+    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it("401s an invalid session with no headers, with the unchanged challenge body", async () => {
+    // sessionWalletFromRequest returns null for unknown, revoked and expired
+    // tokens alike.
+    const accept = await postAccept({ headers: SESSION_ONLY });
+    const decline = await postDecline({ headers: SESSION_ONLY });
+
+    expect(accept.status).toBe(401);
+    expect(await accept.json()).toEqual(SIGNATURE_REQUIRED);
+    expect(decline.status).toBe(401);
+    expect(await decline.json()).toEqual(SIGNATURE_REQUIRED);
+    expect(mockVerifyChallengeSignature).not.toHaveBeenCalled();
+    expect(mockGetTaskByPaymentId).not.toHaveBeenCalled();
   });
 
   it("404s an unknown payment_request_id", async () => {

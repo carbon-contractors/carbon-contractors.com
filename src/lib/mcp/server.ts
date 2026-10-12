@@ -20,6 +20,7 @@ import {
   updateTaskStatus,
   countCommittedTasks,
   findTaskByIdempotencyKey,
+  lapseExpiredOffers,
   WORKER_CONCURRENCY_CAP,
 } from "@/lib/db/tasks";
 import { getFullReputation } from "@/lib/reputation";
@@ -199,7 +200,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         .max(10080)
         .optional()
         .describe(
-          "How long the worker has to answer this offer, in minutes (15–10080, default 1440 = 24h). Only applies when the worker has not enabled auto-booking — otherwise the offer auto-accepts. An unanswered offer lapses at expiry and you are free to re-target."
+          "Offer expiry in minutes (15–10080, default 1440 = 24h); returned as offer_expiry_unix. Applies to every hire. If the worker must accept manually, they have until then to accept and you to fund; if the worker has auto-booking enabled the offer auto-accepts and this is your deadline to fund. A task not funded and confirmed by expiry lapses, the worker is released, and you are free to re-target."
         ),
       acceptance_spec: z
         .string()
@@ -377,9 +378,19 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // CC-094 / ADR-0005 D3: accepts_auto_booking is a gate, not metadata.
         // A worker with the flag true on any channel has pre-authorised being
         // booked against their own stated categories and rate — the offer
-        // auto-accepts. Otherwise it waits for them and lapses at expiry (D4).
+        // auto-accepts, unless the AWOL check below says otherwise. Otherwise
+        // it waits for them and lapses at expiry (D4).
         const channels = await getChannelsForContractor(worker.id);
         const autoAccept = channels.some((c) => c.accepts_auto_booking);
+
+        // D4: lapse expired offers before anything below reads task rows. The
+        // cap counts 'accepted' rows straight from the table, so an auto-booking
+        // the agent never funded would otherwise keep holding the worker past
+        // its expiry until some unrelated reader happened to lapse it — on a
+        // quiet site, indefinitely. It also lets the AWOL check see an expired
+        // pending offer as 'lapsed'. Best-effort and never throws, as in
+        // respondToOffer.
+        await lapseExpiredOffers();
 
         // D5: the concurrency cap applies at auto-accept time too. A worker at
         // the cap of accepted+active tasks cannot take another; booking them
@@ -485,6 +496,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           });
         }
 
+        // Auto-accept only on a positive AWOL result: the check ran against an
+        // auto-bookable worker (`evaluated`) and did not trigger. A trigger has
+        // just switched their auto-booking off, and a throw leaves `awol` at its
+        // unevaluated default — both make this an ordinary pending offer with an
+        // expiry, as the comments above promise. Deciding from `autoAccept`
+        // alone created the row 'accepted' while telling the agent it was
+        // pending, booking a worker the platform had just judged AWOL.
+        const autoAcceptOffer = autoAccept && awol.evaluated && !awol.triggered;
+
         const response = await createFundingOffer({
           from_agent_wallet,
           to_human_wallet: worker.wallet,
@@ -493,7 +513,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           deadline_unix,
           review_window_seconds,
           spec,
-          auto_accept: autoAccept,
+          auto_accept: autoAcceptOffer,
           offer_expiry_seconds,
           ...(idempotency_key !== undefined ? { idempotency_key } : {}),
         });
@@ -546,17 +566,20 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // path the task_funded event is deliberately NOT sent here: at hire
         // time no money is locked yet — the agent still has to fund the
         // escrow — and it fires when /api/fund-task confirms funding
-        // on-chain instead.
+        // on-chain instead. The expiry goes to the worker only on a pending
+        // offer: on an auto-booked row it is the agent's funding deadline,
+        // not a window for the worker to answer within.
         await notifyContractor(worker.id, {
           type: "offer_received",
           payment_request_id: response.payment_request_id,
           amount_usdc,
-          offer_expiry_unix: response.offer_expiry_unix,
+          offer_expiry_unix:
+            response.worker_status === "pending" ? response.offer_expiry_unix : null,
         });
 
         // When AWOL triggered, the offer requires the worker's manual
-        // acceptance — the task row is created `pending` either way, with the
-        // standard offer expiry.
+        // acceptance — autoAcceptOffer above was false, so the task row is
+        // created `pending` with the agent's offer expiry.
         const awolNotice = awol.triggered
           ? {
               worker_auto_booking_disabled: true,

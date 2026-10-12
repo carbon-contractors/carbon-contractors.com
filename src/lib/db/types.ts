@@ -67,8 +67,9 @@ export interface Database {
           deadline_unix: number;
           status: TaskStatus;
           /**
-           * When the pending offer lapses (CC-094 / ADR-0005 D4). Null on
-           * auto-accepted tasks and on anything past the offer stage.
+           * When the offer lapses unless funded (CC-094 / ADR-0005 D4). Set on
+           * pending and auto-accepted rows alike; null only on rows auto-booked
+           * before auto-booked rows carried a deadline.
            */
           offer_expiry_unix: number | null;
           /**

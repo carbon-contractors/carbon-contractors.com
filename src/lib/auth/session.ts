@@ -193,9 +193,11 @@ export function tokenFromRequest(req: Request): string | null {
 export async function sessionWalletFromRequest(
   req: Request,
 ): Promise<string | null> {
-  const token = tokenFromRequest(req);
-  if (!token) return null;
   try {
+    // Inside the try: a malformed cookie makes tokenFromRequest's decodeURIComponent throw,
+    // and routes now read the session before anything else, so that must be a null, not a 500.
+    const token = tokenFromRequest(req);
+    if (!token) return null;
     const verified = await verifySessionToken(token);
     return verified?.wallet ?? null;
   } catch {

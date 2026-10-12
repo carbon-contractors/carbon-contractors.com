@@ -16,6 +16,9 @@
     },
     "src/app/api/cron/offer-reminders/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/cron/settlement-sync/route.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -30,6 +33,10 @@
     {
       "path": "/api/cron/offer-reminders",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/settlement-sync",
+      "schedule": "23 * * * *"
     }
   ]
 }

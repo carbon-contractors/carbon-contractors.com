@@ -21,6 +21,7 @@ vi.mock("@/lib/db/tasks", () => ({
   getTaskByPaymentId: vi.fn(),
   updateTaskStatus: vi.fn(),
   countCommittedTasks: (...args: unknown[]) => mockCountCommittedTasks(...args),
+  lapseExpiredOffers: vi.fn().mockResolvedValue(0),
   WORKER_CONCURRENCY_CAP: 3,
 }));
 
@@ -73,6 +74,7 @@ import {
   computeAwolStreaks,
   evaluateAwol,
   taskStatusToAwolOutcome,
+  taskToAwolOutcome,
   evaluateAwolAtBooking,
 } from "@/lib/awol";
 import { createMcpServer } from "@/lib/mcp/server";
@@ -268,6 +270,17 @@ describe("task status → AWOL outcome mapping", () => {
     expect(taskStatusToAwolOutcome("declined")).toBe("declined");
     expect(taskStatusToAwolOutcome("accepted")).toBe("accepted");
   });
+
+  it("a lapsed row the worker had accepted is the agent's walk-away, not silence (ADR-0005 D4/D6)", () => {
+    const pin = "0x" + "cd".repeat(32);
+    // Accepted (or auto-booked), then never funded: the acceptance stands.
+    expect(taskToAwolOutcome({ status: "lapsed", accepted_description_hash: pin })).toBe("accepted");
+    // Never answered: still the primary AWOL signal.
+    expect(taskToAwolOutcome({ status: "lapsed", accepted_description_hash: null })).toBe("lapsed_offer");
+    expect(taskToAwolOutcome({ status: "lapsed" })).toBe("lapsed_offer");
+    // Every other status maps exactly as by status alone.
+    expect(taskToAwolOutcome({ status: "expired", accepted_description_hash: pin })).toBe("expired_no_submission");
+  });
 });
 
 describe("evaluateAwolAtBooking — the inline auto-booking check", () => {
@@ -371,6 +384,23 @@ describe("evaluateAwolAtBooking — the inline auto-booking check", () => {
     expect(mockSetAcceptsAutoBookingForContractor).not.toHaveBeenCalled();
   });
 
+  it("does not trigger on bookings that lapsed because the agent never funded them (CC-094)", async () => {
+    // Three auto-booked rows (pinned at insertion) that lapsed unfunded.
+    mockGetTasksByWallet.mockResolvedValue(
+      [0, 1, 2].map((i) => ({
+        id: `task-${i}`,
+        status: "lapsed",
+        accepted_description_hash: "0x" + "cd".repeat(32),
+      })),
+    );
+
+    const decision = await evaluateAwolAtBooking({ id: WORKER_ID, wallet: WORKER_WALLET });
+
+    expect(decision).toMatchObject({ evaluated: true, triggered: false, consecutiveLapsedOffers: 0 });
+    expect(mockSetAcceptsAutoBookingForContractor).not.toHaveBeenCalled();
+    expect(mockNotifyAutoBookingDisabled).not.toHaveBeenCalled();
+  });
+
   it("a notification failure never blocks the disable or the hire", async () => {
     mockNotifyAutoBookingDisabled.mockRejectedValueOnce(
       new Error("dispatch exploded"),
@@ -450,6 +480,11 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     expect(json.worker_auto_booking_disabled).toBe(true);
     expect(json.awol_signal).toBe("lapsed_offers");
     expect(json.acceptance).toBe("manual");
+    // ...and it really is manual: the row is created pending, with an expiry,
+    // not 'accepted' behind a response that says otherwise.
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: false, offer_expiry_seconds: 24 * 60 * 60 }),
+    );
   });
 
   it("when not triggered, the response carries no AWOL fields", async () => {
@@ -462,6 +497,10 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     expect(json.worker_auto_booking_disabled).toBeUndefined();
     expect(json.acceptance).toBeUndefined();
     expect(mockSetAcceptsAutoBookingForContractor).not.toHaveBeenCalled();
+    // Evaluated and clear — the one case that auto-accepts.
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: true }),
+    );
   });
 
   it("an unreadable AWOL state fails safe to manual acceptance without blocking the hire", async () => {
@@ -472,5 +511,21 @@ describe("request_human_work with the AWOL check inline (CC-075)", () => {
     expect(result.isError).toBeUndefined();
     expect(mockCreateFundingOffer).toHaveBeenCalledTimes(1);
     expect(json.worker_auto_booking_disabled).toBeUndefined();
+    // Fail safe means a pending offer, not an auto-booking nobody vetted.
+    expect(mockCreateFundingOffer).toHaveBeenCalledWith(
+      expect.objectContaining({ auto_accept: false }),
+    );
+  });
+
+  it("the concurrency cap still refuses an auto-bookable worker before the AWOL check (D5)", async () => {
+    mockCountCommittedTasks.mockResolvedValue(3);
+    mockGetTasksByWallet.mockResolvedValue([]);
+
+    const { result, json } = await callRequestHumanWork();
+
+    expect(result.isError).toBe(true);
+    expect(json.error).toContain("concurrency cap");
+    expect(mockGetTasksByWallet).not.toHaveBeenCalled();
+    expect(mockCreateFundingOffer).not.toHaveBeenCalled();
   });
 });

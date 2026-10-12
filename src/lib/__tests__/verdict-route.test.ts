@@ -21,6 +21,11 @@ vi.mock("@/lib/auth/wallet-challenge", () => ({
   verifyChallengeSignature: (...args: unknown[]) => mockVerifyChallengeSignature(...args),
 }));
 
+const mockSessionWallet = vi.fn();
+vi.mock("@/lib/auth/session", () => ({
+  sessionWalletFromRequest: (...args: unknown[]) => mockSessionWallet(...args),
+}));
+
 const mockComputeAndSignVerdict = vi.fn();
 vi.mock("@/lib/contracts/verdict-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/contracts/verdict-service")>();
@@ -63,6 +68,15 @@ function authHeaders(wallet: string) {
   };
 }
 
+// What the dashboard sends: the httpOnly session cookie and nothing else.
+const SESSION_ONLY = { "Content-Type": "application/json", cookie: "cc_session=ccs_raw" };
+
+const SIGNATURE_REQUIRED = {
+  ok: false,
+  error:
+    "Wallet signature required. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
+};
+
 function makeRequest(opts: { headers?: Record<string, string>; body?: unknown } = {}) {
   return new NextRequest("http://localhost/api/verdict", {
     method: "POST",
@@ -74,6 +88,7 @@ function makeRequest(opts: { headers?: Record<string, string>; body?: unknown } 
 describe("POST /api/verdict (CC-092)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSessionWallet.mockResolvedValue(null);
     mockGetTaskByPaymentId.mockResolvedValue(TASK);
     mockComputeAndSignVerdict.mockResolvedValue({
       verdict: {
@@ -109,6 +124,42 @@ describe("POST /api/verdict (CC-092)", () => {
     const res = await POST(makeRequest());
 
     expect(res.status).toBe(401);
+  });
+
+  // ADR-0009 / CC-112: the dashboard sends the session cookie and no challenge
+  // headers, so the session must be read before the headers are demanded.
+  it("serves the worker on the session cookie alone, as the session wallet (CC-112)", async () => {
+    mockSessionWallet.mockResolvedValue(WORKER_WALLET);
+
+    const { POST } = await import("@/app/api/verdict/route");
+    const res = await POST(makeRequest({ headers: SESSION_ONLY }));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+    expect(mockVerifyChallengeSignature).not.toHaveBeenCalled();
+    expect(mockComputeAndSignVerdict).toHaveBeenCalledWith(TASK, "{}");
+  });
+
+  it("holds a session to the task's parties — a non-party session is 403", async () => {
+    mockSessionWallet.mockResolvedValue(OTHER_WALLET);
+
+    const { POST } = await import("@/app/api/verdict/route");
+    const res = await POST(makeRequest({ headers: SESSION_ONLY }));
+
+    expect(res.status).toBe(403);
+    expect(mockComputeAndSignVerdict).not.toHaveBeenCalled();
+  });
+
+  it("401s an invalid session with no headers, with the unchanged challenge body", async () => {
+    // sessionWalletFromRequest returns null for unknown, revoked and expired
+    // tokens alike.
+    const { POST } = await import("@/app/api/verdict/route");
+    const res = await POST(makeRequest({ headers: SESSION_ONLY }));
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual(SIGNATURE_REQUIRED);
+    expect(mockVerifyChallengeSignature).not.toHaveBeenCalled();
+    expect(mockGetTaskByPaymentId).not.toHaveBeenCalled();
   });
 
   it("404s an unknown task", async () => {

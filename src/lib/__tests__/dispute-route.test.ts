@@ -13,6 +13,11 @@ vi.mock("@/lib/auth/wallet-challenge", () => ({
   verifyChallengeSignature: (...args: unknown[]) => mockVerifyChallengeSignature(...args),
 }));
 
+const mockSessionWallet = vi.fn();
+vi.mock("@/lib/auth/session", () => ({
+  sessionWalletFromRequest: (...args: unknown[]) => mockSessionWallet(...args),
+}));
+
 const mockGetOnChainTask = vi.fn();
 vi.mock("@/lib/contracts/escrow", () => ({
   getOnChainTask: (...args: unknown[]) => mockGetOnChainTask(...args),
@@ -96,9 +101,19 @@ function authHeaders(wallet: string) {
   };
 }
 
+// What the dashboard sends: the httpOnly session cookie and nothing else.
+const SESSION_ONLY = { cookie: "cc_session=ccs_raw" };
+
+const SIGNATURE_REQUIRED = {
+  ok: false,
+  error:
+    "Wallet signature required. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
+};
+
 describe("POST /api/dispute (CC-004 auth)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSessionWallet.mockResolvedValue(null);
   });
 
   it("rejects an unsigned request with 401", async () => {
@@ -143,9 +158,64 @@ describe("POST /api/dispute (CC-004 auth)", () => {
   });
 });
 
+describe("POST /api/dispute with a session (ADR-0009 / CC-112)", () => {
+  // The dashboard sends the session cookie and no challenge headers, so the
+  // session must be read before the headers are demanded.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSessionWallet.mockResolvedValue(null);
+    mockGetTaskByPaymentId.mockResolvedValue(baseTask());
+    mockUpdateTaskStatus.mockResolvedValue(undefined);
+  });
+
+  it("disputes on the session cookie alone, as the session wallet (CC-112)", async () => {
+    mockSessionWallet.mockResolvedValue(WORKER_WALLET);
+    mockComputeAndSignVerdict.mockResolvedValue(failingComputed());
+
+    const { POST } = await import("@/app/api/dispute/route");
+    const res = await POST(
+      makeRequest({
+        headers: SESSION_ONLY,
+        body: { payment_request_id: "pr_1", evidence_bundle: EVIDENCE_BUNDLE },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("disputed");
+    expect(mockVerifyChallengeSignature).not.toHaveBeenCalled();
+    expect(mockUpdateTaskStatus).toHaveBeenCalledWith("pr_1", "disputed");
+  });
+
+  it("holds a session to the task's parties — a non-party session is 403", async () => {
+    mockSessionWallet.mockResolvedValue(OTHER_WALLET);
+
+    const { POST } = await import("@/app/api/dispute/route");
+    const res = await POST(
+      makeRequest({
+        headers: SESSION_ONLY,
+        body: { payment_request_id: "pr_1", evidence_bundle: EVIDENCE_BUNDLE },
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockUpdateTaskStatus).not.toHaveBeenCalled();
+    expect(mockComputeAndSignVerdict).not.toHaveBeenCalled();
+  });
+
+  it("401s an invalid session with no headers, with the unchanged challenge body", async () => {
+    // sessionWalletFromRequest returns null for unknown, revoked and expired
+    // tokens alike.
+    const { POST } = await import("@/app/api/dispute/route");
+    const res = await POST(makeRequest({ headers: SESSION_ONLY }));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual(SIGNATURE_REQUIRED);
+    expect(mockVerifyChallengeSignature).not.toHaveBeenCalled();
+    expect(mockGetTaskByPaymentId).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/dispute with an evidence bundle (CC-092 / ADR-0001 D2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSessionWallet.mockResolvedValue(null);
     mockVerifyChallengeSignature.mockResolvedValue(WORKER_WALLET);
     mockGetTaskByPaymentId.mockResolvedValue(baseTask());
     mockUpdateTaskStatus.mockResolvedValue(undefined);
@@ -265,6 +335,7 @@ describe("POST /api/dispute with an evidence bundle (CC-092 / ADR-0001 D2)", () 
 describe("POST /api/dispute without an evidence bundle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSessionWallet.mockResolvedValue(null);
     mockVerifyChallengeSignature.mockResolvedValue(WORKER_WALLET);
     mockGetTaskByPaymentId.mockResolvedValue(baseTask());
     mockUpdateTaskStatus.mockResolvedValue(undefined);

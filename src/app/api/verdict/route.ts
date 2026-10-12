@@ -2,9 +2,10 @@
  * route.ts — POST /api/verdict (CC-092)
  *
  * Computes and signs a verdict for a task, against a caller-supplied evidence
- * bundle. Authenticated the same way as /api/tasks (CC-093) and /api/dispute — the
- * challenge-response signature (x-caller-wallet / x-caller-signature /
- * x-caller-nonce headers, nonce from POST /api/basedhuman.mcp/challenge) — because
+ * bundle. Authenticated the same way as /api/tasks (CC-093) and /api/dispute — an
+ * ADR-0009 session, else the challenge-response signature (x-caller-wallet /
+ * x-caller-signature / x-caller-nonce headers, nonce from
+ * POST /api/basedhuman.mcp/challenge) — because
  * the acceptance spec this reads can carry GPS coordinates and site references
  * (CLAUDE.md's reasoning for keeping it out of tasks_public), and it should only be
  * reachable by the task's own worker or hiring agent, matching the on-chain
@@ -27,29 +28,31 @@ import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const rawWallet = request.headers.get("x-caller-wallet");
-  const signature = request.headers.get("x-caller-signature") as `0x${string}` | null;
-  const nonce = request.headers.get("x-caller-nonce");
-
-  if (!rawWallet || !isValidWalletAddress(rawWallet) || !signature || !nonce) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "Wallet signature required. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
-      },
-      { status: 401 },
-    );
-  }
-
   // ADR-0009: a valid session (cookie or bearer) authenticates without a
   // prompt. Submitting evidence stays off-chain — the wallet prompt happens at
-  // the contract write, which is where the stakes are (D3).
+  // the contract write, which is where the stakes are (D3). The session is
+  // read first — the dashboard sends no challenge headers at all, so demanding
+  // them up front 401'd every cookie-only caller (CC-112).
   const sessionWallet = await sessionWalletFromRequest(request);
   let callerWallet: string;
   if (sessionWallet) {
     callerWallet = sessionWallet;
   } else {
+    const rawWallet = request.headers.get("x-caller-wallet");
+    const signature = request.headers.get("x-caller-signature") as `0x${string}` | null;
+    const nonce = request.headers.get("x-caller-nonce");
+
+    if (!rawWallet || !isValidWalletAddress(rawWallet) || !signature || !nonce) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Wallet signature required. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
+        },
+        { status: 401 },
+      );
+    }
+
     try {
       callerWallet = await verifyChallengeSignature(rawWallet, signature, nonce);
     } catch (err) {

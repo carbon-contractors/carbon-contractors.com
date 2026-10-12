@@ -90,6 +90,31 @@ export function taskStatusToAwolOutcome(status: string): AwolOutcome {
 }
 
 /**
+ * Map a task row to an AWOL outcome. Same as taskStatusToAwolOutcome except
+ * for one case the status alone cannot tell apart: a `lapsed` row the worker
+ * had already accepted. Since CC-094 an accepted row — auto-booked or
+ * accepted by hand — lapses when the *agent* never funds it (ADR-0005 D4).
+ * That is the agent walking away, not the worker going silent, so it counts
+ * as the acceptance it was. Otherwise an agent could book an auto-booking
+ * worker three times, never fund, and switch their auto-booking off with an
+ * "inactivity" notice they did nothing to earn.
+ *
+ * `accepted_description_hash` is the marker: written in the same statement as
+ * the acceptance (or at insertion for an auto-booked row), immutable after
+ * (migration 025), and kept through the retention prune — so a lapsed row
+ * carries it exactly when the worker had said yes.
+ */
+export function taskToAwolOutcome(task: {
+  status: string;
+  accepted_description_hash?: string | null;
+}): AwolOutcome {
+  if (task.status === "lapsed" && task.accepted_description_hash) {
+    return "accepted";
+  }
+  return taskStatusToAwolOutcome(task.status);
+}
+
+/**
  * Count the trailing consecutive silence streaks in a worker's history.
  *
  * Outcomes are chronological, oldest first. In-flight items (`other`) are
@@ -181,9 +206,7 @@ export async function evaluateAwolAtBooking(worker: {
 
   // getTasksByWallet orders newest-first; the streaks run oldest→newest.
   const tasks = await getTasksByWallet(worker.wallet);
-  const outcomes = [...tasks]
-    .reverse()
-    .map((t) => taskStatusToAwolOutcome(t.status));
+  const outcomes = [...tasks].reverse().map(taskToAwolOutcome);
   const streaks = computeAwolStreaks(outcomes);
   const verdict = evaluateAwol(streaks);
 
