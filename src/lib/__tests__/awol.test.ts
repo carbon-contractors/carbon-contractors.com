@@ -73,6 +73,7 @@ import {
   computeAwolStreaks,
   evaluateAwol,
   taskStatusToAwolOutcome,
+  taskToAwolOutcome,
   evaluateAwolAtBooking,
 } from "@/lib/awol";
 import { createMcpServer } from "@/lib/mcp/server";
@@ -268,6 +269,17 @@ describe("task status → AWOL outcome mapping", () => {
     expect(taskStatusToAwolOutcome("declined")).toBe("declined");
     expect(taskStatusToAwolOutcome("accepted")).toBe("accepted");
   });
+
+  it("a lapsed row the worker had accepted is the agent's walk-away, not silence (ADR-0005 D4/D6)", () => {
+    const pin = "0x" + "cd".repeat(32);
+    // Accepted (or auto-booked), then never funded: the acceptance stands.
+    expect(taskToAwolOutcome({ status: "lapsed", accepted_description_hash: pin })).toBe("accepted");
+    // Never answered: still the primary AWOL signal.
+    expect(taskToAwolOutcome({ status: "lapsed", accepted_description_hash: null })).toBe("lapsed_offer");
+    expect(taskToAwolOutcome({ status: "lapsed" })).toBe("lapsed_offer");
+    // Every other status maps exactly as by status alone.
+    expect(taskToAwolOutcome({ status: "expired", accepted_description_hash: pin })).toBe("expired_no_submission");
+  });
 });
 
 describe("evaluateAwolAtBooking — the inline auto-booking check", () => {
@@ -369,6 +381,23 @@ describe("evaluateAwolAtBooking — the inline auto-booking check", () => {
     expect(decision.triggered).toBe(false);
     expect(decision.consecutiveLapsedOffers).toBe(1);
     expect(mockSetAcceptsAutoBookingForContractor).not.toHaveBeenCalled();
+  });
+
+  it("does not trigger on bookings that lapsed because the agent never funded them (CC-094)", async () => {
+    // Three auto-booked rows (pinned at insertion) that lapsed unfunded.
+    mockGetTasksByWallet.mockResolvedValue(
+      [0, 1, 2].map((i) => ({
+        id: `task-${i}`,
+        status: "lapsed",
+        accepted_description_hash: "0x" + "cd".repeat(32),
+      })),
+    );
+
+    const decision = await evaluateAwolAtBooking({ id: WORKER_ID, wallet: WORKER_WALLET });
+
+    expect(decision).toMatchObject({ evaluated: true, triggered: false, consecutiveLapsedOffers: 0 });
+    expect(mockSetAcceptsAutoBookingForContractor).not.toHaveBeenCalled();
+    expect(mockNotifyAutoBookingDisabled).not.toHaveBeenCalled();
   });
 
   it("a notification failure never blocks the disable or the hire", async () => {
