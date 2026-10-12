@@ -184,9 +184,10 @@ exists rather than reasoning from this file.**
   · `node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`
   · **A redeploy resets ownership to the deployer — re-transfer it (`CC-082`).**
   · **Target is a 2-of-4 Safe before mainnet** (`ADR-0006` D2, accepted; `CC-090`, now P1), with the
-    verdict signer split onto its own HSM key. Custody: Aaron two keys in two buildings, two family
-    members one each — the two family keys reach threshold alone, which is what makes succession work
-    without an estate finding anything.
+    verdict signer split onto its own HSM key. Custody (`ADR-0006` **A4**, 2026-10-12): Aaron holds
+    three cards, one family member holds one, and no access codes are set, so each card is a bearer
+    key. The family card alone no longer reaches threshold: succession needs one of Aaron's secured
+    cards too, which makes the estate packet load-bearing.
   · **Cards ordered 2026-08-31, expected ~2026-09-17.** This entry claimed a shared seed was
     "impossible by construction" because they were bought separately; they came as multi-card packs,
     and the property is how each card is **initialised**, not how it was bought. Set each card up on

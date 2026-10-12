@@ -138,7 +138,7 @@
         "address": "0xa8931097540e69B474013D294d0bA6A2cC853e4b",
         "custody": "single GCP Cloud KMS / HSM key",
         "transferredAt": "2026-09-01",
-        "$comment": "ADR-0006 D2 accepted 2026-08-26: this becomes a 2-of-4 Safe over four hardware-isolated keys before the mainnet deploy. Hardware ordered 2026-08-31, expected ~2026-09-17. AMENDED 2026-08-31 (ADR-0006 A2): the property is how each card is INITIALISED, not how it was bought - set each up on its own, do not run the link step. Read the four addresses and confirm they differ before distributing. Final gate: four Safe owners on-chain. Custody: Aaron holds two, two family members hold one each; the two family keys reach threshold alone. REDEPLOYED 2026-09-01 (CC-034 groundwork). A redeploy resets ownership to the deployer; the transfer ran the same day and verify-escrow-deployment.mjs confirms owner() is the HSM key again. This field read the DEPLOYER address for the interval in between, deliberately - an escrow with the wrong owner is a live incident, and a file that reads correct throughout is how you fail to notice one. This entry has been wrong in both directions historically — never re-derive it by reading (CC-059)."
+        "$comment": "ADR-0006 D2 accepted 2026-08-26: this becomes a 2-of-4 Safe over four hardware-isolated keys before the mainnet deploy. Hardware ordered 2026-08-31, expected ~2026-09-17. AMENDED 2026-08-31 (ADR-0006 A2): the property is how each card is INITIALISED, not how it was bought - set each up on its own, do not run the link step. Read the four addresses and confirm they differ before distributing. Final gate: four Safe owners on-chain. Custody revised 2026-10-12 (ADR-0006 A4): Aaron holds three, one family member holds one, no access codes; the family card alone no longer reaches threshold. REDEPLOYED 2026-09-01 (CC-034 groundwork). A redeploy resets ownership to the deployer; the transfer ran the same day and verify-escrow-deployment.mjs confirms owner() is the HSM key again. This field read the DEPLOYER address for the interval in between, deliberately - an escrow with the wrong owner is a live incident, and a file that reads correct throughout is how you fail to notice one. This entry has been wrong in both directions historically — never re-derive it by reading (CC-059)."
       },
       "acceptedVerdictSigners": [
         "0xa8931097540e69B474013D294d0bA6A2cC853e4b"
@@ -172,7 +172,7 @@
       },
       "owner": {
         "address": null,
-        "custody": "2-of-4 Safe, four hardware-isolated keys (ADR-0006 D2). Slots 3 and 4 are transitional and rotate to partners or a professional key-holder service on the D11 triggers."
+        "custody": "2-of-4 Safe, four hardware-isolated keys (ADR-0006 D2; custody per A4: Aaron three, family one, no access codes). The family slot is transitional and rotates to a partner or a professional key-holder service on the D11 triggers."
       },
       "acceptedVerdictSigners": [],
       "rpcMaxBlockRange": null,
