@@ -26,7 +26,7 @@ does.
 | Decision | Parameter |
 | :-- | :-- |
 | **D1** copyright | **Aaron James Clifft, personally.** AGPL-3.0-or-later at the repository root; `contracts/` MIT. |
-| **D2** ownership | **2-of-4 Safe**, four hardware-isolated keys — each Tangem card initialised **on its own**, link step not run (**A2**). Owner separate from the automated HSM verdict signer, confirmed. **Custody: Aaron holds two, in two separate buildings; two family members hold one each.** |
+| **D2** ownership | **2-of-4 Safe**, four hardware-isolated keys — each Tangem card initialised **on its own**, link step not run (**A2**). Owner separate from the automated HSM verdict signer, confirmed. **Custody: Aaron holds two, in two separate buildings; two family members hold one each.** Revised by **A4** (2026-10-12): Aaron three, family one, no access codes. |
 | **D11** custody escalation | Custody escalates on **measured adoption**, not intent, by **rotating the two family slots** to professional or partner holders. Thresholds keyed to the limbs `verify-concurrent-escrow.mjs` already measures. |
 | **D3** arbitration clock | **A fixed 7-day arbitration window in the contract bytecode, before the mainnet deploy, running from the moment the task is disputed.** An unresolved arbitration defaults to the **worker**, claimed as a pull payment. Mechanism corrected by **Amendment 1** — D3 as written could not start its own clock. |
 | **D5 / D7** continuity | `docs/BCP-DR.md` and `chain-constants.json` live **in-repo**. No dependency on any private workspace. |
@@ -660,3 +660,49 @@ executed transactions on three different pairs, all four keys validated, relayer
 proven) is recorded in full in `CC-090`. The succession criterion is now **satisfiable by custody
 assignment**: executed pairs {2,3} and {1,4} both have on-chain evidence; whichever pair is
 designated "family" closes it. Assignment remains open.
+
+## Amendment 4 — 2026-10-12 — custody assigned: three cards with Aaron, one with family; no access codes
+
+Decided by Aaron on 2026-10-12, closing A3.4's open assignment. Still a 2-of-4 Safe over the four
+independently initialised cards from the 2026-09-09 ceremony; A2 and A3.1 stand unchanged. Recorded
+as roles only, never locations (D2): where each card lives belongs in the estate documents.
+
+| Slot | Holder | Notes |
+| :-- | :-- | :-- |
+| 1 | Aaron, daily | Travels with him |
+| 2 | Aaron, secured | A different building from slot 1 |
+| 3 | Aaron, secured | A third location, separate from slots 1 and 2 |
+| 4 | Family member | Non-technical. The one transitional slot D11 can rotate |
+
+### A4.1 — Access codes are not set, reversing A3.3's gate
+
+A3.3 made distinct access codes a hard gate on distribution. Aaron has dropped that as friction the
+arrangement does not need at its current stakes, and because a forgotten code on the family card is
+a likelier failure than theft. So each card is a **bearer key**: possession is the only credential,
+because the default code is a public constant. Physical labelling by address suffix (A3.3) still
+applies.
+
+### A4.2 — What changes from D2's properties
+
+1. **Losing any two cards is still survivable.** Unchanged.
+2. **The family key alone no longer reaches threshold.** D2's central property is gone: succession
+   now needs the family card **plus one of Aaron's secured cards**. The estate-discovery dependency
+   D2 removed is back. Someone has to find, recognise and correctly handle slot 2 or slot 3, so the
+   estate packet is load-bearing again and must say where they are.
+3. **Aaron can act alone.** Unchanged; he now holds three.
+
+**New residual, accepted for testnet.** Without access codes, any event that puts two cards in one
+pair of hands reaches threshold. The likeliest is slot 1 and a secured card in the same building at
+the same time. Revisit before mainnet (`CC-034`): set codes on Aaron's cards only, or keep slot 1
+out of the secured buildings.
+
+### A4.3 — The succession rehearsal changes
+
+D2's family-only signature is impossible with one family card. The replacement criterion is a
+signature by **the family card plus slot 2 or slot 3, with the family holder doing the taps and
+following only the estate packet.** Assigning the family card so that its pair with a secured card
+is one of A3.4's already-executed pairs ({1,4} or {2,3}) reuses the on-chain evidence, but the
+capability test still needs the family holder to do it once. `CC-090` carries it.
+
+D11's escalation now has one family slot to rotate. A second rotation would come from one of
+Aaron's three cards.

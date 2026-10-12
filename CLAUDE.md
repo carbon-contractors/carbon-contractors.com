@@ -151,7 +151,7 @@ exists rather than reasoning from this file.**
   "Agent resolves its own dispute" was explicitly rejected.
   **Arbitration now has no app or MCP surface at all**, deliberately: the owner resolves via
   `scripts/admin/verify-escrow-lifecycle.ts` with the KMS key until the adjudication tier exists.
-  → `ADR-0001` D2, `ADR-0007` (proposed), `CC-081` Defect 2
+  → `ADR-0001` D2, `ADR-0007` (accepted 2026-08-26), `CC-081` Defect 2
 - **The arbitration clock is live on Sepolia, and on no other network.**
   `ARBITRATION_WINDOW = 7 days` (`ADR-0006` D3 + Amendment 1), stamped by `disputeTask` and claimed
   by the worker through `releaseAfterArbitration`. Deployed 2026-09-01 and confirmed on chain, not
@@ -184,9 +184,10 @@ exists rather than reasoning from this file.**
   · `node --env-file=.env.local scripts/audit/verify-contract-owner.mjs`
   · **A redeploy resets ownership to the deployer — re-transfer it (`CC-082`).**
   · **Target is a 2-of-4 Safe before mainnet** (`ADR-0006` D2, accepted; `CC-090`, now P1), with the
-    verdict signer split onto its own HSM key. Custody: Aaron two keys in two buildings, two family
-    members one each — the two family keys reach threshold alone, which is what makes succession work
-    without an estate finding anything.
+    verdict signer split onto its own HSM key. Custody (`ADR-0006` **A4**, 2026-10-12): Aaron holds
+    three cards, one family member holds one, and no access codes are set, so each card is a bearer
+    key. The family card alone no longer reaches threshold: succession needs one of Aaron's secured
+    cards too, which makes the estate packet load-bearing.
   · **Cards ordered 2026-08-31, expected ~2026-09-17.** This entry claimed a shared seed was
     "impossible by construction" because they were bought separately; they came as multi-card packs,
     and the property is how each card is **initialised**, not how it was bought. Set each card up on
@@ -415,7 +416,7 @@ src/lib/categories.ts  The 10 service categories, max 2 per worker
 contracts/             CarbonEscrow.sol (v2, CC-082). ReputationStake.sol was removed (NOR-537 F2)
                        mocks/ is test-only — never deployed to a live network
 test/                  Hardhat/mocha contract tests. `npm run test:contracts`
-supabase/migrations/   001-026, applied by hand in order. Add new ones, never edit an applied one.
+supabase/migrations/   001-027, applied by hand in order. Add new ones, never edit an applied one.
                        Numbers are unique and gapless — the duplicate 018 pair was renumbered by
                        CC-111 (2026-09-16) to match what production actually applied. The live
                        project's supabase_migrations.schema_migrations is the record of what is
@@ -446,7 +447,8 @@ npm run monitors:list    # Offline — validates the monitor registry. Runs in C
 npm run seed             # Seeds demo workers into Supabase (fixed in CC-017; needs real env)
 ```
 
-CI runs `npm ci`, `npm audit --audit-level=high`, lint, typecheck, compile, `typecheck:contracts`,
+CI runs `npm ci`, the dependency audit (`scripts/check-audit.mjs`: high/critical fail unless in
+`scripts/audit-allowlist.json`, and an entry past its `review_by` date fails too), lint, typecheck, compile, `typecheck:contracts`,
 the ABI drift check, `test:contracts`, `monitors:list`, test, build. The audit step fails the build
 on high-severity findings, so a stale dependency tree breaks CI rather than merging quietly.
 
