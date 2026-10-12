@@ -136,6 +136,17 @@ async function transferOne(
 
   if (same(currentOwner, newOwner)) {
     console.log("   already owned by the target — nothing to do.");
+    // A nomination left dangling after the transfer completed could still be accepted by
+    // its nominee. verify-escrow-deployment.mjs fails on it; say so here too rather than
+    // report a clean OK. Best-effort: a pre-NOR-537 deployment has no pendingOwner().
+    try {
+      const dangling: string = await contract.pendingOwner();
+      if (!/^0x0{40}$/i.test(dangling)) {
+        console.log(`   WARNING: pendingOwner() is ${dangling}. That address can still accept ownership.`);
+      }
+    } catch {
+      // Single-step Ownable: nothing can be pending.
+    }
     return { ...result, skipped: true };
   }
 
@@ -210,7 +221,8 @@ async function transferOne(
 
   console.log(`   last read: ${confirmedPending ?? "unreadable"} — COULD NOT CONFIRM`);
   console.log(`   The transaction was mined. This is very likely RPC lag, not a failure.`);
-  console.log(`   Do NOT re-run. Verify independently before concluding anything:`);
+  console.log(`   Re-running is safe: an existing nomination is detected and not re-sent.`);
+  console.log(`   Verify independently before concluding anything:`);
   console.log(`     node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs`);
   console.log(`     https://sepolia.basescan.org/tx/${tx.hash}`);
   return failed;

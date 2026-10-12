@@ -149,8 +149,8 @@ incident, not a to-do.
 **The owner and the verdict signers can never be a party to a task** (`NOR-537` F1). `createTask`
 reverts `PlatformCannotBeParty` if the funder or the worker is the owner or an accepted signer. Every
 rehearsal wallet, agent and worker alike, must be a different address from both. Also,
-`verify-escrow-lifecycle.ts` funds as the deployer, so none of its funding phases can run until step 2
-has moved ownership off the deployer key.
+`verify-escrow-lifecycle.ts` and `verify-funding-lifecycle.ts` both fund as the deployer, so none of
+their funding phases can run until step 2 has moved ownership off the deployer key.
 
 ### 2 — The two environment variables
 
