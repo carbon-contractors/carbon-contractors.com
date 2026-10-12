@@ -10,7 +10,7 @@ is the only step that tells you when it goes wrong.
 
 | Step | How it fails if you skip it |
 | :-- | :-- |
-| Ownership transfer | contract owned by the deployer key, `resolveDispute` unavailable to the HSM |
+| Ownership transfer | contract owned by the deployer key, `resolveDispute` unavailable to the HSM. A transfer nominated but never *accepted* leaves exactly this state |
 | `NEXT_PUBLIC_ESCROW_CONTRACT` | app reads the *old* contract and reports its state as current |
 | `ESCROW_DEPLOY_BLOCK` | every event query scans from genesis, ~36× the requests (`CC-070`) |
 | Vercel rebuild | `NEXT_PUBLIC_*` is inlined at build time — changing the var alone does nothing |
@@ -99,14 +99,45 @@ node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs <address>
 
 ## After the deploy — none of this is optional
 
-### 1 — Transfer ownership
+### 1 — Transfer ownership: two transactions, two keys
 
 **A fresh deploy is owned by the deployer.** It must not stay that way (`CC-059`, `CC-082`).
 
-```bash
-npm run transfer:ownership
-node --env-file=.env.local scripts/audit/verify-contract-owner.mjs
-```
+Since `NOR-537` the contract is `Ownable2Step`. `transferOwnership()` only **nominates**: it sets
+`pendingOwner()`, and `owner()` stays the deployer until the nominee itself calls
+`acceptOwnership()`.
+
+1. **Nominate**, with the deployer key. Dry run first:
+
+   ```bash
+   npm run transfer:ownership
+   CONFIRM=true npm run transfer:ownership
+   ```
+
+   It ends `PENDING`, not `OK`, and exits 0. That is the correct result. It prints the exact call
+   the target must make. For the 2-of-4 Safe (`CC-090`), set `NEW_OWNER=0xSAFE` on both runs and
+   accept through the Safe.
+
+2. **Accept**, from the new owner's own key. For the HSM key that means the KMS signer, through the
+   lifecycle tooling. Dry run first again:
+
+   ```bash
+   node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/admin/verify-escrow-lifecycle.ts accept-ownership
+   CONFIRM=true node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/admin/verify-escrow-lifecycle.ts accept-ownership
+   ```
+
+   This is the one-way step. A key that cannot sign can never accept, so the contract can no longer
+   be handed to a dead key. Still run `npm run verify:kms` first.
+
+3. **Verify** that ownership landed **and** that `pendingOwner()` is back to zero:
+
+   ```bash
+   node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs
+   node --env-file=.env.local scripts/audit/verify-contract-owner.mjs
+   ```
+
+   A non-zero `pendingOwner()` fails `verify-escrow-deployment.mjs` on every network. A forgotten
+   nomination lets whoever it names take the contract at any time.
 
 Expected owner: the HSM key `0xa8931097540e69B474013D294d0bA6A2cC853e4b` today, and the 2-of-4 Safe
 once `CC-090` lands. **Verify by running the script, not by reading this file** — this repo has had
@@ -114,6 +145,12 @@ the owner recorded wrongly in *both* directions.
 
 Do this **before anything is funded**. An escrow holding money with the wrong owner is a live
 incident, not a to-do.
+
+**The owner and the verdict signers can never be a party to a task** (`NOR-537` F1). `createTask`
+reverts `PlatformCannotBeParty` if the funder or the worker is the owner or an accepted signer. Every
+rehearsal wallet, agent and worker alike, must be a different address from both. Also,
+`verify-escrow-lifecycle.ts` funds as the deployer, so none of its funding phases can run until step 2
+has moved ownership off the deployer key.
 
 ### 2 — The two environment variables
 
@@ -153,7 +190,9 @@ npm run monitors
 
 `verify-escrow-deployment.mjs` now checks `ARBITRATION_WINDOW` and the
 `releaseAfterArbitration` selector. Its absence is **informational on testnet** — the app reads a
-pre-clock deployment deliberately — and **fatal on mainnet**.
+pre-clock deployment deliberately — and **fatal on mainnet**. The `NOR-537` checks follow the same
+rule: `MAX_DEADLINE_HORIZON` (90 days), and the `completeTaskByOwner` and `PlatformCannotBeParty`
+selectors. A non-zero `pendingOwner()` is fatal everywhere.
 
 ### 5 — `chain-constants.json`
 
@@ -172,12 +211,16 @@ entry that says the clock is written but deployed nowhere. Correct them in the s
 
 ## What a Sepolia redeploy unblocks
 
-The dispute stage of the lifecycle cannot be exercised against a contract with no arbitration clock:
-there is no timeout to test. So:
+Until 2026-10-12 this section said the dispute stage needed a redeploy to get the arbitration clock.
+The 2026-09-01 deployment has the clock, and `CC-079` has run against it.
 
-- `CC-079` (dispute stage) needs the redeploy before it can start.
-- `CC-077`/`CC-078` (funding, settlement) do not — they work against either contract — but running
-  them on the old address means re-running them after the redeploy, since the address changes.
+What that deployment lacks is everything after it: `completeTaskByOwner` (`CC-049`, 2026-09-16), and
+the `NOR-537` fixes, which are `Ownable2Step`, the required `specHash`, the 90-day deadline bound and
+the platform-cannot-be-party guard. A lifecycle run against it validates bytecode mainnet will not
+receive (`CC-034`). So:
+
+- `CC-077`/`CC-078`/`CC-079` all work against either contract, but runs on the old address are runs
+  on the old bytecode. Each one is re-run after the redeploy, against the new address.
 
 **So redeploy Sepolia first, then run all three stages once.** Doing the stages first is doing them
 twice.
