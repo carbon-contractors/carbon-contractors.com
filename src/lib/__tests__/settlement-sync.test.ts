@@ -33,6 +33,7 @@ import {
   settlementTargetFor,
   syncSettledTasks,
   SETTLEMENT_SYNC_BATCH_LIMIT,
+  SETTLEMENT_SYNC_OUTCOME_BUDGET_MS,
 } from "@/lib/db/settlement-sync";
 
 function chainable(result: { data: unknown; error: unknown }) {
@@ -42,6 +43,7 @@ function chainable(result: { data: unknown; error: unknown }) {
   chain.update = vi.fn(self);
   chain.eq = vi.fn(self);
   chain.in = vi.fn(self);
+  chain.ilike = vi.fn(self);
   chain.order = vi.fn(self);
   chain.limit = vi.fn(self);
   chain.single = vi.fn().mockResolvedValue(result);
@@ -54,12 +56,17 @@ const WORKER = "0xabcdefabcdefabcdefabcdefabcdefabcdef1234";
 const WORKER_CHECKSUMMED = "0xABCDEFabcdefABCDEFabcdefABCDEFabcdef1234";
 const OTHER_WORKER = "0x1111111111111111111111111111111111111111";
 
+/** The escrow this deployment reads, and one a redeploy superseded. */
+const ESCROW = "0xc6aa99a8226b679C71945dd9545685896a91E4d3";
+const OLD_ESCROW = "0xe80d000000000000000000000000000000CB1b1";
+
 function row(over: Record<string, unknown> = {}) {
   return {
     payment_request_id: "pr_1",
     status: "active",
     to_human_wallet: WORKER,
     amount_usdc: 25,
+    escrow_contract: ESCROW,
     updated_at: "2026-10-01T00:00:00.000Z",
     ...over,
   };
@@ -97,12 +104,13 @@ let consoleSpy: MockInstance;
 beforeEach(() => {
   vi.clearAllMocks();
   mockFrom.mockReset();
-  mockEscrowAddress = "0xc6aa99a8226b679C71945dd9545685896a91E4d3";
+  mockEscrowAddress = ESCROW;
   consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 });
 
 afterEach(() => {
   consoleSpy.mockRestore();
+  vi.useRealTimers();
 });
 
 function loggedEvents(event: string): Record<string, unknown>[] {
@@ -146,7 +154,7 @@ describe("settlementTargetFor", () => {
 });
 
 describe("syncSettledTasks", () => {
-  it("reads only in-flight rows, oldest updated first, bounded, and never selects content", async () => {
+  it("reads only in-flight rows on this escrow, oldest updated first, bounded, and never selects content", async () => {
     const { candidateChain } = queue([]);
 
     const summary = await syncSettledTasks();
@@ -154,9 +162,13 @@ describe("syncSettledTasks", () => {
     // Terminal and pre-funding rows are never candidates — the query is the
     // first guard, updateTaskStatus's WHERE-status clause the second.
     expect(candidateChain.in).toHaveBeenCalledWith("status", ["active", "disputed"]);
+    // Nor are rows funded on any other escrow. Case-insensitive: the column
+    // holds whatever casing the env var had when the row was created.
+    expect(candidateChain.ilike).toHaveBeenCalledWith("escrow_contract", ESCROW);
     expect(candidateChain.order).toHaveBeenCalledWith("updated_at", { ascending: true });
     expect(candidateChain.limit).toHaveBeenCalledWith(SETTLEMENT_SYNC_BATCH_LIMIT);
     const selected = String(candidateChain.select.mock.calls[0][0]);
+    expect(selected).toContain("escrow_contract");
     expect(selected).not.toContain("task_description");
     expect(selected).not.toContain("acceptance_spec");
 
@@ -324,13 +336,43 @@ describe("syncSettledTasks", () => {
     expect(allLogText()).not.toContain("sekret-key");
   });
 
-  it("does not touch a row that went terminal between the read and the write, and carries on", async () => {
-    // A concurrent writer (an overlapping run) got there first. The atomic
-    // WHERE-status guard in updateTaskStatus refuses; the sync counts it.
+  it.each([
+    ["a duplicate cron delivery", "Completed", "completed"],
+    ["the dispute route", "Disputed", "disputed"],
+  ])(
+    "counts a row %s already moved to the target as unchanged, not failed, and carries on",
+    async (_, state, target) => {
+      // The atomic WHERE-status guard in updateTaskStatus refuses the no-op;
+      // the row already says what the chain says, so there is nothing to report.
+      const { laterChains } = queue(
+        [row({ payment_request_id: "pr_1" }), row({ payment_request_id: "pr_2" })],
+        { data: [], error: null }, // pr_1 write matches nothing
+        { data: { status: target }, error: null }, // updateTaskStatus's diagnostic lookup
+        { data: { status: target }, error: null }, // the sync's re-read
+        WRITE_OK("pr_2"),
+      );
+      chainSays({ pr_1: onChain(state), pr_2: onChain("Expired") });
+
+      const summary = await syncSettledTasks();
+
+      expect(summary.failed).toEqual([]);
+      expect(summary.unchanged).toBe(1);
+      expect(loggedEvents("settlement_sync_row_failed")).toEqual([]);
+      expect(laterChains[3].update).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "expired" }),
+      );
+      expect(summary.updated.map((t) => t.payment_request_id)).toEqual(["pr_2"]);
+    },
+  );
+
+  it("fails a refused write when the row moved somewhere other than the target, and carries on", async () => {
+    // The chain says Completed but the row is now `expired`: the DB and the
+    // chain disagree about money, which is a failure worth surfacing.
     const { laterChains } = queue(
       [row({ payment_request_id: "pr_1" }), row({ payment_request_id: "pr_2" })],
       { data: [], error: null }, // pr_1 write matches nothing
-      { data: { status: "completed" }, error: null }, // pr_1 diagnostic lookup
+      { data: { status: "expired" }, error: null }, // updateTaskStatus's diagnostic lookup
+      { data: { status: "expired" }, error: null }, // the sync's re-read
       WRITE_OK("pr_2"),
     );
     chainSays({ pr_1: onChain("Completed"), pr_2: onChain("Expired") });
@@ -339,11 +381,117 @@ describe("syncSettledTasks", () => {
 
     expect(summary.failed).toHaveLength(1);
     expect(summary.failed[0]).toMatchObject({ payment_request_id: "pr_1", stage: "write" });
-    expect(summary.failed[0].error).toContain("Invalid state transition: completed → completed");
-    expect(laterChains[2].update).toHaveBeenCalledWith(
+    expect(summary.failed[0].error).toContain("Invalid state transition: expired → completed");
+    expect(laterChains[3].update).toHaveBeenCalledWith(
       expect.objectContaining({ status: "expired" }),
     );
     expect(summary.updated.map((t) => t.payment_request_id)).toEqual(["pr_2"]);
+  });
+
+  it.each([
+    ["a superseded escrow", OLD_ESCROW],
+    ["no recorded escrow", null],
+  ])("never judges a row from %s by this escrow's state", async (_, escrowContract) => {
+    // The cutover attack: the row is live on the old escrow, and anyone can
+    // read its id, worker and amount from tasks_public, create a matching task
+    // on the new escrow and expire it. That reading must not reach the row.
+    queue([row({ escrow_contract: escrowContract })]);
+    chainSays({ pr_1: onChain("Expired") }); // matching worker and amount
+
+    const summary = await syncSettledTasks();
+
+    expect(mockGetOnChainTask).not.toHaveBeenCalled();
+    expect(mockFrom).toHaveBeenCalledTimes(1); // no write
+    expect(summary.updated).toEqual([]);
+    expect(summary.mismatched).toEqual(["pr_1"]);
+    expect(loggedEvents("settlement_sync_escrow_mismatch")).toHaveLength(1);
+  });
+
+  it("matches the row's escrow case-insensitively", async () => {
+    const { laterChains } = queue([row({ escrow_contract: ESCROW.toLowerCase() })], WRITE_OK());
+    chainSays({ pr_1: onChain("Completed") });
+
+    const summary = await syncSettledTasks();
+
+    expect(laterChains[0].update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "completed" }),
+    );
+    expect(summary.mismatched).toEqual([]);
+  });
+
+  it.each(["completed", "expired", "lapsed", "declined", "pending", "accepted"])(
+    "ignores a %s row the query returned anyway: no read, no write",
+    async (status) => {
+      // The query filters these out; a mock that does no filtering stands in
+      // for a filter that silently stopped applying.
+      queue([row({ status })]);
+      chainSays({ pr_1: onChain("Expired") });
+
+      const summary = await syncSettledTasks();
+
+      expect(mockGetOnChainTask).not.toHaveBeenCalled();
+      expect(mockFrom).toHaveBeenCalledTimes(1);
+      expect(summary.updated).toEqual([]);
+      expect(summary.unchanged).toBe(1);
+    },
+  );
+
+  it("writes every other row before starting a TaskResolved lookup", async () => {
+    const { laterChains } = queue(
+      [row({ payment_request_id: "pr_1", status: "disputed" }), row({ payment_request_id: "pr_2" })],
+      WRITE_OK("pr_2"),
+      WRITE_OK("pr_1"),
+    );
+    chainSays({ pr_1: onChain("Resolved"), pr_2: onChain("Completed") });
+    let writesBeforeLookup = -1;
+    mockGetTaskResolvedOutcome.mockImplementation(async () => {
+      writesBeforeLookup = laterChains[0].update.mock.calls.length;
+      return { releasedToWorker: true, amount: BigInt(25_000_000) };
+    });
+
+    const summary = await syncSettledTasks();
+
+    expect(writesBeforeLookup).toBe(1);
+    expect(laterChains[0].eq).toHaveBeenCalledWith("payment_request_id", "pr_2");
+    expect(summary.updated.map((t) => t.payment_request_id)).toEqual(["pr_2", "pr_1"]);
+  });
+
+  it("stops starting TaskResolved lookups once the time budget is spent, and defers the rest", async () => {
+    // A lookup that walks weeks of chain can outlast the cron's maxDuration.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const startedAt = Date.parse("2026-10-12T00:00:00.000Z");
+    vi.setSystemTime(startedAt);
+
+    queue(
+      [
+        row({ payment_request_id: "pr_1", status: "disputed" }),
+        row({ payment_request_id: "pr_2", status: "disputed" }),
+        row({ payment_request_id: "pr_3" }),
+      ],
+      WRITE_OK("pr_3"),
+      WRITE_OK("pr_1"),
+    );
+    chainSays({
+      pr_1: onChain("Resolved"),
+      pr_2: onChain("Resolved"),
+      pr_3: onChain("Expired"),
+    });
+    mockGetTaskResolvedOutcome.mockImplementation(async () => {
+      vi.setSystemTime(startedAt + SETTLEMENT_SYNC_OUTCOME_BUDGET_MS);
+      return { releasedToWorker: false, amount: BigInt(25_000_000) };
+    });
+
+    const summary = await syncSettledTasks();
+
+    expect(mockGetTaskResolvedOutcome).toHaveBeenCalledTimes(1);
+    expect(mockGetTaskResolvedOutcome).toHaveBeenCalledWith("pr_1");
+    expect(summary.updated.map((t) => [t.payment_request_id, t.to])).toEqual([
+      ["pr_3", "expired"],
+      ["pr_1", "expired"],
+    ]);
+    expect(summary.deferred).toEqual(["pr_2"]);
+    expect(summary.failed).toEqual([]);
+    expect(loggedEvents("settlement_sync_outcome_lookups_deferred")).toHaveLength(1);
   });
 
   it.each([
@@ -363,12 +511,50 @@ describe("syncSettledTasks", () => {
     expect(loggedEvents("settlement_sync_chain_mismatch")).toHaveLength(1);
   });
 
-  it("never logs a wallet address in full", async () => {
-    queue([row({ payment_request_id: "pr_1" }), row({ payment_request_id: "pr_2" })], WRITE_OK());
-    chainSays({ pr_1: onChain("Completed"), pr_2: onChain("Completed", { worker: OTHER_WORKER }) });
+  it("never logs a wallet address in full, from any of its log sites", async () => {
+    // One row down every branch that logs, with the wallets in scope at each,
+    // so a field added to any of those lines later is caught here.
+    queue(
+      [
+        row({ payment_request_id: "pr_ok" }),
+        row({ payment_request_id: "pr_mismatch" }),
+        row({ payment_request_id: "pr_read" }),
+        row({ payment_request_id: "pr_write" }),
+        row({ payment_request_id: "pr_missing", status: "disputed" }),
+        row({ payment_request_id: "pr_outcome", status: "disputed" }),
+        row({ payment_request_id: "pr_old", escrow_contract: OLD_ESCROW }),
+      ],
+      WRITE_OK("pr_ok"),
+      { data: null, error: { message: "permission denied" } }, // pr_write
+    );
+    chainSays({
+      pr_ok: onChain("Completed"),
+      pr_mismatch: onChain("Completed", { worker: OTHER_WORKER }),
+      pr_read: new Error("decode failed"),
+      pr_write: onChain("Completed"),
+      pr_missing: onChain("Resolved"),
+      pr_outcome: onChain("Resolved"),
+    });
+    mockGetTaskResolvedOutcome.mockImplementation(async (id: string) => {
+      if (id === "pr_outcome") throw new Error("eth_getLogs range too large");
+      return null;
+    });
 
     await syncSettledTasks();
 
+    for (const event of [
+      "task_settlement_synced",
+      "settlement_sync_chain_mismatch",
+      "settlement_sync_row_failed",
+      "settlement_sync_resolved_outcome_missing",
+      "settlement_sync_escrow_mismatch",
+      "settlement_sync_run",
+    ]) {
+      expect(loggedEvents(event).length, event).toBeGreaterThan(0);
+    }
+    expect(loggedEvents("settlement_sync_row_failed").map((e) => e.stage)).toEqual(
+      expect.arrayContaining(["read", "write", "outcome"]),
+    );
     const text = allLogText().toLowerCase();
     expect(text).not.toContain(WORKER);
     expect(text).not.toContain(OTHER_WORKER);
@@ -378,6 +564,15 @@ describe("syncSettledTasks", () => {
     mockEscrowAddress = null;
 
     await expect(syncSettledTasks()).rejects.toThrow("escrow contract is not configured");
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockGetOnChainTask).not.toHaveBeenCalled();
+  });
+
+  it("fails the run before reading anything when the escrow address is malformed", async () => {
+    // The address is used as an ilike pattern; only a hex address makes that equality.
+    mockEscrowAddress = "0x%";
+
+    await expect(syncSettledTasks()).rejects.toThrow("escrow contract address is malformed");
     expect(mockFrom).not.toHaveBeenCalled();
     expect(mockGetOnChainTask).not.toHaveBeenCalled();
   });
@@ -413,6 +608,7 @@ describe("syncSettledTasks", () => {
         unchanged: 1,
         mismatched: 0,
         outcome_missing: 0,
+        deferred: 0,
         failed: 1,
       }),
     ]);

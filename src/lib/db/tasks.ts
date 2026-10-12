@@ -343,7 +343,8 @@ const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   disputed: ["active", "pending"],                // either party flags
   // From `active`: a funded task whose deadline passed with nothing delivered, and
   // the agent reclaimed it (expireTask is only reachable from Funded, ADR-0001 D1).
-  expired: ["active", "disputed", "pending", "accepted"], // reclaimed, dispute resolved in agent's favor, or timeout
+  // From the rest: dispute resolved in agent's favor, or timeout.
+  expired: ["active", "disputed", "pending", "accepted"],
 };
 
 export async function updateTaskStatus(

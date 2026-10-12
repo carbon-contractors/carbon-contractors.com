@@ -39,6 +39,7 @@ function summary(over: Record<string, unknown> = {}) {
     unchanged: 1,
     mismatched: [],
     outcome_missing: [],
+    deferred: ["pr_4"],
     failed: [{ payment_request_id: "pr_3", stage: "read", error: "HTTP request failed." }],
     ...over,
   };
@@ -100,6 +101,7 @@ describe("GET /api/cron/settlement-sync (CC-080)", () => {
       unchanged: 1,
       mismatched: 0,
       outcome_missing: 0,
+      deferred: 1,
       failed: 1,
       transitions: [{ payment_request_id: "pr_1", from: "active", to: "completed" }],
       failures: ["pr_3"],

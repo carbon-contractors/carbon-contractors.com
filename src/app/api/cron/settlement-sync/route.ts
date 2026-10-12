@@ -86,6 +86,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       unchanged: summary.unchanged,
       mismatched: summary.mismatched.length,
       outcome_missing: summary.outcome_missing.length,
+      deferred: summary.deferred.length,
       failed: summary.failed.length,
       transitions: summary.updated.map((t) => ({
         payment_request_id: t.payment_request_id,
