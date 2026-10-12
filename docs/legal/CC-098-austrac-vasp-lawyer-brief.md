@@ -3,7 +3,7 @@
 Prepared 2026-09-16. **Revised 2026-10-12** to correct four statements found wrong or overstated by
 the NOR-537 code audit (`docs/audits/2026-10-regulatory-claims-audit.md`): signer/owner separation,
 the fixed-destination claim as it applies to `ReputationStake`, what verdicts verify, and
-`completeTaskByOwner` deployment status. This is an instruction brief for the same purpose as before. It is an instruction brief for an Australian lawyer with AML/CTF (AUSTRAC)
+`completeTaskByOwner` deployment status. This is an instruction brief for an Australian lawyer with AML/CTF (AUSTRAC)
 practice. It is written to be self-contained: every platform fact is stated here with its
 in-repo source, so counsel does not need repo access to reason about the architecture.
 
