@@ -13,7 +13,7 @@ the commands under each surface are how.
 
 | Surface | What it is | How it runs | Why it exists |
 | :-- | :-- | :-- | :-- |
-| **Contract** | `contracts/CarbonEscrow.sol`, `ReputationStake.sol` | deployed to Base Sepolia | the only one-way door; everything else is rewritable |
+| **Contract** | `contracts/CarbonEscrow.sol` | deployed to Base Sepolia | the only one-way door; everything else is rewritable |
 | **Scripts** | `scripts/admin/`, `scripts/audit/`, `scripts/deploy/` | `tsx` / `hardhat` from a laptop or CI, keys from `.env.local` or KMS | proves the bytecode against a real chain before any product exists |
 | **App** | `src/app/api/*`, `src/app/dashboard`, `src/lib/*` | Next.js on Vercel | what a human uses |
 | **MCP** | `src/lib/mcp/server.ts` via `/api/basedhuman.mcp` | HTTP, agent-driven | what an agent uses |
@@ -57,7 +57,7 @@ the record of what is actually deployed.
 | Claim after arbitration timeout (`releaseAfterArbitration`) | `built` — **source only, deployed nowhere** (`ADR-0006` D3, `CC-034`) | `deferred` | `built` (dashboard, gated on `arbitrationClock`) | — (read-only: `get_task_status`, `dispute_task` report the deadline) | app (worker is a human) |
 | Expire / refund (`expireTask`) | `live` | `live` | `deferred` | — | **the agent's own wallet** (pull payment, `ADR-0001` A1.2) |
 | Reputation read | — | — | `live` (`/api/reputation`) | `live` (`get_reputation`) | both |
-| Stake / unstake | `live` | — | `live` (dashboard, wagmi `writeContract`) | — | app |
+| Stake / unstake | `removed` (ADR-0013) | — | `removed` | — | — |
 | Notifications | — | — | `broken: CC-095` (channels registered, never written to) | `built` (`register_notification_channel`) | app |
 | Task-content retention | — | `deferred: CC-087` | `next: CC-087` | — | scheduled job |
 | Invariant monitors | — | `live` (solvency, owner, signer, unclaimed, concurrent-escrow) + `deferred` (commitments, retention, checker, verdict-rate) | — | — | scripts + CI schedule |

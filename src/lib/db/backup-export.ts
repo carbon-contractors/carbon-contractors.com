@@ -108,15 +108,13 @@ export interface TableSpec {
 }
 
 /**
- * The Tier 1 reference set per BCP-DR "Data and backups" plus the two tables
- * the ADR's wording implies: `stake_slashes` (the "stakes" half of this
- * ticket — on-chain facts with off-chain attribution) and
- * `task_content_deletion_log` (the CC-087 deletion record, which D9 requires
- * to be durable and auditable).
+ * The Tier 1 reference set per BCP-DR "Data and backups" plus the table the
+ * ADR's wording implies: `task_content_deletion_log` (the CC-087 deletion
+ * record, which D9 requires to be durable and auditable). `stake_slashes` was
+ * dropped with staking (ADR-0013, migration 028).
  *
- * Column lists mirror the live schema as verified 2026-09-16. `stake_slashes`
- * (migration 024) was applied to production after that (confirmed 2026-09-28);
- * the exporter still treats a missing table as `absent`, distinct from `0 rows`, and says so in the
+ * Column lists mirror the live schema as verified 2026-09-16. The exporter
+ * treats a missing table as `absent`, distinct from `0 rows`, and says so in the
  * manifest — "table not there yet" and "table empty" are different facts.
  */
 export const TIER1_TABLES: readonly TableSpec[] = [
@@ -176,11 +174,6 @@ export const TIER1_TABLES: readonly TableSpec[] = [
     name: "task_content_deletion_log",
     columns: ["id", "task_id", "payment_request_id", "retention_rule_version", "deleted_at"],
     note: "the CC-087 deletion record — D9 requires it durable and auditable",
-  },
-  {
-    name: "stake_slashes",
-    columns: ["id", "wallet", "amount_usdc", "payment_request_id", "tx_hash", "slashed_at"],
-    note: "resolution-time slash attribution (migration 024) — the on-chain event plus the why",
   },
 ];
 

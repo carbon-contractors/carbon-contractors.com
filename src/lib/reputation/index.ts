@@ -1,6 +1,6 @@
 /**
  * reputation/index.ts
- * Compositor — combines on-chain task state, on-chain stake, and computed score.
+ * Compositor — combines on-chain task state and the computed score.
  *
  * The escrow contract is the source of truth for every fact about money: task state,
  * amount, and which worker a task belongs to. The DB supplies only the *list* of
@@ -15,12 +15,9 @@
  */
 
 import { getReputationSummary, getTasksByWallet } from "@/lib/db/tasks";
-import { getWorkerStake, getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { getOnChainReputationSummary, getEscrowConfig } from "@/lib/contracts/escrow";
 import { computeReputation, type ReputationBreakdown } from "./compute";
 import { log } from "@/lib/logging";
-
-const USDC_DECIMALS = 6;
 
 export interface FullReputation {
   wallet: string;
@@ -36,12 +33,6 @@ export interface FullReputation {
     pending: number;
     total_earned_usdc: number;
     completion_rate: number | null;
-  };
-  stake: {
-    amount_usdc: number;
-    staked_at: number;
-    slashed_total_usdc: number;
-    contract: string | null;
   };
 }
 
@@ -127,30 +118,10 @@ export async function getFullReputation(wallet: string): Promise<FullReputation>
     taskSummary = dbSummary;
   }
 
-  // On-chain stake (always from ReputationStake contract)
-  let stakeAmountUsdc = 0;
-  let stakedAt = 0;
-  let slashedTotalUsdc = 0;
-  const stakeConfig = getReputationStakeConfig();
-
-  if (stakeConfig.address) {
-    try {
-      const onChainStake = await getWorkerStake(wallet);
-      stakeAmountUsdc =
-        Number(onChainStake.amount) / 10 ** USDC_DECIMALS;
-      stakedAt = Number(onChainStake.stakedAt);
-      slashedTotalUsdc =
-        Number(onChainStake.slashedTotal) / 10 ** USDC_DECIMALS;
-    } catch {
-      // Contract not deployed or wallet has no stake — use defaults
-    }
-  }
-
   const breakdown = computeReputation({
     completed: taskSummary.completed,
     disputed: taskSummary.disputed,
     totalTasks: taskSummary.total_tasks,
-    stakeAmountUsdc,
     recentCompletions: taskSummary.recentCompletions,
     midCompletions: taskSummary.midCompletions,
   });
@@ -172,12 +143,6 @@ export async function getFullReputation(wallet: string): Promise<FullReputation>
         taskSummary.total_tasks > 0
           ? Math.round((taskSummary.completed / taskSummary.total_tasks) * 100)
           : null,
-    },
-    stake: {
-      amount_usdc: stakeAmountUsdc,
-      staked_at: stakedAt,
-      slashed_total_usdc: slashedTotalUsdc,
-      contract: stakeConfig.address,
     },
   };
 }

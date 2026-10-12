@@ -14,12 +14,11 @@
  * anything undecodable returns the caller's fallback copy unchanged rather
  * than inventing a reason.
  *
- * Every mapping below is checked against the guards in CarbonEscrow.sol /
- * ReputationStake.sol (error names and their revert sites), not invented —
+ * Every mapping below is checked against the guards in CarbonEscrow.sol (error names and their revert sites), not invented —
  * a translation that says the wrong thing is worse than the generic one.
  */
 
-/** Names of the custom errors both contracts can emit, mapped to plain terms. */
+/** Names of the custom errors the escrow can emit, mapped to plain terms. */
 const KNOWN_REVERTS: Record<string, string> = {
   // ── CarbonEscrow ──────────────────────────────────────────────────────────
   TaskAlreadyExists:
@@ -69,12 +68,6 @@ const KNOWN_REVERTS: Record<string, string> = {
     "The verdict's outcome doesn't suit this action — claiming needs a passing verdict, disputing needs a failing one.",
   ZeroSigner: "The verdict signer was empty — this shouldn't be reachable from the dashboard.",
 
-  // ── ReputationStake ───────────────────────────────────────────────────────
-  BelowMinimumStake: "That would leave you below the platform's minimum stake.",
-  CooldownNotElapsed:
-    "Stake changes have a cooldown — try again once it has elapsed.",
-  InsufficientStake: "You don't have enough staked for that.",
-  InvalidUnstakeAmount: "That unstake amount doesn't match an existing stake.",
 };
 
 /**

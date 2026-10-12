@@ -50,7 +50,6 @@ import {
   VerdictInputError,
 } from "@/lib/contracts/verdict-service";
 import { serializeVerdict } from "@/lib/contracts/verdict-json";
-import { getReputationStakeConfig } from "@/lib/contracts/reputation";
 import { taskCreationRateLimiter } from "@/lib/ratelimit";
 import { parseAndHashSpec, SpecValidationError } from "@/lib/spec/hash";
 import { MAX_SPEC_BYTES } from "@/lib/spec/schema";
@@ -1039,7 +1038,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   // ─── Tool: get_reputation ──────────────────────────────────────────────
   server.tool(
     "get_reputation",
-    "Get a contractor's computed reputation score (0-100), task history, USDC stake amount, and score breakdown (completion/volume/recency/stake components).",
+    "Get a contractor's computed reputation score (0-100), task history, and score breakdown (completion/volume/recency components).",
     {
       wallet: z
         .string()
@@ -1491,32 +1490,6 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             text: JSON.stringify({
               protocol: "base-human-mcp/1.0",
               escrow: config,
-            }),
-          },
-        ],
-      };
-    }
-  );
-
-  // ─── Resource: reputation_stake_config ────────────────────────────────────
-  server.resource(
-    "reputation_stake_config",
-    "base-human://reputation/config",
-    {
-      description:
-        "Reputation staking contract address, minimum stake, and cooldown period.",
-      mimeType: "application/json",
-    },
-    async () => {
-      const config = getReputationStakeConfig();
-      return {
-        contents: [
-          {
-            uri: "base-human://reputation/config",
-            mimeType: "application/json",
-            text: JSON.stringify({
-              protocol: "base-human-mcp/1.0",
-              reputation_stake: config,
             }),
           },
         ],

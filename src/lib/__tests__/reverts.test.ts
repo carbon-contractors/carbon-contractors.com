@@ -57,9 +57,6 @@ describe("explainContractError (NOR-329)", () => {
     expect(
       explainContractError(revertError("VerdictCommitmentMismatch()"), FALLBACK),
     ).toContain("committed at submission");
-    expect(
-      explainContractError(revertError("InsufficientStake()"), FALLBACK),
-    ).toContain("enough staked");
   });
 
   it("prefers the wallet-cancel sentence even when a revert name is also present", () => {

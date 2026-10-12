@@ -8,7 +8,7 @@ Large language models can already write code, analyse data, and generate content
 
 Workers register their service categories and hourly rates on-chain. AI agents query the worker registry via MCP (Model Context Protocol), select a worker, and lock USDC in escrow. When the work is delivered, the worker claims payment directly from the escrow contract — the platform is never in the money path. No invoicing, no accounts payable.
 
-The trust layer is staked capital and a public, verifiable track record: every task's lifecycle is an on-chain event, and reputation is computed from escrow event logs anyone can read. A stake is only ever slashed for established fault — a published, re-runnable check failure or a staked jury ruling, never one party's bare assertion ([ADR-0001](docs/adr/ADR-0001-escrow-resolution-and-dispute-authority.md)). No KYC, no resumes, no interviews. Just wallets, services, and outcomes.
+The trust layer is a public, verifiable track record: every task's lifecycle is an on-chain event, and reputation is computed from escrow event logs anyone can read. There is no monetary stake — reputation is non-monetary ([ADR-0013](docs/adr/ADR-0013-no-stake-no-fee-identity-verification.md)) — and a dispute is only ever opened by a published, re-runnable check failure, never one party's bare assertion ([ADR-0001](docs/adr/ADR-0001-escrow-resolution-and-dispute-authority.md)). No KYC, no resumes, no interviews. Just wallets, services, and outcomes.
 
 ## Why Base
 
@@ -83,7 +83,6 @@ flowchart LR
 **MCP Resources:**
 - `human_whitepages` — Full worker directory as structured JSON
 - `escrow_config` — Contract address and chain configuration
-- `reputation_stake_config` — Stake contract address, minimum stake, cooldown period
 
 The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible client can connect — no custom SDK required.
 
@@ -113,8 +112,8 @@ The server speaks Streamable HTTP (SSE), not WebSocket. Any MCP-compatible clien
 - [x] Agent-funded escrow (`approve` + `createTask`, confirmed on-chain by `/api/fund-task`) — replaced the x402 flow (CC-081, CC-103)
 - [x] Task lifecycle MCP tools (create → fund → complete)
 - [x] Notification channels with agent-to-agent auto-booking
-- [x] Reputation staking + on-chain history (ReputationStake.sol)
-- [x] Computed reputation scoring (completion/volume/recency/stake)
+- [x] On-chain task history (staking was removed, ADR-0013)
+- [x] Computed reputation scoring (completion/volume/recency)
 - [x] Dispute resolution MCP tools + dashboard panel
 - [x] Rate limiting middleware
 - [x] Security headers (CSP, HSTS, X-Frame-Options)

@@ -2,7 +2,7 @@
 
 Prepared 2026-09-16. **Revised 2026-10-12** to correct four statements found wrong or overstated by
 the NOR-537 code audit (`docs/audits/2026-10-regulatory-claims-audit.md`): signer/owner separation,
-the fixed-destination claim as it applies to `ReputationStake`, what verdicts verify, and
+the fixed-destination claim (which exposed a staking contract that has since been removed), what verdicts verify, and
 `completeTaskByOwner` deployment status. This is an instruction brief for an Australian lawyer with AML/CTF (AUSTRAC)
 practice. It is written to be self-contained: every platform fact is stated here with its
 in-repo source, so counsel does not need repo access to reason about the architecture.
@@ -49,9 +49,8 @@ contract (`contracts/CarbonEscrow.sol`, v2) and audit record:
    was funded. In `CarbonEscrow` no function, including the owner's, can direct funds to any
    other destination (`ADR-0001` D9; verified by the `CC-037` trust-boundary audit and
    re-checked by source review in NOR-537). The contract has no sweep, rescue, `receive`,
-   proxy, pause, `delegatecall` or `selfdestruct`. **This statement is scoped to the escrow
-   contract only — see item 3a for the separate staking contract, which does not have this
-   property.**
+   proxy, pause, `delegatecall` or `selfdestruct`. The platform runs no other contract that holds
+   user USDC (see item 3a).
 3. **The platform holds two privileged roles: dispute resolution and verdict signing.**
    The contract owner (a non-exportable key in Google Cloud's HSM, attestation published
    in-repo) can, in a *disputed* task only, choose which of the two fixed addresses receives
@@ -79,15 +78,13 @@ contract (`contracts/CarbonEscrow.sol`, v2) and audit record:
      on 2026-09-16, after the current Base Sepolia escrow was deployed (2026-09-01). Treat
      it as part of the intended mainnet design, not as a verified feature of the testnet
      deployment, until `scripts/audit/verify-escrow-deployment.mjs` confirms the selector.
-3a. **A second contract, `ReputationStake`, does move funds to the platform.** Workers may
-   stake USDC (minimum 20) as a trust signal. The owner can `slash(worker, amount)`
-   (`contracts/ReputationStake.sol:123`), which transfers the slashed USDC **to the owner
-   address**, at the owner's sole discretion and with no on-chain link to a dispute outcome.
-   Unstaking is by the worker after a 7-day cooldown. This contract is deployed on Base
-   Sepolia, has no automated test suite, and is outside the escrow's fixed-destination
-   property. Its mainnet treatment is undecided (options: remove slashing, route slashed
-   funds to a non-platform destination, or keep it as disclosed). Counsel should assume it
-   is in scope until that decision is made (see Q2a).
+3a. **No stake of any kind.** An earlier testnet contract, `ReputationStake`, let workers lock
+   USDC as a trust signal and let the owner `slash` it to the owner's own address. That was a
+   discretionary third destination for users' USDC, found in the NOR-537 audit. It has been
+   removed: the contract source, ABI, app and MCP surface and the attribution table are gone,
+   and it will not be deployed to mainnet (`ADR-0013` D1). Reputation is non-monetary and is
+   computed from the on-chain task record only. The retired Sepolia deployment remains on
+   chain as history; it held nothing (`totalStaked == 0`) and is not used by the platform.
 4. **Most settlement paths need no platform action at all, and most do not evaluate the
    work.** The worker claims payment directly (`releaseAfterReview` once the agent's review
    window of 12 hours to 14 days elapses with no failing verdict; `releaseAfterArbitration`
@@ -155,8 +152,7 @@ updated 10 Jul 2026) — the candidates, with our facts against each:
     task's duration; the owner's `resolveDispute`/`completeTaskByOwner` authority (§2.3) is
     discretion over which of two parties receives funds; the verdict-signer key (currently
     the same key as the owner) exercises settlement authority even in the non-disputed fast
-    path; and `ReputationStake.slash` (§2.3a) lets the owner take staked worker USDC to
-    itself.
+    path.
   - *Against scope:* the platform holds no private key capable of moving the funds anywhere
     but the two fixed addresses; "controlling or managing" is defined by AUSTRAC as the
     ability to "hold, trade, transfer or spend … according to the owner or user's
@@ -213,12 +209,6 @@ of "managing or controlling" virtual assets under 46A, or of "accepting instruct
 transfer" under items 29–30? We are specifically interested in how AUSTRAC's multi-signature
 note (§4, 46A) interacts with a deterministic smart-contract escrow with bounded owner
 discretion.
-
-**Q2a — The staking contract.** `ReputationStake` holds worker-staked USDC and lets the
-platform owner transfer slashed amounts to itself (§2.3a). Is that, independently of the
-escrow, a safekeeping service (46A) or otherwise a registrable activity? Would any of the
-three remedies in §2.3a (remove slashing; route slashed funds away from the platform; keep
-and disclose) change the answer?
 
 **Q3 — Business and geography.** Is a pre-revenue, pre-launch, sole-operator platform
 "carrying on a business as a VASP" (§5)? Confirm the geographical link analysis.

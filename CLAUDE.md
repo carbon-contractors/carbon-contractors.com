@@ -106,7 +106,7 @@ One more position that keeps needing restating. Settled (Aaron, 2026-09-02):
 
 - **The customer-facing experience includes the hiring agent's experience, not just the human
   worker's.** Time-to-response is the agent's load time; lapse of an ignored offer is a re-targeting
-  feature, not a failure (ADR-0005); stake/AWOL/reputation must stay machine-readable over MCP;
+  feature, not a failure (ADR-0005); AWOL/reputation must stay machine-readable over MCP;
   auto-booking (CC-074/075) is agent UX. Canonical statement and rationale live in Linear
   (`NOR-333`); check every worker-side feature against the question — *does this make an agent wait
   longer, or trust the pool less?*
@@ -406,7 +406,7 @@ frontmatter field.
 src/app/api/           REST + MCP routes. basedhuman.mcp/ is the MCP server entry point.
 src/app/               Pages: / /connect /dashboard /services /learn /mcp-info
 src/learn/             The 7 Learn modules (markdown); registry in src/lib/learn/modules.ts
-src/lib/mcp/server.ts  All 10 MCP tools and 3 resources (resolve_dispute removed, ADR-0001 D2)
+src/lib/mcp/server.ts  All 10 MCP tools and 2 resources (resolve_dispute removed, ADR-0001 D2)
 src/lib/db/            Supabase access. whitepages.ts reads with the ANON key;
                        register/notifications use the SERVICE ROLE key. Know which you are in.
 src/lib/contracts/     signer.ts (KMS or raw key), kms-signer.ts, escrow.ts (read-only), ABIs

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from "wagmi";
+import { useAccount, useWriteContract, useSignMessage } from "wagmi";
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
 import { CATEGORIES, validateCategorySelection } from "@/lib/categories";
@@ -38,36 +38,6 @@ import { chain as appChain } from "@/lib/wallet/providers";
 import styles from "./dashboard.module.css";
 
 // ── ABIs for write operations ───────────────────────────────────────────────
-
-const ERC20_APPROVE_ABI = [
-  {
-    type: "function",
-    name: "approve",
-    inputs: [
-      { name: "spender", type: "address" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "bool" }],
-    stateMutability: "nonpayable",
-  },
-] as const;
-
-const STAKE_ABI = [
-  {
-    type: "function",
-    name: "stake",
-    inputs: [{ name: "amount", type: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "unstake",
-    inputs: [{ name: "amount", type: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
 
 // CC-092: the v2 write paths. submitWork echoes the task's committed specHash
 // as specVersionAck — that is what makes goalpost-moving impossible. The
@@ -157,11 +127,6 @@ const DISPUTE_ABI = [
 /** CC-036 slot — zero until EAS lands. */
 const ZERO_ATTESTATION_UID = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
-// ── USDC address (set via env var — differs per network) ────────────────────
-
-const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS!;
-const USDC_DECIMALS = 6;
-
 // ── Profile editing (CC-021) — mirrors the PATCH /api/profile validation ─────
 
 const AVAILABILITY_OPTIONS = ["available", "busy", "offline"] as const;
@@ -236,7 +201,6 @@ interface ReputationBreakdown {
   completion: number;
   volume: number;
   recency: number;
-  stake: number;
   total: number;
 }
 
@@ -251,21 +215,6 @@ interface Reputation {
     total_earned_usdc: number;
     completion_rate: number | null;
   };
-  stake: {
-    amount_usdc: number;
-    staked_at: number;
-    slashed_total_usdc: number;
-    contract: string | null;
-  };
-}
-
-/** NOR-330: a recorded slash, linking the on-chain event to its dispute. */
-interface StakeSlash {
-  id: string;
-  amount_usdc: number;
-  payment_request_id: string | null;
-  tx_hash: string;
-  slashed_at: string;
 }
 
 /** One row of the dashboard session list (ADR-0009 D5). */
@@ -375,7 +324,6 @@ export default function DashboardPage() {
     committed: number;
     cap: number;
   } | null>(null);
-  const [slashes, setSlashes] = useState<StakeSlash[]>([]);
   const [reputation, setReputation] = useState<Reputation | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
@@ -388,9 +336,6 @@ export default function DashboardPage() {
     tasks: null,
     reputation: null,
   });
-
-  const [stakeInput, setStakeInput] = useState("");
-  const [unstakeInput, setUnstakeInput] = useState("");
 
   // ── Task actions (CC-092) ────────────────────────────────────────────────
   // One open action per task at a time — submit, claim-early and dispute all
@@ -432,18 +377,12 @@ export default function DashboardPage() {
   const [actionMsg, setActionMsg] = useState<
     Record<string, { ok: boolean; text: string; checks?: CheckResult[] }>
   >({});
-  const [stakeStep, setStakeStep] = useState<"idle" | "approving" | "staking" | "unstaking">("idle");
-  const [stakeError, setStakeError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [rateInput, setRateInput] = useState("");
   const [editCategories, setEditCategories] = useState<string[]>([]);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  // CC-011: the staking panel starts collapsed for workers with no stake. The override
-  // is null until the user toggles, so the default tracks `hasStake` as it loads.
-  const [stakeOpenOverride, setStakeOpenOverride] = useState<boolean | null>(null);
 
   // ── Notification channels (CC-073) ────────────────────────────────────────
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -463,37 +402,14 @@ export default function DashboardPage() {
   // disable every other control in the panel.
   const [autoBookBusy, setAutoBookBusy] = useState<string | null>(null);
 
-  const {
-    writeContract,
-    writeContractAsync,
-    data: txHash,
-    error: writeContractError,
-    reset: resetWriteContract,
-  } = useWriteContract();
+  const { writeContractAsync } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
   const ensureAppChain = useEnsureAppChain();
-  const {
-    isSuccess: txConfirmed,
-    isError: txFailed,
-    error: txReceiptError,
-  } = useWaitForTransactionReceipt({ hash: txHash });
-  const { data: usdcBalance } = useBalance({
-    address,
-    token: USDC_ADDRESS as `0x${string}`,
-    chainId: appChain.id,
-  });
-  const stakeContractAddress = reputation?.stake?.contract as `0x${string}` | undefined;
 
-  // CC-010: 0 tasks + 0 stake means "new", not "score of zero".
+  // CC-010: 0 tasks means "new", not "score of zero".
   const newWorker = reputation
-    ? isNewWorker({
-        totalTasks: reputation.tasks.total,
-        stakeAmountUsdc: reputation.stake.amount_usdc,
-      })
+    ? isNewWorker({ totalTasks: reputation.tasks.total })
     : false;
-
-  const hasStake = (reputation?.stake?.amount_usdc ?? 0) > 0;
-  const stakeOpen = stakeOpenOverride ?? hasStake;
 
   // Tasks require proof of wallet ownership (CC-093): an unsigned fetch only
   // returns the public projection, which has no task_description. Same
@@ -647,7 +563,6 @@ export default function DashboardPage() {
         // with the updater form since the two requests resolve independently.
         if (repData.ok) {
           setReputation(repData.reputation);
-          setSlashes(repData.slashes ?? []);
         } else {
           setErrors((prev) => ({
             ...prev,
@@ -727,145 +642,6 @@ export default function DashboardPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureSession, fetchTasks, fetchData]);
-
-
-  // Refresh after tx confirms
-  useEffect(() => {
-    if (txConfirmed) {
-      setStakeStep("idle");
-      setStakeInput("");
-      setUnstakeInput("");
-      setStakeError(null);
-      fetchData();
-    }
-  }, [txConfirmed, fetchData]);
-
-  // ── Contract-write failure handling (NOR-345/346) ────────────────────────
-  // Previously nothing read `writeContractError` or the receipt's failure
-  // state: any rejected signature, failed simulation or reverted transaction
-  // left `stakeStep` parked on "Staking…" forever with the inputs disabled —
-  // the exact walkthrough failure. Now every failure path resets the state
-  // machine and shows a translated sentence instead.
-  useEffect(() => {
-    if (!writeContractError) return;
-    setStakeError(
-      explainWriteError(
-        writeContractError,
-        "The transaction could not be sent — nothing was changed on-chain. Try again.",
-        appChain.name,
-      ),
-    );
-    setStakeStep("idle");
-    resetWriteContract();
-  }, [writeContractError, resetWriteContract]);
-
-  useEffect(() => {
-    if (!txFailed) return;
-    setStakeError(
-      explainWriteError(
-        txReceiptError,
-        "The transaction was sent but failed on-chain — nothing was staked. Try again.",
-        appChain.name,
-      ),
-    );
-    setStakeStep("idle");
-  }, [txFailed, txReceiptError]);
-
-
-  function handleStake() {
-    if (!stakeContractAddress || !stakeInput) return;
-
-    // NOR-346: never ask for a signature an underfunded wallet can only
-    // honour with a failure. The panel shows the balance, so this guard
-    // firing is legible rather than a mystery.
-    if (stakeExceedsBalance) {
-      setStakeError(
-        "This wallet doesn't hold enough USDC for that stake — see the balance above. Your funds may be in a different wallet than the one you connected.",
-      );
-      return;
-    }
-    setStakeError(null);
-    const amountWei = BigInt(Math.round(parseFloat(stakeInput) * 10 ** USDC_DECIMALS));
-
-    if (stakeStep === "idle") {
-      // Step 1: Approve USDC — on the app's chain, never whichever network
-      // the wallet happens to be parked on (useEnsureAppChain).
-      setStakeStep("approving");
-      void ensureAppChain()
-        .then(() =>
-          writeContract({
-            chainId: appChain.id,
-            address: USDC_ADDRESS as `0x${string}`,
-            abi: ERC20_APPROVE_ABI,
-            functionName: "approve",
-            args: [stakeContractAddress, amountWei],
-          }),
-        )
-        .catch((err) => {
-          setStakeError(explainWriteError(err, "The approval was not sent.", appChain.name));
-          setStakeStep("idle");
-        });
-    }
-  }
-
-  // After approval confirmed, do the actual stake. The approve above already
-  // switched chains; chainId here makes viem refuse if the wallet moved since.
-  useEffect(() => {
-    if (txConfirmed && stakeStep === "approving" && stakeContractAddress && stakeInput) {
-      const amountWei = BigInt(Math.round(parseFloat(stakeInput) * 10 ** USDC_DECIMALS));
-      setStakeStep("staking");
-      writeContract({
-        chainId: appChain.id,
-        address: stakeContractAddress,
-        abi: STAKE_ABI,
-        functionName: "stake",
-        args: [amountWei],
-      });
-    }
-  }, [txConfirmed, stakeStep, stakeContractAddress, stakeInput, writeContract]);
-
-  function handleUnstake() {
-    if (!stakeContractAddress || !unstakeInput) return;
-    const amountWei = BigInt(Math.round(parseFloat(unstakeInput) * 10 ** USDC_DECIMALS));
-    setStakeStep("unstaking");
-    void ensureAppChain()
-      .then(() =>
-        writeContract({
-          chainId: appChain.id,
-          address: stakeContractAddress,
-          abi: STAKE_ABI,
-          functionName: "unstake",
-          args: [amountWei],
-        }),
-      )
-      .catch((err) => {
-        setStakeError(explainWriteError(err, "The unstake was not sent.", appChain.name));
-        setStakeStep("idle");
-      });
-  }
-
-  const cooldownReady = reputation?.stake?.staked_at
-    ? reputation.stake.staked_at + 7 * 24 * 3600 <= Date.now() / 1000
-    : true;
-
-  const cooldownDate = reputation?.stake?.staked_at
-    ? new Date((reputation.stake.staked_at + 7 * 24 * 3600) * 1000)
-    : null;
-
-  // ── Stake preflight (NOR-346) ─────────────────────────────────────────────
-  // The walkthrough failure was the bundler refusing an underfunded
-  // UserOperation with "ERC20: transfer amount exceeds balance" — the USDC
-  // sat in a different wallet than the one connected. A read-only balance
-  // query makes that visible BEFORE a signature is requested, and blocks the
-  // attempt that could only fail after one.
-  const usdcBalanceUnits = usdcBalance
-    ? Number(usdcBalance.value) / 10 ** (usdcBalance.decimals ?? USDC_DECIMALS)
-    : null;
-  const stakeExceedsBalance =
-    usdcBalanceUnits !== null &&
-    stakeInput !== "" &&
-    !Number.isNaN(parseFloat(stakeInput)) &&
-    parseFloat(stakeInput) > usdcBalanceUnits;
 
   const escrowContract = process.env.NEXT_PUBLIC_ESCROW_CONTRACT as `0x${string}` | undefined;
 
@@ -2006,12 +1782,6 @@ export default function DashboardPage() {
                           </span>
                           <span className={styles.breakdownLabel}>Recency</span>
                         </div>
-                        <div className={styles.breakdownItem}>
-                          <span className={styles.breakdownValue}>
-                            {reputation.breakdown.stake}
-                          </span>
-                          <span className={styles.breakdownLabel}>Stake</span>
-                        </div>
                       </div>
                       <div className={styles.reputationStats}>
                         <span>{reputation.tasks.completed} completed</span>
@@ -2025,177 +1795,15 @@ export default function DashboardPage() {
                           ("Reputation?"). One plain-language line, the exact
                           arithmetic, and where to read more. */}
                       <p className={styles.reputationExplainer}>
-                        Score is 0–100 from four parts: completed ÷ total tasks
-                        (max 40), task volume (max 20), recent activity (max
-                        20), and your stake (max 20). Disputes reduce it.{" "}
+                        Score is 0–100 from three parts: completed ÷ total tasks
+                        (max 50), task volume (max 25) and recent activity (max
+                        25). Disputes reduce it.{" "}
                         <Link href="/learn">See Learn</Link> for how offers
                         reach you.
                       </p>
                     </>
                   )}
                 </div>
-
-                {stakeContractAddress && (
-                  <div className={styles.stakePanel}>
-                    <div className={styles.stakePanelHeader}>
-                      <h3 className={styles.stakePanelTitle}>
-                        USDC Stake
-                        {!hasStake && (
-                          <span className={styles.optionalTag}>optional</span>
-                        )}
-                      </h3>
-                      <button
-                        className={styles.stakeToggle}
-                        onClick={() => setStakeOpenOverride(!stakeOpen)}
-                      >
-                        {stakeOpen
-                          ? "Hide"
-                          : hasStake
-                            ? "Manage stake"
-                            : "Add a stake"}
-                      </button>
-                    </div>
-
-                    <p className={styles.stakeExplainer}>
-                      Optional: Boost search rank and credibility with a stake
-                      deposit. Staking is not required to receive jobs.
-                    </p>
-
-                    {stakeOpen && (
-                      <>
-                        <div className={styles.stakeAmount}>
-                          {reputation.stake.amount_usdc} USDC
-                        </div>
-                        {reputation.stake.slashed_total_usdc > 0 && (
-                          <div className={styles.slashedNote}>
-                            {reputation.stake.slashed_total_usdc} USDC slashed
-                          </div>
-                        )}
-                        {reputation.stake.slashed_total_usdc > 0 &&
-                          slashes.length > 0 && (
-                            <div className={styles.slashList}>
-                              {slashes.map((slash) => {
-                                const task = tasks.find(
-                                  (t) =>
-                                    t.payment_request_id ===
-                                    slash.payment_request_id,
-                                );
-                                return (
-                                  <div key={slash.id} className={styles.slashRow}>
-                                    <span className={styles.slashAmount}>
-                                      {slash.amount_usdc} USDC
-                                    </span>
-                                    <span className={styles.slashWhen}>
-                                      {formatDeadline(
-                                        Math.floor(
-                                          new Date(slash.slashed_at).getTime() /
-                                            1000,
-                                        ),
-                                      )}
-                                    </span>
-                                    {task ? (
-                                      <a
-                                        className={styles.slashTaskLink}
-                                        href={`#task-${task.payment_request_id}`}
-                                      >
-                                        dispute on{" "}
-                                        {task.payment_request_id.slice(0, 12)}…
-                                      </a>
-                                    ) : (
-                                      <span className={styles.slashWhen}>
-                                        {slash.payment_request_id
-                                          ? `task ${slash.payment_request_id.slice(0, 12)}…`
-                                          : "task not recorded"}
-                                      </span>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                        <div className={styles.stakeActions}>
-                          {usdcBalanceUnits !== null && (
-                            <p className={styles.balanceNote}>
-                              Connected wallet holds{" "}
-                              <strong>{usdcBalanceUnits.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC</strong>
-                              {usdcBalanceUnits < 20 && " — below the 20 USDC minimum stake"}
-                            </p>
-                          )}
-                          {stakeError && (
-                            <p className={styles.stakeError}>{stakeError}</p>
-                          )}
-                          <div className={styles.stakeInputGroup}>
-                            <input
-                              type="number"
-                              placeholder="Amount (min 20)"
-                              value={stakeInput}
-                              onChange={(e) => {
-                                setStakeInput(e.target.value);
-                                setStakeError(null);
-                              }}
-                              className={styles.stakeInput}
-                              min="20"
-                              step="1"
-                            />
-                            <button
-                              onClick={handleStake}
-                              disabled={
-                                stakeStep !== "idle" || !stakeInput || parseFloat(stakeInput) < 20
-                              }
-                              className={styles.stakeBtn}
-                            >
-                              {stakeStep === "approving"
-                                ? "Approving..."
-                                : stakeStep === "staking"
-                                  ? "Staking..."
-                                  : "Stake"}
-                            </button>
-                          </div>
-
-                          {reputation.stake.amount_usdc > 0 && (
-                            <div className={styles.stakeInputGroup}>
-                              <input
-                                type="number"
-                                placeholder="Amount to unstake"
-                                value={unstakeInput}
-                                onChange={(e) => setUnstakeInput(e.target.value)}
-                                className={styles.stakeInput}
-                                max={reputation.stake.amount_usdc}
-                                step="1"
-                              />
-                              <button
-                                onClick={handleUnstake}
-                                disabled={
-                                  stakeStep !== "idle" ||
-                                  !unstakeInput ||
-                                  !cooldownReady
-                                }
-                                className={styles.unstakeBtn}
-                              >
-                                {stakeStep === "unstaking"
-                                  ? "Unstaking..."
-                                  : "Unstake"}
-                              </button>
-                            </div>
-                          )}
-
-                          {!cooldownReady && cooldownDate && (
-                            <p className={styles.cooldownNote}>
-                              Cooldown until{" "}
-                              {cooldownDate.toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </p>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
               </div>
             )}
 

@@ -35,8 +35,8 @@ as others see value in it* (`ADR-0006`).
 
 ## What is *not* AGPL
 
-**`contracts/` stays MIT.** `CarbonEscrow.sol` and `ReputationStake.sol` carry
-`// SPDX-License-Identifier: MIT` and are deployed and source-verified on a public chain.
+**`contracts/` stays MIT.** `CarbonEscrow.sol` carries
+`// SPDX-License-Identifier: MIT` and is deployed and source-verified on a public chain.
 
 - Copyleft over deployed bytecode is close to meaningless — the "source" is already published by
   verification, and there is no distribution event to attach conditions to.
