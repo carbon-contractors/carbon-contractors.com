@@ -47,7 +47,7 @@ function summary(over: Record<string, unknown> = {}) {
     prefix: "tier1-backup/abc123def456ghi789jk/2026-09-16/0417Z",
     tables: [
       { name: "humans", status: "exported", rows: 4, verified: true },
-      { name: "stake_slashes", status: "absent", rows: 0 },
+      { name: "task_content_deletion_log", status: "absent", rows: 0 },
     ],
     ...over,
   };

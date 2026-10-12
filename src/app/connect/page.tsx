@@ -126,8 +126,8 @@ export default function ConnectPage() {
           <div className={styles.hero}>
             <h2>You&apos;re already registered</h2>
             <p>
-              This wallet is listed in the whitepages. Your tasks, profile and
-              stake live on your dashboard — edit your services there.
+              This wallet is listed in the whitepages. Your tasks and profile
+              live on your dashboard — edit your services there.
             </p>
             <p className={styles.mono}>{address}</p>
             <div className={styles.heroConnect}>

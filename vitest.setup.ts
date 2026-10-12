@@ -50,7 +50,6 @@ const FORBIDDEN_ENV = [
   // Live contract addresses. Tests stub their own; a real one here would mean a test
   // could eth_call, or worse write to, a deployed contract.
   "NEXT_PUBLIC_ESCROW_CONTRACT",
-  "NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT",
   "ESCROW_DEPLOY_BLOCK",
   // Screening provider credential (CC-099). A leaked-into-env key would let a unit
   // test query a real sanctions API — non-deterministic and a credential disclosure.

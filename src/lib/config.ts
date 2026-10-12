@@ -96,7 +96,6 @@ const envSchema = z.object({
   // envOptional, not bare .optional(): a blank NEXT_PUBLIC_ESCROW_CONTRACT would
   // otherwise arrive as "" and be treated as a configured address (CC-097).
   NEXT_PUBLIC_ESCROW_CONTRACT: envOptional(z.string().optional()),
-  NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT: envOptional(z.string().optional()),
   BASE_SEPOLIA_RPC_URL: envOptional(z.string().optional()),
   BASE_MAINNET_RPC_URL: envOptional(z.string().optional()),
 

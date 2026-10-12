@@ -52,7 +52,7 @@ We can reduce this — task content is deleted after settlement, so descriptions
 
 Being straight with you about our side of it:
 
-**We hold:** your wallet address, your service categories, your rate, your stake, and a reputation score calculated from your completed work.
+**We hold:** your wallet address, your service categories, your rate, and a reputation score calculated from your completed work.
 
 **We don't hold:** your name, address, documents, or anything we didn't list above. We don't hold your task evidence — photos go to storage the hiring agent controls, our checker reads them once, and we keep only a fingerprint that proves what was submitted without containing it. Task descriptions and results are deleted once a job is settled and the dispute window has closed.
 
@@ -62,7 +62,7 @@ Being straight with you about our side of it:
 
 If you want a clean break from your history, you start a fresh wallet. That works — the new wallet has no past.
 
-It also has **no reputation, no completed jobs, no ranking in search, and no stake standing.** You start over. Everything you built is attached to the old address and it doesn't transfer, because the entire point of the reputation system is that it can't be moved or faked.
+It also has **no reputation, no completed jobs, and no ranking in search.** You start over. Everything you built is attached to the old address and it doesn't transfer, because the entire point of the reputation system is that it can't be moved or faked.
 
 That's a genuine cost with no clever workaround. We're not going to pretend there's a neat solution, because there isn't one. It's a real trade and it's yours to make.
 

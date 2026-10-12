@@ -174,8 +174,8 @@ calling it directly. Both were empty at cutover.
 | | Address |
 | :-- | :-- |
 | `CarbonEscrow` **v2** (redeployed 2026-09-01, block `46227900`) | [`0xc6aa99a8226b679C71945dd9545685896a91E4d3`](https://sepolia.basescan.org/address/0xc6aa99a8226b679C71945dd9545685896a91E4d3) |
-| `ReputationStake` | [`0x4cdeF542F9361201f9543512eeCd1eE834793203`](https://sepolia.basescan.org/address/0x4cdeF542F9361201f9543512eeCd1eE834793203) |
-| Expected `owner()` on both — the HSM-derived address | `0xa8931097540e69B474013D294d0bA6A2cC853e4b` |
+| `ReputationStake` — **removed, ADR-0013; testnet deployment retained as history, not used** | [`0x4cdeF542F9361201f9543512eeCd1eE834793203`](https://sepolia.basescan.org/address/0x4cdeF542F9361201f9543512eeCd1eE834793203) |
+| Expected `owner()` on the escrow — the HSM-derived address | `0xa8931097540e69B474013D294d0bA6A2cC853e4b` |
 | `CarbonEscrow` v2, 2026-08-15 deployment — **superseded, do not use** | `0xe80d03688E8fa6270668AD73191d353e522CB1b1` |
 | `CarbonEscrow` v1 — **superseded, do not use** | `0xb9bF8dAC51f62cA237F2C439c63c9D8f16FD2ef7` |
 

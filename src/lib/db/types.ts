@@ -302,36 +302,6 @@ export interface Database {
         };
         Relationships: [];
       };
-      // NOR-330: resolution-time attestations linking a stake slash to the
-      // dispute that caused it (the chain records the slash, not the cause).
-      // Service-role only; migration 024.
-      stake_slashes: {
-        Row: {
-          id: string;
-          wallet: string;
-          amount_usdc: number;
-          payment_request_id: string | null;
-          tx_hash: string;
-          slashed_at: string;
-        };
-        Insert: {
-          id?: string;
-          wallet: string;
-          amount_usdc: number;
-          payment_request_id?: string | null;
-          tx_hash: string;
-          slashed_at?: string;
-        };
-        Update: {
-          id?: string;
-          wallet?: string;
-          amount_usdc?: number;
-          payment_request_id?: string | null;
-          tx_hash?: string;
-          slashed_at?: string;
-        };
-        Relationships: [];
-      };
       // ADR-0010: the agent's write-only evidence-bucket credential, KMS
       // envelope-encrypted. Service-role only; deleted at terminal task state
       // by trigger; migration 027.

@@ -84,7 +84,6 @@ jobs:
       # to catch; the workflow had the same hole. Any future redeploy MUST update this
       # block and ESCROW_DEPLOY_BLOCK together (see docs/backlog/CC-040.md).
       NEXT_PUBLIC_ESCROW_CONTRACT: "0xc6aa99a8226b679C71945dd9545685896a91E4d3"
-      NEXT_PUBLIC_REPUTATION_STAKE_CONTRACT: "0x4cdeF542F9361201f9543512eeCd1eE834793203"
       NEXT_PUBLIC_USDC_ADDRESS: "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
       VERDICT_SIGNER_ADDRESS: "0xa8931097540e69B474013D294d0bA6A2cC853e4b"
       # CC-070: without this every getLogs query scans from genesis. Re-derive after any

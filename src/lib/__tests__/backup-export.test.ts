@@ -176,10 +176,10 @@ describe("buildManifest", () => {
       },
       [
         { name: "humans", status: "exported", rows: 4, verified: true },
-        { name: "stake_slashes", status: "absent", rows: 0 },
+        { name: "task_content_deletion_log", status: "absent", rows: 0 },
       ],
     );
-    expect(manifest.tables.find((t) => t.name === "stake_slashes")?.status).toBe("absent");
+    expect(manifest.tables.find((t) => t.name === "task_content_deletion_log")?.status).toBe("absent");
     expect(manifest.excludes["task_description_history"]).toMatch(/task content/i);
     expect(manifest.excludes["sessions"]).toMatch(/token_hash/i);
     expect(manifest.rule_version).toBe(EXPORT_RULE_VERSION);
