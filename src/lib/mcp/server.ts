@@ -20,6 +20,7 @@ import {
   updateTaskStatus,
   countCommittedTasks,
   findTaskByIdempotencyKey,
+  lapseExpiredOffers,
   WORKER_CONCURRENCY_CAP,
 } from "@/lib/db/tasks";
 import { getFullReputation } from "@/lib/reputation";
@@ -29,6 +30,15 @@ import {
 } from "@/lib/db/notifications";
 import { notifyContractor } from "@/lib/notifications/dispatch";
 import { toolError } from "@/lib/mcp/errors";
+import {
+  encryptCredential,
+  isEvidenceEncryptionConfigured,
+} from "@/lib/evidence/credential-crypto";
+import { storeUploadCredential } from "@/lib/db/upload-credentials";
+import {
+  PLATFORM_MAX_UPLOAD_BYTES,
+  resolveBucketLocation,
+} from "@/lib/evidence/upload-policy";
 import {
   getOnChainTask,
   ARBITRATION_WINDOW_SECONDS,
@@ -190,13 +200,27 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         .max(10080)
         .optional()
         .describe(
-          "How long the worker has to answer this offer, in minutes (15–10080, default 1440 = 24h). Only applies when the worker has not enabled auto-booking — otherwise the offer auto-accepts. An unanswered offer lapses at expiry and you are free to re-target."
+          "Offer expiry in minutes (15–10080, default 1440 = 24h); returned as offer_expiry_unix. Applies to every hire. If the worker must accept manually, they have until then to accept and you to fund; if the worker has auto-booking enabled the offer auto-accepts and this is your deadline to fund. A task not funded and confirmed by expiry lapses, the worker is released, and you are free to re-target."
         ),
       acceptance_spec: z
         .string()
         .max(MAX_SPEC_BYTES)
         .describe(
           'Machine-checkable acceptance criteria, as a JSON STRING (not an object) — e.g. \'{"schema_version":1,"criteria":{"min_artefacts":8}}\'. Sent as a string because the exact bytes you send are the hash preimage: the returned spec_hash is keccak256 of them, and re-serialising would change it. Pass it verbatim as specHash to createTask. Required — without a spec there is nothing to check, so a task can only resolve in the worker\'s favour, and that must be a commitment you made, not an omission.'
+        ),
+      evidence_upload: z
+        .object({
+          access_key_id: z.string().min(1).max(256),
+          secret_access_key: z.string().min(1).max(256),
+          session_token: z.string().min(1).max(4096).optional(),
+          region: z.string().min(1).max(40).optional(),
+          endpoint: z.string().min(1).max(200).optional(),
+          max_upload_mb: z.number().int().min(1).max(25).optional(),
+        })
+        .strict()
+        .optional()
+        .describe(
+          "Optional (ADR-0010): a WRITE-ONLY credential for the bucket named in your acceptance_spec's evidence_bucket, so the worker can upload photos/files from their phone straight into YOUR bucket — the platform never holds the bytes. Requires evidence_bucket {provider: 's3', target: 's3://<bucket>'} (AWS: pass region; Cloudflare R2: pass endpoint https://<account>.r2.cloudflarestorage.com) or {provider: 'gcs', target: 'gs://<bucket>'} with a GCS HMAC key. Scope the credential to PutObject only under the prefix tasks/<payment_request_id>/ — no read, list or delete — and allow PUT from this site's origin in the bucket's CORS. The credential is sent outside the spec so it never enters the specHash preimage; the platform stores it KMS-encrypted and deletes it when the task ends. max_upload_mb caps each file (1–25, default 25). Omit to have workers paste links to self-hosted files instead."
         ),
       idempotency_key: z
         .string()
@@ -215,6 +239,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
       review_window_hours,
       offer_expiry_minutes,
       acceptance_spec,
+      evidence_upload,
       idempotency_key,
     }) => {
       const deadline_unix =
@@ -353,9 +378,19 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // CC-094 / ADR-0005 D3: accepts_auto_booking is a gate, not metadata.
         // A worker with the flag true on any channel has pre-authorised being
         // booked against their own stated categories and rate — the offer
-        // auto-accepts. Otherwise it waits for them and lapses at expiry (D4).
+        // auto-accepts, unless the AWOL check below says otherwise. Otherwise
+        // it waits for them and lapses at expiry (D4).
         const channels = await getChannelsForContractor(worker.id);
         const autoAccept = channels.some((c) => c.accepts_auto_booking);
+
+        // D4: lapse expired offers before anything below reads task rows. The
+        // cap counts 'accepted' rows straight from the table, so an auto-booking
+        // the agent never funded would otherwise keep holding the worker past
+        // its expiry until some unrelated reader happened to lapse it — on a
+        // quiet site, indefinitely. It also lets the AWOL check see an expired
+        // pending offer as 'lapsed'. Best-effort and never throws, as in
+        // respondToOffer.
+        await lapseExpiredOffers();
 
         // D5: the concurrency cap applies at auto-accept time too. A worker at
         // the cap of accepted+active tasks cannot take another; booking them
@@ -397,6 +432,42 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           return toolError(message, "INVALID_SPEC");
         }
 
+        // ADR-0010: validate the upload credential against the committed
+        // bucket BEFORE any row exists, so a bad one fails the whole call.
+        // Nothing about the credential is logged anywhere on this path.
+        const bucket = spec.spec.evidence_bucket;
+        if (evidence_upload) {
+          if (!isEvidenceEncryptionConfigured()) {
+            return toolError(
+              "Platform-minted evidence uploads are not enabled on this deployment. Omit evidence_upload; workers will paste links to self-hosted files.",
+              "INVALID_ARGUMENT",
+              { reason: "evidence_upload_unavailable" },
+            );
+          }
+          if (!bucket) {
+            return toolError(
+              "evidence_upload needs an evidence_bucket in acceptance_spec — the bucket is part of what you commit to, the credential is not.",
+              "INVALID_ARGUMENT",
+              { reason: "evidence_upload_invalid" },
+            );
+          }
+          const resolved = resolveBucketLocation(bucket.provider, bucket.target, {
+            region: evidence_upload.region,
+            endpoint: evidence_upload.endpoint,
+          });
+          if (!resolved.ok) {
+            return toolError(resolved.error, "INVALID_ARGUMENT", { reason: "evidence_upload_invalid" });
+          }
+        }
+        // ADR-0010 open item 2: tell the agent when its criteria want files
+        // but it gave the worker nowhere to put them.
+        const warnings: string[] = [];
+        if (!evidence_upload && spec.spec.criteria.min_artefacts) {
+          warnings.push(
+            "Your criteria require evidence files but you gave no evidence_upload credential, so the worker must host files themselves and paste links — slower, and harder from a phone. See the evidence_upload argument.",
+          );
+        }
+
         // CC-075 / ADR-0005 D6 + ADR-0001 D1: inline AWOL check at auto-booking
         // time, before the offer would auto-accept. When the worker has crossed
         // either threshold (3 consecutive lapsed offers, or 3 consecutive expired
@@ -425,6 +496,15 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           });
         }
 
+        // Auto-accept only on a positive AWOL result: the check ran against an
+        // auto-bookable worker (`evaluated`) and did not trigger. A trigger has
+        // just switched their auto-booking off, and a throw leaves `awol` at its
+        // unevaluated default — both make this an ordinary pending offer with an
+        // expiry, as the comments above promise. Deciding from `autoAccept`
+        // alone created the row 'accepted' while telling the agent it was
+        // pending, booking a worker the platform had just judged AWOL.
+        const autoAcceptOffer = autoAccept && awol.evaluated && !awol.triggered;
+
         const response = await createFundingOffer({
           from_agent_wallet,
           to_human_wallet: worker.wallet,
@@ -433,10 +513,52 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           deadline_unix,
           review_window_seconds,
           spec,
-          auto_accept: autoAccept,
+          auto_accept: autoAcceptOffer,
           offer_expiry_seconds,
           ...(idempotency_key !== undefined ? { idempotency_key } : {}),
         });
+
+        // ADR-0010: encrypt (task-bound AAD needs the payment_request_id, so
+        // this follows the row) and store. A failure here does not undo the
+        // hire — the task is valid without uploads — but it is reported, not
+        // swallowed, so the agent knows workers will need to paste links.
+        let evidenceUploadResult: { enabled: boolean; max_upload_bytes?: number; error?: string } | undefined;
+        if (evidence_upload && bucket && (bucket.provider === "s3" || bucket.provider === "gcs")) {
+          const maxBytes = Math.min(
+            (evidence_upload.max_upload_mb ?? 25) * 1024 * 1024,
+            PLATFORM_MAX_UPLOAD_BYTES,
+          );
+          try {
+            const envelope = await encryptCredential(
+              {
+                accessKeyId: evidence_upload.access_key_id,
+                secretAccessKey: evidence_upload.secret_access_key,
+                ...(evidence_upload.session_token ? { sessionToken: evidence_upload.session_token } : {}),
+                ...(evidence_upload.region ? { region: evidence_upload.region } : {}),
+                ...(evidence_upload.endpoint ? { endpoint: evidence_upload.endpoint } : {}),
+              },
+              response.payment_request_id,
+            );
+            await storeUploadCredential({
+              payment_request_id: response.payment_request_id,
+              provider: bucket.provider,
+              credential_envelope: envelope,
+              max_upload_bytes: maxBytes,
+            });
+            evidenceUploadResult = { enabled: true, max_upload_bytes: maxBytes };
+          } catch (err) {
+            log("error", "evidence_upload_credential_store_failed", {
+              caller: from_agent_wallet,
+              payment_request_id: response.payment_request_id,
+              error: err instanceof Error ? err.name : "unknown",
+            });
+            evidenceUploadResult = {
+              enabled: false,
+              error:
+                "The task was created, but your upload credential could not be stored, so workers will need to paste links. Retrying with the same idempotency_key will not re-attempt it; contact the platform if this persists.",
+            };
+          }
+        }
 
         // ADR-0005 D7: the worker must be told about the offer. notifyContractor
         // delivers over their registered channels (CC-095) and never throws,
@@ -444,17 +566,20 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
         // path the task_funded event is deliberately NOT sent here: at hire
         // time no money is locked yet — the agent still has to fund the
         // escrow — and it fires when /api/fund-task confirms funding
-        // on-chain instead.
+        // on-chain instead. The expiry goes to the worker only on a pending
+        // offer: on an auto-booked row it is the agent's funding deadline,
+        // not a window for the worker to answer within.
         await notifyContractor(worker.id, {
           type: "offer_received",
           payment_request_id: response.payment_request_id,
           amount_usdc,
-          offer_expiry_unix: response.offer_expiry_unix,
+          offer_expiry_unix:
+            response.worker_status === "pending" ? response.offer_expiry_unix : null,
         });
 
         // When AWOL triggered, the offer requires the worker's manual
-        // acceptance — the task row is created `pending` either way, with the
-        // standard offer expiry.
+        // acceptance — autoAcceptOffer above was false, so the task row is
+        // created `pending` with the agent's offer expiry.
         const awolNotice = awol.triggered
           ? {
               worker_auto_booking_disabled: true,
@@ -469,7 +594,13 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ ok: true, ...response, ...awolNotice }),
+              text: JSON.stringify({
+                ok: true,
+                ...response,
+                ...awolNotice,
+                ...(evidenceUploadResult ? { evidence_upload: evidenceUploadResult } : {}),
+                ...(warnings.length > 0 ? { warnings } : {}),
+              }),
             },
           ],
         };

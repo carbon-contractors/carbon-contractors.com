@@ -141,6 +141,15 @@ const envSchema = z.object({
   GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID: envOptional(z.string().optional()),
   GCP_SERVICE_ACCOUNT_EMAIL: envOptional(z.string().optional()),
 
+  // ── Evidence upload credential encryption (ADR-0010) ─────────────────────
+  // A second, symmetric KMS key and its own service account — never the
+  // contract-owner signer's. Unset = platform-minted uploads are switched off
+  // and request_human_work refuses an evidence_upload credential.
+  // Key path WITHOUT /cryptoKeyVersions/…: KMS picks the primary to encrypt and
+  // reads the version from the ciphertext to decrypt, so rotation just works.
+  GCP_KMS_EVIDENCE_KEY_PATH: envOptional(z.string().optional()),
+  GCP_EVIDENCE_SERVICE_ACCOUNT_EMAIL: envOptional(z.string().optional()),
+
   // ── Session management ────────────────────────────────────────────────────
   SESSION_TIMEOUT_MS: envInt(1_800_000), // 30 min
   MAX_SESSIONS: envInt(100),

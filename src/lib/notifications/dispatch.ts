@@ -125,7 +125,11 @@ export type ContractorNotificationEvent =
       type: "offer_received";
       payment_request_id: string;
       amount_usdc: number;
-      /** Null on auto-accepted rows — there was no window to answer within. */
+      /**
+       * Null on auto-accepted rows — there was no window to answer within. Their
+       * expiry is the agent's funding deadline, not the worker's, so the hire
+       * path withholds it rather than telling the worker to accept before it.
+       */
       offer_expiry_unix: number | null;
     }
   | {

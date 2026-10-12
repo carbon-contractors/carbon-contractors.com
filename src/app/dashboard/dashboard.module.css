@@ -1462,3 +1462,44 @@
 .slashTaskLink:hover {
   color: var(--cc-text-muted);
 }
+
+/* ADR-0010: upload straight into the hiring agent's bucket. */
+.uploadRow {
+  margin-bottom: 0.5rem;
+}
+
+.uploadButton {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--cc-blue);
+  border-radius: 6px;
+  color: var(--cc-blue-bright);
+  font-size: 0.85rem;
+}
+
+.uploadButton:focus-within {
+  outline: 2px solid var(--cc-blue-bright);
+  outline-offset: 2px;
+}
+
+.uploadInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.uploadNote {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--cc-text-secondary);
+}
+
+.uploadError {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--cc-red);
+}

@@ -46,8 +46,13 @@ export interface FundingOfferRequest {
    */
   auto_accept?: boolean;
   /**
-   * When the offer lapses, in seconds from now (ADR-0005 D4). Required unless
-   * auto_accept — validated against the 15-minute to 7-day bounds below.
+   * When the offer lapses, in seconds from now (ADR-0005 D4) — validated
+   * against the 15-minute to 7-day bounds below whether or not auto_accept.
+   * A pending row lapses at expiry unless the worker accepted AND the agent
+   * funded; an auto-accepted row lapses unless the agent funded. The bound
+   * applies to both because an 'accepted' row counts towards the worker's D5
+   * cap: without a deadline, an agent could park an auto-booking worker's
+   * availability for free by booking them and never funding.
    */
   offer_expiry_seconds?: number;
   /**
@@ -76,7 +81,13 @@ export interface FundingOfferResponse {
   fund_url: string;
   /** CC-094: 'accepted' when auto-booked, 'pending' while the worker decides (ADR-0005 D3). */
   worker_status: "accepted" | "pending";
-  /** When the pending offer lapses; null when already accepted (ADR-0005 D4). */
+  /**
+   * When the task lapses unless it is funded and confirmed by then (ADR-0005
+   * D4). For a 'pending' offer the worker must also accept before it; for an
+   * auto-booked ('accepted') one it is purely the agent's funding deadline.
+   * Null only on a replay of a row auto-booked before auto-booked rows carried
+   * a deadline.
+   */
   offer_expiry_unix: number | null;
   /** The exact preimage the hash was taken over — echoed so the agent need not trust us. */
   acceptance_spec: string;
@@ -109,8 +120,9 @@ export const DEFAULT_OFFER_EXPIRY_SECONDS = 24 * 60 * 60;
 /**
  * createFundingOffer
  *
- * Persists the task to Supabase as "pending" and returns every parameter the agent
- * needs to fund the escrow itself via `USDC.approve` + `escrow.createTask`.
+ * Persists the task to Supabase as "pending" (or "accepted" when auto-booked) with
+ * its offer expiry, and returns every parameter the agent needs to fund the escrow
+ * itself via `USDC.approve` + `escrow.createTask`.
  */
 export async function createFundingOffer(
   req: FundingOfferRequest
@@ -136,20 +148,25 @@ export async function createFundingOffer(
   // CC-094 / ADR-0005 D3+D4: resolve the offer shape before any row is written,
   // so an out-of-bounds expiry fails the whole call rather than creating an
   // offer that can never be honoured.
+  //
+  // An auto-accepted row gets the same bounded expiry as a manual offer. It is
+  // born 'accepted', so it counts towards the worker's D5 cap from the first
+  // second; with no expiry, lapseExpiredOffers never touched it, and three
+  // bookings the agent never funded blocked an auto-booking worker for good.
+  // D4's 7-day ceiling exists to stop exactly that free option on a worker's
+  // time, and it now applies on both paths.
   const autoAccept = req.auto_accept ?? false;
   const offerExpirySeconds = req.offer_expiry_seconds ?? DEFAULT_OFFER_EXPIRY_SECONDS;
-  if (!autoAccept) {
-    if (
-      offerExpirySeconds < MIN_OFFER_EXPIRY_SECONDS ||
-      offerExpirySeconds > MAX_OFFER_EXPIRY_SECONDS
-    ) {
-      throw new Error(
-        `offer_expiry_seconds must be between ${MIN_OFFER_EXPIRY_SECONDS} (15m) and ${MAX_OFFER_EXPIRY_SECONDS} (7d)`,
-      );
-    }
+  if (
+    offerExpirySeconds < MIN_OFFER_EXPIRY_SECONDS ||
+    offerExpirySeconds > MAX_OFFER_EXPIRY_SECONDS
+  ) {
+    throw new Error(
+      `offer_expiry_seconds must be between ${MIN_OFFER_EXPIRY_SECONDS} (15m) and ${MAX_OFFER_EXPIRY_SECONDS} (7d)`,
+    );
   }
   const nowUnix = Math.floor(Date.now() / 1000);
-  const offerExpiryUnix = autoAccept ? null : nowUnix + offerExpirySeconds;
+  const offerExpiryUnix = nowUnix + offerExpirySeconds;
   const initialStatus: "accepted" | "pending" = autoAccept ? "accepted" : "pending";
 
   const payment_request_id = randomBytes(16).toString("hex");
@@ -202,6 +219,7 @@ export async function createFundingOffer(
     spec: req.spec,
     worker_status: initialStatus,
     offer_expiry_unix: offerExpiryUnix,
+    in_offer_stage: true,
   });
 }
 
@@ -215,6 +233,14 @@ interface FundingResponseParams {
   spec: { preimage: string; hash: string; version: number; hasNoCriteria?: boolean };
   worker_status: "accepted" | "pending";
   offer_expiry_unix: number | null;
+  /**
+   * False on a replay of a row past the offer stage (declined, lapsed, active,
+   * …). Its expiry no longer binds anything, so the Deadline line is left out:
+   * on a declined or lapsed row it would tell the agent the worker is booked
+   * and to fund a task /api/fund-task then refuses, locking the USDC until
+   * deadline_unix.
+   */
+  in_offer_stage: boolean;
 }
 
 /**
@@ -259,10 +285,22 @@ function buildFundingResponse(p: FundingResponseParams): FundingOfferResponse {
     ...(specWarning ? { spec_warning: specWarning } : {}),
     instructions: [
       `Fund the escrow from your own wallet on ${escrowConfig.chainName} (chain id ${escrowConfig.chainId}):`,
+      // ADR-0005 D4: one clock covers the whole offer stage. A pending offer
+      // the worker accepted still lapses at the same expiry if it is not funded,
+      // and so does an auto-booked one (CC-094) — say so up front.
+      ...(p.in_offer_stage && p.offer_expiry_unix !== null
+        ? [
+            p.worker_status === "pending"
+              ? `Deadline: unix ${p.offer_expiry_unix}. The worker must accept AND you must fund and confirm (steps 1-3) before then, or the offer lapses.`
+              : `Deadline: unix ${p.offer_expiry_unix}. The worker is booked, but you must fund and confirm (steps 1-3) before then, or the booking lapses.`,
+            `   A lapsed task releases the worker and /api/fund-task refuses it even if the escrow is funded — do not fund close to the deadline.`,
+            `   USDC funded into a lapsed task stays locked until deadline_unix; then escrow.expireTask("${taskIdBytes32}") from this wallet refunds it.`,
+          ]
+        : []),
       ...(p.worker_status === "pending"
         ? [
-            `0. Wait for the worker to accept the offer — the task is '${p.worker_status}' until they do`,
-            `   (they have until unix ${p.offer_expiry_unix}). /api/fund-task refuses a task that is not 'accepted'.`,
+            `0. Wait for the worker to accept the offer — the task is '${p.worker_status}' until they do.`,
+            `   /api/fund-task refuses a task that is not 'accepted'.`,
           ]
         : []),
       `1. Approve the escrow to spend your USDC: usdc.approve("${escrowConfig.address}", ${amountWei}).`,
@@ -303,6 +341,7 @@ export function replayFundingOffer(task: TaskRecord): FundingOfferReplay {
       },
       worker_status: task.status === "pending" ? "pending" : "accepted",
       offer_expiry_unix: task.offer_expiry_unix,
+      in_offer_stage: inOfferStage,
     }),
     status: inOfferStage ? "awaiting_funding" : "already_initiated",
     task_status: task.status,

@@ -29,6 +29,16 @@
  *   submit     fund -> submitWork, then stop and write state to a file.
  *   claim      resume from that file and call releaseAfterReview.
  *
+ *   accept-ownership   NOT a lifecycle phase. The KMS key calls acceptOwnership(), the
+ *                      second half of the Ownable2Step transfer (NOR-537) that
+ *                      transfer-escrow-ownership.ts starts. It lives here because this
+ *                      is the script that already sends owner transactions with the KMS
+ *                      key. Dry run unless CONFIRM=true.
+ *
+ * Every funding phase acts as the deployer, and since NOR-537 F1 the owner cannot be a
+ * party to a task. So on a fresh deployment none of them can run until
+ * `accept-ownership` has moved ownership off the deployer key.
+ *
  * ── Why arbitration is a split pair, like submit/claim ──────────────────────────
  *
  * ARBITRATION_WINDOW is 7 days and a live chain cannot be fast-forwarded. The contract
@@ -52,7 +62,8 @@
  * pull-payment, so the worker must be able to transact.
  *
  * Requires an active `gcloud auth application-default login --impersonate-service-account=...`
- * session (same one `npm run verify:kms` uses) for the phases that sign a verdict.
+ * session (same one `npm run verify:kms` uses) for the phases that sign a verdict, and for
+ * `accept-ownership`.
  *
  * If .env.local has ever picked up a VERCEL_OIDC_TOKEN (e.g. from `vercel link`), unset it
  * for this run — kms-signer.ts's isVercelRuntime() treats its mere presence as "running on
@@ -178,6 +189,7 @@ async function main() {
     "arbitration-claim",
     "submit",
     "claim",
+    "accept-ownership",
   ];
   if (!VALID.includes(phase)) {
     console.error(`Usage: verify-escrow-lifecycle.ts <${VALID.join("|")}>`);
@@ -189,6 +201,7 @@ async function main() {
     console.error("  arbitration-claim   resume and releaseAfterArbitration, 7d after `hold`");
     console.error("  submit              fund -> submitWork, then stop (writes state file)");
     console.error("  claim               resume and releaseAfterReview, 12h after `submit`");
+    console.error("  accept-ownership    the KMS key accepts a pending ownership transfer");
     process.exitCode = 1;
     return;
   }
@@ -209,6 +222,11 @@ async function main() {
 
   if (phase === "claim" || phase === "arbitration-claim") {
     await runResume(phase, pub, rpcUrl, usdc, escrow);
+    return;
+  }
+
+  if (phase === "accept-ownership") {
+    await runAcceptOwnership(pub, rpcUrl, escrow);
     return;
   }
 
@@ -493,6 +511,108 @@ async function main() {
       throw new Error("refund resolved but the agent's USDC balance did not increase");
     }
   }
+}
+
+/**
+ * `accept-ownership`: the second half of the Ownable2Step transfer (NOR-537), signed by
+ * the KMS key.
+ *
+ * transfer-escrow-ownership.ts nominates the HSM address with the deployer key, but that
+ * moves nothing: owner() stays the deployer until the nominee itself calls
+ * acceptOwnership(). The nominee is the KMS key, whose signer the Hardhat script cannot
+ * typecheck (tsconfig.hardhat.json). So the call is made here, through getPlatformAccount(),
+ * the same account resolveDisputeOnChain signs with.
+ *
+ * Dry run unless CONFIRM=true. This is the one-way step, not the nomination: once it
+ * lands DEPLOYER_PRIVATE_KEY can no longer act as owner.
+ */
+async function runAcceptOwnership(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pub: any,
+  rpcUrl: string,
+  escrow: Address,
+) {
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const readRole = (functionName: "owner" | "pendingOwner"): Promise<Address> =>
+    pub.readContract({ address: escrow, abi: CARBON_ESCROW_ABI, functionName });
+
+  const usingKms = Boolean(getConfig().GCP_KMS_KEY_PATH);
+  const account = await getPlatformAccount();
+  const [owner, pendingOwner] = await Promise.all([readRole("owner"), readRole("pendingOwner")]);
+
+  console.log(line());
+  console.log('NOR-537 escrow ownership — phase "accept-ownership" — Base Sepolia');
+  console.log(line());
+  console.log(`  escrow contract:  ${escrow}`);
+  console.log(
+    `  signer:           ${account.address} (${usingKms ? "KMS" : "DEPLOYER_PRIVATE_KEY — GCP_KMS_KEY_PATH is unset"})`,
+  );
+  console.log(`  owner():          ${owner}`);
+  console.log(`  pendingOwner():   ${pendingOwner}`);
+
+  if (same(owner, account.address)) {
+    console.log("\n  PASS — this signer already owns the escrow. Nothing to do.");
+    return;
+  }
+
+  if (!same(pendingOwner, account.address)) {
+    console.log("\n  ABORT — pendingOwner() is not this signer, so acceptOwnership() would revert.");
+    if (!usingKms) {
+      console.log("  GCP_KMS_KEY_PATH is unset, so getPlatformAccount() fell back to the raw");
+      console.log("  deployer key. This phase has to sign as the KMS key.");
+    } else {
+      console.log("  Nominate it first: CONFIRM=true npm run transfer:ownership");
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (process.env.CONFIRM !== "true") {
+    console.log(`\n  DRY RUN — would call acceptOwnership() from ${account.address}.`);
+    console.log("  Re-run with CONFIRM=true to send it.");
+    return;
+  }
+
+  const ownerWallet = createWalletClient({
+    account,
+    chain: baseSepolia,
+    transport: http(rpcUrl),
+  });
+
+  console.log(`\n[1] acceptOwnership() as ${usingKms ? "the KMS key" : "the raw-key fallback"}`);
+  const hash = await withRpcLagRetry("acceptOwnership", () =>
+    ownerWallet.writeContract({
+      address: escrow,
+      abi: CARBON_ESCROW_ABI,
+      functionName: "acceptOwnership",
+    }),
+  );
+  const receipt = await pub.waitForTransactionReceipt({ hash });
+  console.log(`      tx: ${hash}  status: ${receipt.status}`);
+  if (receipt.status !== "success") throw new Error(`acceptOwnership reverted: ${hash}`);
+
+  // Lessons-Learned §16: poll for the owner we expect. A stale read straight after the
+  // write is not a failure, and printing one as FAILED is how this went wrong twice.
+  let last: Address | null = null;
+  for (let i = 1; i <= 8; i++) {
+    last = await readRole("owner").catch(() => null);
+    if (last && same(last, account.address)) break;
+    if (i < 8) {
+      console.log(`      owner() not updated yet, re-reading in 5s (${i}/7)...`);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+
+  if (last && same(last, account.address)) {
+    console.log(`\n  PASS — owner() is ${last}.`);
+  } else {
+    console.log(`\n  COULD NOT CONFIRM — last read: ${last ?? "unreadable"}.`);
+    console.log("  The transaction was mined. This is very likely RPC lag, not a failure.");
+    console.log(`  Do NOT re-run. Check https://sepolia.basescan.org/tx/${hash}`);
+    process.exitCode = 1;
+  }
+  console.log("\n  Then verify ownership landed and pendingOwner() is back to zero:");
+  console.log("    node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs");
 }
 
 /** Phase 2: the worker claims, with no agent or platform involvement whatsoever. */

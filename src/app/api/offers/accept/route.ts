@@ -6,11 +6,12 @@
  * the state /api/fund-task requires before the agent's createTask can activate
  * anything.
  *
- * Requires the same wallet challenge-response signature as the MCP transport
- * (CC-093): get a nonce from POST /api/basedhuman.mcp/challenge, sign the
- * returned message, and send the result as x-caller-wallet / x-caller-signature
- * / x-caller-nonce headers. The caller must be the wallet offered the task
- * (to_human_wallet). Enforces the ADR-0005 D5 concurrency cap.
+ * Authenticated by an ADR-0009 session (the dashboard's cookie, or a bearer
+ * token) or, failing that, the same wallet challenge-response signature as the
+ * MCP transport (CC-093): get a nonce from POST /api/basedhuman.mcp/challenge,
+ * sign the returned message, and send the result as x-caller-wallet /
+ * x-caller-signature / x-caller-nonce headers. The caller must be the wallet
+ * offered the task (to_human_wallet). Enforces the ADR-0005 D5 concurrency cap.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -23,28 +24,30 @@ import { safeErrorResponse } from "@/lib/errors";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const rawWallet = request.headers.get("x-caller-wallet");
-    const signature = request.headers.get("x-caller-signature") as `0x${string}` | null;
-    const nonce = request.headers.get("x-caller-nonce");
-
-    if (!rawWallet || !isValidWalletAddress(rawWallet) || !signature || !nonce) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Wallet signature required. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
-        },
-        { status: 401 },
-      );
-    }
-
     // ADR-0009: a valid session (cookie or bearer) authenticates without a
-    // prompt; machine callers keep the challenge path (D6).
+    // prompt; machine callers keep the challenge path (D6). The session is
+    // read first — the dashboard sends no challenge headers at all, so
+    // demanding them up front 401'd every cookie-only caller (CC-112).
     const sessionWallet = await sessionWalletFromRequest(request);
     let callerWallet: string;
     if (sessionWallet) {
       callerWallet = sessionWallet;
     } else {
+      const rawWallet = request.headers.get("x-caller-wallet");
+      const signature = request.headers.get("x-caller-signature") as `0x${string}` | null;
+      const nonce = request.headers.get("x-caller-nonce");
+
+      if (!rawWallet || !isValidWalletAddress(rawWallet) || !signature || !nonce) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Wallet signature required. Get a nonce from /api/basedhuman.mcp/challenge, sign it, and retry with x-caller-wallet/x-caller-signature/x-caller-nonce headers.",
+          },
+          { status: 401 },
+        );
+      }
+
       try {
         callerWallet = await verifyChallengeSignature(rawWallet, signature, nonce);
       } catch (err) {

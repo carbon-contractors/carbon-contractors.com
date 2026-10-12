@@ -22,6 +22,7 @@ import {
   mintSession,
   revokeAllSessions,
   revokeSession,
+  sessionWalletFromRequest,
   tokenFromRequest,
   verifySessionToken,
 } from "@/lib/auth/session";
@@ -149,5 +150,15 @@ describe("tokenFromRequest", () => {
 
   it("returns null with neither", () => {
     expect(tokenFromRequest(req())).toBeNull();
+  });
+});
+
+describe("sessionWalletFromRequest", () => {
+  // Routes now read the session before the challenge headers, so a malformed cookie
+  // reaches this first. decodeURIComponent throws on it; that must be "no session".
+  it("treats a malformed session cookie as no session instead of throwing", async () => {
+    const r = req({ cookie: `${SESSION_COOKIE}=%E0%A4%A` });
+    expect(() => tokenFromRequest(r)).toThrow(URIError);
+    await expect(sessionWalletFromRequest(r)).resolves.toBeNull();
   });
 });

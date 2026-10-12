@@ -53,6 +53,14 @@ const REDACTED_PAYLOAD_KEYS = new Set([
   "spec_json",
   "spec",
   "evidence",
+  // ADR-0010: the agent's bucket credential must never reach a log line, even
+  // by accident through a whole-args log. Redacted by key, wherever it nests.
+  "evidence_upload",
+  "secret_access_key",
+  "session_token",
+  "credential",
+  "credential_envelope",
+  "upload_url",
 ]);
 
 /**

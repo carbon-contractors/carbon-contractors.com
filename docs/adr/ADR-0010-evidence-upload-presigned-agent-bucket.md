@@ -145,10 +145,39 @@ remain open and are settled at implementation time.
 
 1. ~~**Ratify D1**~~ **Ratified 2026-09-28.** — this forecloses platform-hosted evidence as a product option. Everything else
    follows from it.
-2. Agent onboarding UX ownership: who writes the bucket-setup recipe, and does
-   `request_human_work` validation warn when `evidence_bucket` is absent but criteria require
-   artefacts?
-3. Confirm the cap values (platform max artefact size; default TTL) at implementation time.
+2. ~~Agent onboarding UX ownership~~ **Settled at implementation (2026-09-28):** the recipe is
+   `docs/runbooks/AGENT-EVIDENCE-BUCKET.md` (AWS S3, Cloudflare R2, GCS), and
+   `request_human_work` returns a `warnings` entry when the criteria set `min_artefacts` but no
+   `evidence_upload` credential was given.
+3. ~~Cap values~~ **Settled at implementation (2026-09-28):** 25 MB per artefact platform
+   maximum (agent-configurable down via `max_upload_mb`), 10-minute URL TTL, one object per URL.
+
+## Implementation notes (2026-09-28)
+
+What shipped, and where it differs from the sketch below:
+
+- **Per-task prefix is enforced by the signer, not the credential.** D2 says the agent's
+  credential is scoped to `tasks/<taskId>/`, but the id does not exist until
+  `request_human_work` returns, so an agent cannot mint a credential for it in advance. Agents
+  scope to `tasks/*`; every URL the platform signs names one key under `tasks/<payment_request_id>/`
+  with a random component, and the signature covers the key, so no grant reaches another task.
+- **Size is enforced by signing `content-length`** alongside `content-type`; a pre-signed PUT has
+  no content-length-range. The worker declares the size, the platform checks it against the cap,
+  and the provider rejects any other body.
+- **Hosts are an allowlist, not free-form:** AWS regional virtual-hosted S3, Cloudflare R2
+  account endpoints, and the GCS XML API (HMAC keys, GOOG4 signing). These are also the page's
+  only new CSP `connect-src` entries. MinIO and other S3-compatible hosts stay on `https`
+  (worker-hosted), as D2 already said for arbitrary web hosts.
+- **Encryption uses a dedicated KMS key and service account** (`evidence-credentials`,
+  `evidence-creds-svc`), not the contract-owner signer's. The service account's workload-identity
+  binding admits only the Vercel production environment. The task's `payment_request_id` is the
+  AAD at both envelope layers.
+- **Cloudflare R2 cannot be write-only** (it has no such token type); the recipe says so.
+- **The checker never reads the bytes today** — it evaluates the worker-declared metadata in the
+  bundle — so the uploaded object's URI only has to identify the object. D5's note on `phash`
+  therefore still stands as a follow-up: the form asks for `phash` only when a criterion needs it.
+- Migration **027** (`task_upload_credentials` + deletion log + terminal-state trigger);
+  `POST /api/evidence/upload-url`; the `evidence_upload` argument; the dashboard upload control.
 
 ## Implementation sketch (post-acceptance, not in this ADR's scope)
 

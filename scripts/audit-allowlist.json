@@ -1,0 +1,9 @@
+[
+  {
+    "id": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "reason": "No patched release of braces exists (every version is affected). It reaches this repo only through eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch, a lint-time dev dependency that never ships. npm's only offered fix is a breaking downgrade of eslint-config-next to 14.x. Approved by Aaron 2026-10-12 (PR #250).",
+    "added": "2026-10-12",
+    "review_by": "2026-11-12"
+  }
+]

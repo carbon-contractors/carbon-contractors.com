@@ -67,8 +67,9 @@ export interface Database {
           deadline_unix: number;
           status: TaskStatus;
           /**
-           * When the pending offer lapses (CC-094 / ADR-0005 D4). Null on
-           * auto-accepted tasks and on anything past the offer stage.
+           * When the offer lapses unless funded (CC-094 / ADR-0005 D4). Set on
+           * pending and auto-accepted rows alike; null only on rows auto-booked
+           * before auto-booked rows carried a deadline.
            */
           offer_expiry_unix: number | null;
           /**
@@ -328,6 +329,33 @@ export interface Database {
           payment_request_id?: string | null;
           tx_hash?: string;
           slashed_at?: string;
+        };
+        Relationships: [];
+      };
+      // ADR-0010: the agent's write-only evidence-bucket credential, KMS
+      // envelope-encrypted. Service-role only; deleted at terminal task state
+      // by trigger; migration 027.
+      task_upload_credentials: {
+        Row: {
+          payment_request_id: string;
+          provider: "s3" | "gcs";
+          credential_envelope: string;
+          max_upload_bytes: number;
+          created_at: string;
+        };
+        Insert: {
+          payment_request_id: string;
+          provider: "s3" | "gcs";
+          credential_envelope: string;
+          max_upload_bytes: number;
+          created_at?: string;
+        };
+        Update: {
+          payment_request_id?: string;
+          provider?: "s3" | "gcs";
+          credential_envelope?: string;
+          max_upload_bytes?: number;
+          created_at?: string;
         };
         Relationships: [];
       };

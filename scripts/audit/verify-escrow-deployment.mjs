@@ -37,13 +37,19 @@
  * the 2-of-4 Safe, signer and owner are different addresses and this script must
  * check the signer, not the owner. On mainnet it is additionally FATAL for the signer
  * to equal the owner (ADR-0006 D2 separation gate).
+ *
+ * NOR-537: pendingOwner() must be zero on every network. The contract is Ownable2Step,
+ * so a nomination nobody accepted is a standing offer of the contract. Also checked:
+ * MAX_DEADLINE_HORIZON, completeTaskByOwner, and the PlatformCannotBeParty guard. Their
+ * absence is informational on testnet and fatal on mainnet, like the arbitration clock.
  */
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPublicClient, http, getAddress, toFunctionSelector, keccak256 } from "viem";
+import { createPublicClient, http, getAddress, keccak256, zeroAddress } from "viem";
 import { baseSepolia, base } from "viem/chains";
+import { selectorInBytecode } from "./bytecode-selector.mjs";
 
 /** CC-059 — the HSM key that must own the contract. */
 const HSM = "0xa8931097540e69B474013D294d0bA6A2cC853e4b";
@@ -68,6 +74,8 @@ const HSM = "0xa8931097540e69B474013D294d0bA6A2cC853e4b";
 
 const ABI = [
   { type: "function", name: "owner", inputs: [], outputs: [{ type: "address" }], stateMutability: "view" },
+  { type: "function", name: "pendingOwner", inputs: [], outputs: [{ type: "address" }], stateMutability: "view" },
+  { type: "function", name: "MAX_DEADLINE_HORIZON", inputs: [], outputs: [{ type: "uint64" }], stateMutability: "view" },
   { type: "function", name: "usdc", inputs: [], outputs: [{ type: "address" }], stateMutability: "view" },
   { type: "function", name: "totalLocked", inputs: [], outputs: [{ type: "uint256" }], stateMutability: "view" },
   { type: "function", name: "MIN_REVIEW_WINDOW", inputs: [], outputs: [{ type: "uint32" }], stateMutability: "view" },
@@ -234,10 +242,27 @@ async function main() {
   // in its dispatcher, so the selector appearing in the code is good evidence the
   // function is there — but 4 bytes in ~10KB can collide, which is why ARBITRATION_WINDOW
   // above is the primary check and this is a cross-check on it.
-  const RELEASE_AFTER_ARBITRATION_SELECTOR = toFunctionSelector(
-    "releaseAfterArbitration(bytes32)",
-  ).slice(2);
-  const claimPathPresent = code.toLowerCase().includes(RELEASE_AFTER_ARBITRATION_SELECTOR);
+  const claimPathPresent = selectorInBytecode(code, "releaseAfterArbitration(bytes32)");
+
+  // ── NOR-537 mainnet hardening ─────────────────────────────────────────────
+  //
+  // Probed the same way, for the same reason: every deployment before the NOR-537 redeploy
+  // lacks these, the live 2026-09-01 Sepolia escrow included. A view that is absent reads
+  // as null, not a crash. completeTaskByOwner has no view to read, so its dispatcher
+  // selector is the check. The F1 guard is a revert, so its error selector is the only
+  // trace it leaves in the code. That is corroborating at best, and it needs
+  // bytecode-selector.mjs: this one is not stored as its own four bytes.
+  const probe = (functionName) => call(functionName).catch(() => null);
+  const [pendingOwner, horizonRaw] = await Promise.all([
+    probe("pendingOwner"),
+    probe("MAX_DEADLINE_HORIZON"),
+  ]);
+  const horizon = horizonRaw === null ? null : Number(horizonRaw);
+  const ownerEmergencyPresent = selectorInBytecode(code, "completeTaskByOwner(bytes32)");
+  const partyGuardPresent = selectorInBytecode(code, "PlatformCannotBeParty(address)");
+  const pendingClear = pendingOwner !== null && pendingOwner === zeroAddress;
+  const hardeningAbsent =
+    pendingOwner === null || horizon === null || !ownerEmergencyPresent || !partyGuardPresent;
 
   const expectedUsdc = process.env.NEXT_PUBLIC_USDC_ADDRESS;
   const expectedOwner = ownerOverrideRaw ? getAddress(ownerOverrideRaw) : HSM;
@@ -259,6 +284,19 @@ async function main() {
   console.log(
     `releaseAfterArbitration  ${mark(claimPathPresent)}  ${claimPathPresent ? "selector present in bytecode" : "selector ABSENT"}`,
   );
+  if (horizon === null) {
+    console.log(`MAX_DEADLINE_HORIZON     ${mark(false)}  ABSENT — this deployment predates NOR-537`);
+  } else {
+    console.log(
+      `MAX_DEADLINE_HORIZON     ${mark(horizon === 7776000)}  ${horizon}s (${horizon / 86400}d)`,
+    );
+  }
+  console.log(
+    `completeTaskByOwner      ${mark(ownerEmergencyPresent)}  ${ownerEmergencyPresent ? "selector present in bytecode" : "selector ABSENT"}`,
+  );
+  console.log(
+    `PlatformCannotBeParty    ${mark(partyGuardPresent)}  ${partyGuardPresent ? "error selector present in bytecode" : "error selector ABSENT"}`,
+  );
   console.log(`usdc()                   ${mark(usdcOk)}  ${usdc}`);
   // Informational, not a pass/fail. This started life marking non-zero with ✗, which was
   // right for a fresh deployment and wrong the moment a task was funded — it flagged a
@@ -269,6 +307,13 @@ async function main() {
   console.log(
     `                         (expected: ${expectedOwner}${ownerOverrideRaw ? " — from --owner" : " — CC-059 HSM constant; pass --owner=0xSAFE for the 2-of-4 Safe (CC-090 mainnet leg)"})`,
   );
+  if (pendingOwner === null) {
+    console.log(`pendingOwner()           ${mark(false)}  ABSENT — single-step Ownable, predates NOR-537`);
+  } else {
+    console.log(
+      `pendingOwner()           ${mark(pendingClear)}  ${pendingOwner}${pendingClear ? " (no transfer in flight)" : " — NOMINATED, NOT ACCEPTED"}`,
+    );
+  }
   console.log(
     `acceptedSigners(signer)  ${mark(signerAccepted)}  ${signerAccepted}  (${signerOverrideRaw ? "from --signer" : "from committed .pub"})`,
   );
@@ -306,6 +351,30 @@ async function main() {
     process.exit(1);
   }
 
+  // ── What the NOR-537 hardening's absence means, per network ───────────────
+  if (hardeningAbsent) {
+    console.log("");
+    console.log("This deployment predates the NOR-537 mainnet fixes (all or part of them):");
+    console.log("Ownable2Step, the 90-day deadline bound, completeTaskByOwner (CC-049), and");
+    console.log("the rule that the owner and verdict signers cannot be a party to a task.");
+    console.log("");
+    if (mainnet) {
+      console.log("This is MAINNET, so it is fatal. Each is bytecode-or-never: redeploy from a");
+      console.log("build that includes them before anything is funded.");
+      process.exit(1);
+    }
+    console.log("This is testnet, so it is reported and not fatal. But a Sepolia rehearsal");
+    console.log("against it validates bytecode mainnet will not receive — see");
+    console.log("docs/runbooks/ESCROW-REDEPLOY.md, \"What a Sepolia redeploy unblocks\".");
+    console.log("");
+  }
+  if (horizon !== null && horizon !== 7776000) {
+    console.log("");
+    console.log(`MAX_DEADLINE_HORIZON is ${horizon}s, not the 7776000s (90 days) NOR-537 F7 sets.`);
+    console.log("It is a contract constant, so this cannot be corrected without a redeploy.");
+    process.exit(1);
+  }
+
   // Binary search for the deploy block, so ESCROW_DEPLOY_BLOCK never has to be guessed.
   let lo = 0n;
   let hi = await client.getBlockNumber();
@@ -319,7 +388,13 @@ async function main() {
 
   console.log();
   if (!ownerIsExpected) {
-    if (ownerOverrideRaw) {
+    if (pendingOwner !== null && pendingOwner.toLowerCase() === expectedOwner.toLowerCase()) {
+      console.log(`✗ OWNERSHIP NOMINATED BUT NOT ACCEPTED (NOR-537 two-step transfer).`);
+      console.log(`  pendingOwner() is ${pendingOwner}, but owner() is still ${owner}.`);
+      console.log("  Nothing moves until the nominee itself calls acceptOwnership() — see");
+      console.log("  docs/runbooks/ESCROW-REDEPLOY.md step 1. If it was accepted moments ago, re-run");
+      console.log("  before concluding: a lagging RPC returns the pre-acceptance state (Lessons-Learned §16).");
+    } else if (ownerOverrideRaw) {
       console.log(`✗ OWNER IS NOT THE EXPECTED ADDRESS.`);
       console.log(`  expected ${expectedOwner} (--owner)`);
       console.log(`  actual   ${owner}`);
@@ -330,6 +405,13 @@ async function main() {
       console.log("  re-run with --owner=0xSAFE to verify against it, and record it in");
       console.log("  chain-constants.json once verify-contract-owner.mjs passes against it.");
     }
+    process.exit(1);
+  }
+  if (pendingOwner !== null && !pendingClear) {
+    console.log(`✗ A TRANSFER IS PENDING — pendingOwner() is ${pendingOwner}.`);
+    console.log("  Under Ownable2Step that address can take the contract at any time by calling");
+    console.log("  acceptOwnership(). If the nomination is intended, finish it; if not, the owner");
+    console.log(`  cancels it with transferOwnership(${zeroAddress}).`);
     process.exit(1);
   }
   if (!signerAccepted) {
@@ -358,6 +440,7 @@ async function main() {
   }
   console.log("✓ CLEAN — v2, owner verified, verdict signer accepted.");
   console.log(`  Owner/signer separation: ${signerIsOwner ? "NOT separated (same key) — known open item, CC-090" : "separated"}.`);
+  console.log(`  NOR-537 hardening: ${hardeningAbsent ? "ABSENT (testnet — reported above)" : "present, no transfer pending"}.`);
   console.log("  Whether the locked balance is accounted for is a separate question:");
   console.log("    node --env-file=.env.local scripts/audit/verify-escrow-solvency.mjs");
 }

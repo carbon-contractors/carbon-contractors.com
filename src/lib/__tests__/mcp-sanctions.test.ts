@@ -36,6 +36,7 @@ vi.mock("@/lib/db/tasks", () => ({
   updateTaskStatus: vi.fn(),
   countCommittedTasks: vi.fn(),
   findTaskByIdempotencyKey: vi.fn().mockResolvedValue(null),
+  lapseExpiredOffers: vi.fn().mockResolvedValue(0),
   WORKER_CONCURRENCY_CAP: 3,
 }));
 

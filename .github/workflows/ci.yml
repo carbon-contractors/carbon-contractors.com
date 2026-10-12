@@ -65,8 +65,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Fails on any high or critical advisory outside scripts/audit-allowlist.json, and on any
+      # allowlist entry past its review date. Replaces a bare `npm audit --audit-level=high`,
+      # which could not express an advisory with no patched release (braces, 2026-10-12).
       - name: Security audit
-        run: npm audit --audit-level=high
+        run: node scripts/check-audit.mjs
 
       # Offline, no dependencies — the script runs before `npm install` by design.
       # 248 lines across CLAUDE.md, Lessons-Learned.md and CC-025.md were double-encoded
