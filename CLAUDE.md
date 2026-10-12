@@ -446,7 +446,8 @@ npm run monitors:list    # Offline — validates the monitor registry. Runs in C
 npm run seed             # Seeds demo workers into Supabase (fixed in CC-017; needs real env)
 ```
 
-CI runs `npm ci`, `npm audit --audit-level=high`, lint, typecheck, compile, `typecheck:contracts`,
+CI runs `npm ci`, the dependency audit (`scripts/check-audit.mjs`: high/critical fail unless in
+`scripts/audit-allowlist.json`, and an entry past its `review_by` date fails too), lint, typecheck, compile, `typecheck:contracts`,
 the ABI drift check, `test:contracts`, `monitors:list`, test, build. The audit step fails the build
 on high-severity findings, so a stale dependency tree breaks CI rather than merging quietly.
 
