@@ -68,6 +68,19 @@ pseudonymous; wallets and track records are what other users see.
 Reduces the data held and lets the platform start under A. Needs a cap design and an enforcement
 point, and depends on the separate decision on escrow value caps.
 
+**D — Analytics-led, with thin or no ID.** Wallet risk screening is the primary control. Both wallets
+are screened before a task is funded and again before payout (CC-099 ships OFAC list screening now,
+with an optional Chainalysis layer; a full blockchain-analytics provider such as Chainalysis, TRM
+Labs or Elliptic would add transaction history and source-of-funds risk). Identity documents are
+either not collected (as in A) or limited to a light check at a threshold (as in C). The argument for
+D: document checks stop casual fraud but not organised launderers, who can forge or borrow
+identities, whereas chain history cannot be forged and shows where funds came from and went. The
+limits: analytics measures the risk of a wallet, not who the customer is, and whether it can stand
+in for customer due diligence under the Act is a legal question for counsel, not an engineering
+one (Q6(b) in the `CC-098` brief asks it, and the answer may be that simplified due diligence is the
+route). It also does not tie a wallet to one human, so one person running many wallets is not caught.
+D combines with A or C; it is not an alternative to them.
+
 Under B or C identity data may never go on `humans`, which is world-readable by design (`CC-030`).
 
 ## Open items
@@ -83,7 +96,10 @@ Under B or C identity data may never go on `humans`, which is world-readable by 
    settlement plus the dispute window.
 6. Whether the ATO sharing economy reporting regime applies, and if so, collecting its seller
    fields in the same design so identity is not collected twice.
-7. Without a stake, is there any other cheap Sybil control (rate limits per wallet age, counterparty
+7. Does wallet analytics (option D) satisfy, or reduce, any customer due diligence obligation, and
+   which provider and coverage on Base would be needed? CC-099 still has Chainalysis Base coverage
+   and the API contract unconfirmed.
+8. Without a stake, is there any other cheap Sybil control (rate limits per wallet age, counterparty
    diversity in the score, value caps for new wallets) that would be enough on its own?
 
 ## Consequences if accepted
