@@ -1046,6 +1046,47 @@ export default function DashboardPage() {
     }
   }
 
+  /**
+   * Funded + deadline passed, called by the funding AGENT → refund (CC-119).
+   *
+   * expireTask is agent-only (ADR-0001 A1.2) and pays the agent in the same transaction, so
+   * nothing but the agent's own wallet can ever send it — the platform has no path, by
+   * design. This button is the only product surface for it.
+   */
+  async function handleExpireTask(task: Task) {
+    if (!escrowContract || !address) return;
+    setActionBusy(task.payment_request_id);
+    setActionMsg((prev) => ({
+      ...prev,
+      [task.id]: { ok: true, text: "Confirm expireTask in your wallet…" },
+    }));
+    try {
+      await ensureAppChain();
+      await writeContractAsync({
+        chainId: appChain.id,
+        address: escrowContract,
+        abi: CARBON_ESCROW_ABI,
+        functionName: "expireTask",
+        args: [taskIdOf(task)],
+      });
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: true, text: "Refund submitted — your USDC returns once the transaction confirms." },
+      }));
+    } catch (err) {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: false,
+          text: explainWriteError(err, "Refund was not sent.", appChain.name),
+        },
+      }));
+    } finally {
+      setActionBusy(null);
+      fetchData();
+    }
+  }
+
   /** Delivered + review window elapsed → pull-payment claim, no verdict needed. */
   async function handleClaimAfterReview(task: Task) {
     if (!escrowContract || !address) return;
@@ -2111,6 +2152,13 @@ export default function DashboardPage() {
                     address &&
                       task.to_human_wallet.toLowerCase() === address.toLowerCase(),
                   );
+                  // The contract is the authority on who the agent is (CC-037); the DB
+                  // column is only the fallback when the chain read failed.
+                  const isAgentForTask = Boolean(
+                    address &&
+                      (task.on_chain?.agent ?? task.from_agent_wallet).toLowerCase() ===
+                        address.toLowerCase(),
+                  );
                   const busy = actionBusy === task.payment_request_id;
                   const specDisplay = parseSpecForDisplay(task.acceptance_spec);
                   const specCriteria = parseSpecCriteria(task.acceptance_spec);
@@ -2339,6 +2387,28 @@ export default function DashboardPage() {
                             longer be submitted. The hiring agent can now reclaim their
                             funds; there is nothing further to do on your side.
                           </p>
+                        </div>
+                      )}
+
+                    {/* ── Reclaim (CC-119): the AGENT's refund once the deadline passes ── */}
+                    {isAgentForTask &&
+                      escrowContract &&
+                      task.on_chain?.state === "Funded" &&
+                      nowSec >= task.on_chain.deadline && (
+                        <div className={styles.workerActionSection}>
+                          <p className={styles.actionNote}>
+                            The delivery deadline passed on{" "}
+                            {formatDeadline(task.on_chain.deadline)} and no work was
+                            submitted. Your funds stay in escrow until you reclaim them
+                            from the wallet that funded this task — nobody else can.
+                          </p>
+                          <button
+                            className={styles.actionBtn}
+                            onClick={() => handleExpireTask(task)}
+                            disabled={busy}
+                          >
+                            {busy ? "Working..." : "Reclaim funds (deadline passed)"}
+                          </button>
                         </div>
                       )}
 
