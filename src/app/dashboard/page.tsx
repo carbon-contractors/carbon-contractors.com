@@ -12,6 +12,7 @@ import {
 import { parseSpecCriteria, parseSpecForDisplay } from "@/lib/spec/display";
 import type { AcceptanceSpec } from "@/lib/spec/schema";
 import { explainWriteError } from "@/lib/contracts/reverts";
+import { CARBON_ESCROW_ABI } from "@/lib/contracts/escrow-abi";
 import { useEnsureAppChain } from "@/lib/wallet/useEnsureAppChain";
 import {
   UPLOAD_ACCEPT_ATTRIBUTE,
@@ -39,90 +40,12 @@ import styles from "./dashboard.module.css";
 
 // ── ABIs for write operations ───────────────────────────────────────────────
 
-// CC-092: the v2 write paths. submitWork echoes the task's committed specHash
-// as specVersionAck — that is what makes goalpost-moving impossible. The
-// verdict-carrying calls take the tuple + signature from /api/verdict.
-const VERDICT_TUPLE_COMPONENTS = [
-  { name: "taskId", type: "bytes32" },
-  { name: "specHash", type: "bytes32" },
-  { name: "evidenceHash", type: "bytes32" },
-  { name: "checkerHash", type: "bytes32" },
-  { name: "passed", type: "bool" },
-  { name: "breakdownHash", type: "bytes32" },
-  { name: "expiry", type: "uint256" },
-  { name: "nonce", type: "uint256" },
-] as const;
-
-const SUBMIT_WORK_ABI = [
-  {
-    type: "function",
-    name: "submitWork",
-    inputs: [
-      { name: "taskId", type: "bytes32" },
-      { name: "evidenceHash", type: "bytes32" },
-      { name: "specVersionAck", type: "bytes32" },
-      { name: "attestationUid", type: "bytes32" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
-
-const RELEASE_AFTER_REVIEW_ABI = [
-  {
-    type: "function",
-    name: "releaseAfterReview",
-    inputs: [{ name: "taskId", type: "bytes32" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
-
-/**
- * ADR-0006 D3. The counterpart to releaseAfterReview one state along: when an
- * arbitration runs out of time without a ruling, the worker claims by default.
- *
- * A separate function, not a flag on the other one — so the dashboard has to pick, and
- * picking wrong reverts. That is the whole reason `arbitrationClock` is plumbed through
- * from the chain read rather than assumed.
- */
-const RELEASE_AFTER_ARBITRATION_ABI = [
-  {
-    type: "function",
-    name: "releaseAfterArbitration",
-    inputs: [{ name: "taskId", type: "bytes32" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
-
-const CLAIM_WITH_VERDICT_ABI = [
-  {
-    type: "function",
-    name: "claimWithVerdict",
-    inputs: [
-      { name: "taskId", type: "bytes32" },
-      { name: "verdict", type: "tuple", components: VERDICT_TUPLE_COMPONENTS },
-      { name: "signature", type: "bytes" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
-
-const DISPUTE_ABI = [
-  {
-    type: "function",
-    name: "disputeTask",
-    inputs: [
-      { name: "taskId", type: "bytes32" },
-      { name: "verdict", type: "tuple", components: VERDICT_TUPLE_COMPONENTS },
-      { name: "signature", type: "bytes" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-] as const;
+// CC-092: the v2 write paths all use the generated escrow ABI, not hand-written
+// fragments. A fragment has no `error` entries, so viem cannot decode a custom revert and
+// the worker sees a bare "contract function reverted" instead of `DeadlinePassed` and the
+// like (CC-119). submitWork echoes the task's committed specHash as specVersionAck — that
+// is what makes goalpost-moving impossible. The verdict-carrying calls take the tuple +
+// signature from /api/verdict.
 
 /** CC-036 slot — zero until EAS lands. */
 const ZERO_ATTESTATION_UID = "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -1088,7 +1011,7 @@ export default function DashboardPage() {
       await writeContractAsync({
         chainId: appChain.id,
         address: escrowContract,
-        abi: SUBMIT_WORK_ABI,
+        abi: CARBON_ESCROW_ABI,
         functionName: "submitWork",
         args: [
           taskIdOf(task),
@@ -1136,7 +1059,7 @@ export default function DashboardPage() {
       await writeContractAsync({
         chainId: appChain.id,
         address: escrowContract,
-        abi: RELEASE_AFTER_REVIEW_ABI,
+        abi: CARBON_ESCROW_ABI,
         functionName: "releaseAfterReview",
         args: [taskIdOf(task)],
       });
@@ -1181,7 +1104,7 @@ export default function DashboardPage() {
       await writeContractAsync({
         chainId: appChain.id,
         address: escrowContract,
-        abi: RELEASE_AFTER_ARBITRATION_ABI,
+        abi: CARBON_ESCROW_ABI,
         functionName: "releaseAfterArbitration",
         args: [taskIdOf(task)],
       });
@@ -1267,7 +1190,7 @@ export default function DashboardPage() {
       await writeContractAsync({
         chainId: appChain.id,
         address: escrowContract,
-        abi: CLAIM_WITH_VERDICT_ABI,
+        abi: CARBON_ESCROW_ABI,
         functionName: "claimWithVerdict",
         args: [taskIdOf(task), verdictTupleForContract(verdict), data.signature],
       });
@@ -1344,7 +1267,7 @@ export default function DashboardPage() {
       await writeContractAsync({
         chainId: appChain.id,
         address: escrowContract,
-        abi: DISPUTE_ABI,
+        abi: CARBON_ESCROW_ABI,
         functionName: "disputeTask",
         args: [taskIdOf(task), verdictTupleForContract(verdict), data.signature],
       });
@@ -2372,7 +2295,8 @@ export default function DashboardPage() {
                       escrowContract &&
                       task.on_chain &&
                       task.status === "active" &&
-                      task.on_chain.state === "Funded" && (
+                      task.on_chain.state === "Funded" &&
+                      nowSec < task.on_chain.deadline && (
                         <div className={styles.workerActionSection}>
                           <button
                             className={styles.actionToggle}
@@ -2401,6 +2325,20 @@ export default function DashboardPage() {
                               </button>
                             </div>
                           )}
+                        </div>
+                      )}
+
+                    {/* ── Lapsed (CC-119): Funded but past the delivery deadline ── */}
+                    {isWorkerForTask &&
+                      task.on_chain?.state === "Funded" &&
+                      nowSec >= task.on_chain.deadline && (
+                        <div className={styles.workerActionSection}>
+                          <p className={styles.actionNote}>
+                            The delivery deadline passed on{" "}
+                            {formatDeadline(task.on_chain.deadline)}, so work can no
+                            longer be submitted. The hiring agent can now reclaim their
+                            funds; there is nothing further to do on your side.
+                          </p>
                         </div>
                       )}
 
