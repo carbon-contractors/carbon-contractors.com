@@ -57,6 +57,7 @@
  * Exit codes: 0 clean · 1 violation · 2 misconfigured · 3 transient RPC failure
  */
 
+import { splitAcknowledged } from "./unclaimed-exceptions.mjs";
 import { createPublicClient, http, getAddress, formatUnits, parseAbiItem } from "viem";
 import { base, baseSepolia } from "viem/chains";
 import { withRpcRetry, isTransient, shortError, chainIdMismatch, rangeLimitHint } from "./rpc-retry.mjs";
@@ -368,8 +369,17 @@ async function main() {
 
   claimable.sort((a, b) => b.age - a.age);
   timedOutArbitration.sort((a, b) => b.age - a.age);
-  const breaches = claimable.filter((c) => c.age > maxAgeDays * 86_400);
-  const arbBreaches = timedOutArbitration.filter((c) => c.age > maxAgeDays * 86_400);
+  // Known-unclaimable test tasks (CC-079) stay in every count and every printed row, but
+  // stop deciding the exit code. See unclaimed-exceptions.mjs for why this is narrow.
+  const overAge = (c) => c.age > maxAgeDays * 86_400;
+  const split = (rows) => splitAcknowledged(rows.filter(overAge), escrow, asOf);
+  const claimSplit = split(claimable);
+  const arbSplit = split(timedOutArbitration);
+  const breaches = claimSplit.live;
+  const arbBreaches = arbSplit.live;
+  const acknowledged = [...claimSplit.acknowledged, ...arbSplit.acknowledged];
+  const lapsedExceptions = [...claimSplit.lapsed, ...arbSplit.lapsed];
+  const ackIds = new Set(acknowledged.map((a) => a.row.taskId.toLowerCase()));
   const heldClaimable = claimable.reduce((s, c) => s + c.amount, 0n);
   const heldArb = timedOutArbitration.reduce((s, c) => s + c.amount, 0n);
   const unstamped = liveArbitration.filter((c) => c.unstamped);
@@ -386,7 +396,7 @@ async function main() {
   console.log("");
 
   for (const c of claimable.slice(0, 20)) {
-    const flag = c.age > maxAgeDays * 86_400 ? "BREACH" : "  ok  ";
+    const flag = ackIds.has(c.taskId.toLowerCase()) ? "ACKED " : overAge(c) ? "BREACH" : "  ok  ";
     console.log(
       `  ${flag}  ${short(c.taskId)}  ${usdcFmt(c.amount).padStart(14)}  claimable for ${days(c.age).padStart(7)} d  worker ${c.worker}`,
     );
@@ -395,7 +405,7 @@ async function main() {
   if (claimable.length > 0) console.log("");
 
   for (const c of timedOutArbitration.slice(0, 20)) {
-    const flag = c.age > maxAgeDays * 86_400 ? "BREACH" : "  ok  ";
+    const flag = ackIds.has(c.taskId.toLowerCase()) ? "ACKED " : overAge(c) ? "BREACH" : "  ok  ";
     console.log(
       `  ${flag}  ${short(c.taskId)}  ${usdcFmt(c.amount).padStart(14)}  arbitration timed out ${days(c.age).padStart(7)} d ago  worker ${c.worker}`,
     );
@@ -433,6 +443,17 @@ async function main() {
     console.log("made a pull-payment. Same UX failure, other party. Not asserted on: CC-085");
     console.log("specifies the worker case only, and there is no baseline yet for this one.");
     console.log("");
+  }
+
+  for (const { row, entry } of acknowledged) {
+    console.log("");
+    console.log(`ACKNOWLEDGED — ${short(row.taskId)} is excluded from the verdict (${entry.ticket}, review by ${entry.review_by}):`);
+    console.log(`  ${entry.reason}`);
+  }
+  for (const entry of lapsedExceptions) {
+    console.log("");
+    console.log(`EXCEPTION LAPSED — ${short(entry.taskId)} (${entry.ticket}) passed its review_by of ${entry.review_by}`);
+    console.log("  and counts again. Re-confirm it is still unclaimable and extend review_by, or remove it.");
   }
 
   if (breaches.length === 0 && arbBreaches.length === 0) {
