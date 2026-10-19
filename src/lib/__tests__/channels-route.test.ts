@@ -12,6 +12,17 @@ const mockGetChannelById = vi.fn();
 const mockRegisterNotificationChannel = vi.fn();
 const mockRemoveNotificationChannel = vi.fn();
 const mockSetChannelAutoBooking = vi.fn();
+// CC-108: registration resolves the webhook host. Hermetic suite — stub the
+// resolver to "public"; webhook-target.test.ts covers the real rules.
+const mockResolveWebhookTarget = vi.fn();
+vi.mock("@/lib/notifications/webhook-target", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/notifications/webhook-target")>();
+  return {
+    ...actual,
+    resolveWebhookTarget: (...args: unknown[]) => mockResolveWebhookTarget(...args),
+  };
+});
+
 vi.mock("@/lib/db/notifications", () => ({
   getChannelsForContractor: (...args: unknown[]) =>
     mockGetChannelsForContractor(...args),
@@ -77,6 +88,7 @@ function mockRegisteredHuman(wallet = WORKER_WALLET, id = CONTRACTOR_ID) {
 }
 
 beforeEach(() => {
+    mockResolveWebhookTarget.mockResolvedValue({ ok: true });
   vi.clearAllMocks();
   mockVerifyChallengeSignature.mockResolvedValue(WORKER_WALLET);
 });
@@ -323,6 +335,31 @@ describe("POST /api/channels", () => {
       }),
     );
     expect(res.status).toBe(201);
+  });
+
+  // CC-108: the real resolver, with DNS replaced by a fixed answer.
+  it.each([
+    ["https://127.0.0.1/hook", "127.0.0.1", "private_address"],
+    ["https://hooks.example.com:8080/hook", "93.184.216.34", "port_not_allowed"],
+    ["https://hooks.example.com/hook", "192.168.1.10", "private_address"],
+    ["https://0x7f.0.0.1/hook", "127.0.0.1", "private_address"], // URL parser normalises to 127.0.0.1
+  ])("rejects a webhook at %s (resolves %s)", async (address, resolved, reason) => {
+    mockRegisteredHuman();
+    const actual = await vi.importActual<typeof import("@/lib/notifications/webhook-target")>(
+      "@/lib/notifications/webhook-target",
+    );
+    mockResolveWebhookTarget.mockImplementation((url: string) =>
+      actual.resolveWebhookTarget(url, async () => [{ address: resolved, family: 4 }]),
+    );
+
+    const { POST } = await import("@/app/api/channels/route");
+    const res = await POST(
+      makeRequest("POST", { headers: AUTH_HEADERS, body: { type: "webhook", address } }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.reason).toBe(reason);
+    expect(mockRegisterNotificationChannel).not.toHaveBeenCalled();
   });
 
   it("accepts a negative Telegram group chat ID", async () => {

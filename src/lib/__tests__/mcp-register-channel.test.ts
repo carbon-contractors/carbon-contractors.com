@@ -3,6 +3,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMcpServer } from "@/lib/mcp/server";
 
 const mockGetHumanByWallet = vi.fn();
+// CC-108: registration resolves the webhook host. Hermetic suite — stub the
+// resolver to "public"; webhook-target.test.ts covers the real rules.
+const mockResolveWebhookTarget = vi.fn();
+vi.mock("@/lib/notifications/webhook-target", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/notifications/webhook-target")>();
+  return {
+    ...actual,
+    resolveWebhookTarget: (...args: unknown[]) => mockResolveWebhookTarget(...args),
+  };
+});
+
 vi.mock("@/lib/db/whitepages", () => ({
   getHumanByWallet: (...args: unknown[]) => mockGetHumanByWallet(...args),
   searchByCategory: vi.fn(),
@@ -37,6 +48,7 @@ async function callRegisterChannel(
 describe("register_notification_channel MCP tool (CC-045)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockResolveWebhookTarget.mockResolvedValue({ ok: true });
     mockGetHumanByWallet.mockResolvedValue({
       id: CALLER_CONTRACTOR_ID,
       wallet: WORKER_WALLET.toLowerCase(),
@@ -166,5 +178,27 @@ describe("register_notification_channel MCP tool (CC-045)", () => {
     });
 
     expect(result.content[0].text).not.toContain("private@example.com");
+  });
+
+  // CC-108: the real resolver, with DNS replaced by a fixed answer.
+  it.each([
+    ["https://10.0.0.5/hook", "203.0.113.9", "webhook_private_address"],
+    ["https://hooks.example.com:8443/hook", "93.184.216.34", "webhook_port_not_allowed"],
+    ["https://metadata.google.internal/", "93.184.216.34", "webhook_internal_hostname"],
+    ["https://rebind.example.com/hook", "169.254.169.254", "webhook_private_address"],
+  ])("rejects a webhook at %s (resolves %s)", async (address, resolved, reason) => {
+    const actual = await vi.importActual<typeof import("@/lib/notifications/webhook-target")>(
+      "@/lib/notifications/webhook-target",
+    );
+    mockResolveWebhookTarget.mockImplementation((url: string) =>
+      actual.resolveWebhookTarget(url, async () => [{ address: resolved, family: 4 }]),
+    );
+
+    const { json } = await callRegisterChannel({ type: "webhook", address });
+
+    expect(json.ok).toBe(false);
+    expect(json.code).toBe("INVALID_ARGUMENT");
+    expect(json.reason).toBe(reason);
+    expect(mockRegisterNotificationChannel).not.toHaveBeenCalled();
   });
 });

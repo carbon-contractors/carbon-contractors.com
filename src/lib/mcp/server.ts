@@ -62,6 +62,10 @@ import { isIntakePaused } from "@/lib/config";
 import { isWalletSanctioned } from "@/lib/sanctions";
 import { evaluateAwolAtBooking, type AwolBookingDecision } from "@/lib/awol";
 import { log } from "@/lib/logging";
+import {
+  resolveWebhookTarget,
+  WEBHOOK_REJECTION_MESSAGES,
+} from "@/lib/notifications/webhook-target";
 
 /** Context provided when a caller authenticates their session. */
 export interface McpSessionContext {
@@ -916,6 +920,18 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             "INVALID_ARGUMENT",
             { reason: "invalid_channel_address" },
           );
+        }
+
+        // CC-108: same rule as /api/channels — a webhook must resolve public.
+        if (type === "webhook") {
+          const target = await resolveWebhookTarget(address.trim());
+          if (!target.ok) {
+            return toolError(
+              WEBHOOK_REJECTION_MESSAGES[target.reason],
+              "INVALID_ARGUMENT",
+              { reason: `webhook_${target.reason}` },
+            );
+          }
         }
 
         // The channel is bound to the caller's own contractor record — never

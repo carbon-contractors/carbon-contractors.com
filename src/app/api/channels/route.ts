@@ -34,6 +34,10 @@ import {
 } from "@/lib/validation";
 import { log } from "@/lib/logging";
 import { safeErrorResponse } from "@/lib/errors";
+import {
+  resolveWebhookTarget,
+  WEBHOOK_REJECTION_MESSAGES,
+} from "@/lib/notifications/webhook-target";
 
 const CHANNEL_TYPES = ["email", "webhook", "telegram", "discord"] as const;
 
@@ -191,6 +195,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { ok: false, error: INVALID_ADDRESS_MESSAGES[type] },
         { status: 400 }
       );
+    }
+
+    // CC-108: a webhook is a server-side fetch target, so it must resolve public.
+    if (type === "webhook") {
+      const target = await resolveWebhookTarget(address.trim());
+      if (!target.ok) {
+        return NextResponse.json(
+          { ok: false, error: WEBHOOK_REJECTION_MESSAGES[target.reason], reason: target.reason },
+          { status: 400 }
+        );
+      }
     }
 
     const human = await getHumanByWallet(auth.wallet);
