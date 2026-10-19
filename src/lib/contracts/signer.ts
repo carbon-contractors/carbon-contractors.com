@@ -165,56 +165,11 @@ export async function resolveDisputeOnChain(
   return receipt.transactionHash;
 }
 
-/**
- * Call escrow.expireTask(taskId) on-chain to refund the agent.
- *
- * **CC-082 made this unreachable for the platform signer, deliberately.** In v1
- * `expireTask` was callable by anyone, so this worked. `ADR-0001` Amendment 1 A1.2 made
- * refunds a pull-payment the agent claims for itself, so `expireTask` is now agent-only
- * and this reverts with `NotAgent()` whoever calls it from here.
- *
- * That is the intended posture — the platform should not be in any settlement path — but
- * it means this function is dead until the agent-side call exists. Removing it belongs
- * with `CC-081` Defect 1, which rewrites the whole app layer against the v2 ABI.
- *
- * CC-081 Defect 3: like `resolveDisputeOnChain`, this waits for the receipt before
- * returning, so a caller gating a DB status change on the result is gating on a
- * confirmed transaction, not a submitted one.
- */
-export async function expireTaskOnChain(
-  taskId: `0x${string}`,
-): Promise<Hash> {
-  const escrow = getEscrowAddress();
-  const wallet = await getWalletClient();
-  const pub = getPublicClient();
-  const account = await getPlatformAccount();
-
-  log("info", "signer_expire_task_submit", { taskId, escrow });
-
-  const { request } = await pub.simulateContract({
-    account,
-    address: escrow,
-    abi: CARBON_ESCROW_ABI,
-    functionName: "expireTask",
-    args: [taskId],
-  });
-
-  const hash = await wallet.writeContract(request);
-
-  const receipt = await pub.waitForTransactionReceipt({ hash });
-  if (receipt.status !== "success") {
-    throw new Error(
-      `expireTask transaction reverted on-chain: ${hash} (CC-081 Defect 3)`,
-    );
-  }
-
-  log("info", "signer_expire_task_confirmed", {
-    taskId,
-    txHash: receipt.transactionHash,
-    blockNumber: Number(receipt.blockNumber),
-  });
-  return receipt.transactionHash;
-}
+// expireTaskOnChain was removed here (CC-119). expireTask is agent-only
+// (ADR-0001 A1.2), so it reverted NotAgent() from the platform signer every time.
+// The refund is the agent's own call — the dashboard Reclaim button, or the
+// `reclaim` hint get_task_status returns over MCP. Do not reintroduce a platform
+// path to it.
 
 /** Reset cached clients (for testing). */
 export function _resetSignerClients(): void {

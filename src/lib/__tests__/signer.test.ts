@@ -32,9 +32,10 @@ vi.mock("@/lib/contracts/kms-signer", () => ({
  *
  * CC-080: the function those tests exercised, completeTaskOnChain, is gone — it could
  * never succeed, because completeTask is agent-only and the platform signer is the
- * wrong sender. The same harness now covers the two remaining write functions
- * (resolveDisputeOnChain, expireTaskOnChain), and one test pins the removal itself:
- * a callable that always reverts is how the dead path survived unnoticed for so long.
+ * wrong sender. CC-119 removed expireTaskOnChain for the same reason (expireTask is
+ * agent-only). The harness now covers the one remaining write, resolveDisputeOnChain,
+ * and two tests pin the removals: a callable that always reverts is how the dead path
+ * survived unnoticed for so long.
  */
 vi.mock("viem", async (importOriginal) => {
   const actual = await importOriginal<typeof import("viem")>();
@@ -91,6 +92,14 @@ describe("signer", () => {
     expect((signer as Record<string, unknown>).completeTaskOnChain).toBeUndefined();
   });
 
+  it("no longer exports expireTaskOnChain — CC-119 removed it", async () => {
+    stubEnv();
+    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
+
+    const signer = await import("@/lib/contracts/signer");
+    expect((signer as Record<string, unknown>).expireTaskOnChain).toBeUndefined();
+  });
+
   it("throws when NEXT_PUBLIC_ESCROW_CONTRACT is not set", async () => {
     stubEnv();
     vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
@@ -103,13 +112,12 @@ describe("signer", () => {
     );
   });
 
-  it("exports the two remaining on-chain write functions", async () => {
+  it("exports the remaining on-chain write function", async () => {
     stubEnv();
     vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
 
     const signer = await import("@/lib/contracts/signer");
     expect(typeof signer.resolveDisputeOnChain).toBe("function");
-    expect(typeof signer.expireTaskOnChain).toBe("function");
   });
 
   it("_resetSignerClients clears cached clients", async () => {
@@ -149,8 +157,8 @@ describe("signer", () => {
 
     // The transport is mocked, so this completes rather than throwing. No try/catch —
     // if it rejects, that is a real failure and the test should say so.
-    const { expireTaskOnChain } = await import("@/lib/contracts/signer");
-    const hash = await expireTaskOnChain(TASK_ID);
+    const { resolveDisputeOnChain } = await import("@/lib/contracts/signer");
+    const hash = await resolveDisputeOnChain(TASK_ID, true);
 
     expect(mockCreateKmsAccount).toHaveBeenCalled();
     expect(hash).toBe("0x" + "ff".repeat(32));
@@ -194,8 +202,8 @@ describe("signer", () => {
     vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
     mockSimulateContract.mockRejectedValue(new Error("execution reverted: NotAgent()"));
 
-    const { expireTaskOnChain } = await import("@/lib/contracts/signer");
-    await expect(expireTaskOnChain(TASK_ID)).rejects.toThrow("NotAgent()");
+    const { resolveDisputeOnChain } = await import("@/lib/contracts/signer");
+    await expect(resolveDisputeOnChain(TASK_ID, true)).rejects.toThrow("NotAgent()");
 
     // This is the property the original test assumed and never checked.
     expect(mockWriteContract).not.toHaveBeenCalled();
@@ -226,27 +234,6 @@ describe("signer", () => {
     expect(hash).toBe(confirmed);
   });
 
-  it("expireTaskOnChain waits for the receipt before returning the hash", async () => {
-    stubEnv();
-    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
-    const confirmed = "0x" + "dd".repeat(32);
-    mockWaitForReceipt.mockResolvedValue({
-      status: "success",
-      transactionHash: confirmed,
-      blockNumber: BigInt(999),
-    });
-
-    const { expireTaskOnChain } = await import("@/lib/contracts/signer");
-    const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
-    const hash = await expireTaskOnChain(taskId);
-
-    expect(mockWaitForReceipt).toHaveBeenCalledTimes(1);
-    expect(mockWaitForReceipt).toHaveBeenCalledWith({
-      hash: "0x" + "ff".repeat(32),
-    });
-    expect(hash).toBe(confirmed);
-  });
-
   it("resolveDisputeOnChain throws when the transaction reverts after submission", async () => {
     stubEnv();
     vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
@@ -263,23 +250,6 @@ describe("signer", () => {
     const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
 
     await expect(resolveDisputeOnChain(taskId, false)).rejects.toThrow(
-      "reverted on-chain",
-    );
-  });
-
-  it("expireTaskOnChain throws when the transaction reverts after submission", async () => {
-    stubEnv();
-    vi.stubEnv("DEPLOYER_PRIVATE_KEY", TEST_PRIVATE_KEY);
-    mockWaitForReceipt.mockResolvedValue({
-      status: "reverted",
-      transactionHash: "0x" + "ff".repeat(32),
-      blockNumber: BigInt(999),
-    });
-
-    const { expireTaskOnChain } = await import("@/lib/contracts/signer");
-    const taskId = ("0x" + "ab".repeat(32)) as `0x${string}`;
-
-    await expect(expireTaskOnChain(taskId)).rejects.toThrow(
       "reverted on-chain",
     );
   });

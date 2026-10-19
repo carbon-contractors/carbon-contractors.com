@@ -137,12 +137,12 @@ exists rather than reasoning from this file.**
   `Completed` moved 2 → 3 and everything above `Funded` shifted, so any hard-coded state integer
   predating 2026-08-15 is wrong. → `CC-082`
   · `node --env-file=.env.local scripts/audit/verify-escrow-deployment.mjs`
-- **`completeTaskOnChain` is gone (CC-080, done); `expireTaskOnChain` still cannot succeed.**
-  `completeTask` is agent-only and the platform signer was structurally the wrong sender, so the
-  function was removed outright — `confirm_task_completion` now records the confirmation and hands
-  settlement back to the agent. `expireTask` is agent-only too (refunds are a pull-payment the
-  agent claims, `A1.2`), so the remaining function reverts `NotAgent()` from the platform; it
-  fails safely and its removal belongs with `CC-081` Defect 1. → `CC-080`, `ADR-0001` D2/A1.2
+- **`completeTaskOnChain` and `expireTaskOnChain` are both gone (CC-080, CC-119).** Both
+  `completeTask` and `expireTask` are agent-only, so the platform signer was structurally the wrong
+  sender and neither function could ever succeed. The agent refunds a lapsed task itself: the
+  dashboard Reclaim button, or the `reclaim` hint `get_task_status` returns over MCP. The platform
+  stays out of the settlement path. Do not reintroduce a platform call to either.
+  → `CC-080`, `CC-119`, `ADR-0001` D2/A1.2, `ADR-0015` (proposed)
 - **Dispute authority is decided; do not re-guess it.** Either party may dispute, but **only by
   presenting a signed failing verdict** — there is no bare-assertion dispute, because one would hand
   the agent both outcomes. `completeTask` stays agent-only: an agent may always choose to pay, never

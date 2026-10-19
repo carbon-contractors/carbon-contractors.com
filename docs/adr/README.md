@@ -37,6 +37,7 @@ made.
 | [ADR-0012](ADR-0012-agent-api-host-split.md) | Two front doors — a bot-friendly API host for agents, a protected website for humans | **proposed** | edge bot protection blocking agents (2026-09-27); amends `ADR-0006` D6 |
 | [ADR-0013](ADR-0013-no-stake-no-fee-identity-verification.md) | No stake, no fee | **accepted** | `NOR-537` F2; the stake/fee contradiction of 2026-10-02; amends `ADR-0007` |
 | [ADR-0014](ADR-0014-identity-verification-and-the-sybil-control.md) | Identity verification and the Sybil control | **proposed** | split from `ADR-0013`; waiting on AUSTRAC and counsel; would supersede `ADR-0002` D1 only if accepted |
+| [ADR-0015](ADR-0015-lapsed-task-refund-surface.md) | The lapsed-task refund stays the agent's own call | **proposed** | `CC-119` items 1–4 |
 
 `ADR-0001` carries three amendments, and each changes decisions stated above it:
 

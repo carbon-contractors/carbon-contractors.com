@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 // Static, not dynamic: `vi.mock` is hoisted above it (see mcp-request-human-work.test.ts).
 import { createMcpServer } from "@/lib/mcp/server";
+import { getOnChainTask } from "@/lib/contracts/escrow";
 
 const mockGetHumanByWallet = vi.fn();
 vi.mock("@/lib/db/whitepages", () => ({
@@ -247,5 +248,77 @@ describe("MCP structured error semantics (CC-046)", () => {
     assertErrorContract(json);
     expect(json.code).toBe("INTERNAL");
     expect(json.retryable).toBe(true);
+  });
+});
+
+// CC-119: an agent with no UI must be able to learn its task lapsed, and how to reclaim.
+describe("get_task_status reclaim hint (CC-119)", () => {
+  const now = () => Math.floor(Date.now() / 1000);
+  const onChain = (state: string, deadline: number) => ({
+    state,
+    amount: BigInt(25_000_000),
+    deadline: BigInt(deadline),
+    reviewWindow: 0,
+    submittedAt: BigInt(0),
+    reviewDeadline: BigInt(0),
+    disputedAt: BigInt(0),
+    arbitrationDeadline: BigInt(0),
+    arbitrationClock: true,
+    specHash: "0x",
+    evidenceHash: "0x",
+    verdictHash: "0x",
+    verdictPassed: false,
+    worker: WORKER_WALLET,
+    agent: AGENT_WALLET,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetTaskByPaymentId.mockResolvedValue({
+      payment_request_id: "pr_1",
+      from_agent_wallet: AGENT_WALLET.toLowerCase(),
+      to_human_wallet: WORKER_WALLET.toLowerCase(),
+      status: "active",
+      amount_usdc: 25,
+    });
+  });
+
+  it("returns the expireTask call once a Funded task is past its deadline", async () => {
+    vi.mocked(getOnChainTask).mockResolvedValue(onChain("Funded", now() - 60) as never);
+
+    const { json } = await callTool("get_task_status", { payment_request_id: "pr_1" }, AGENT_WALLET);
+
+    expect(json.reclaim).toEqual({
+      lapsed: true,
+      action: expect.stringContaining("expireTask"),
+      escrow_contract: "0xEscrow00000000000000000000000000000000",
+      function: "expireTask(bytes32)",
+      task_id_bytes32: "0xtaskid-pr_1",
+      callable_by: AGENT_WALLET,
+    });
+  });
+
+  it("omits it before the deadline", async () => {
+    vi.mocked(getOnChainTask).mockResolvedValue(onChain("Funded", now() + 3600) as never);
+
+    const { json } = await callTool("get_task_status", { payment_request_id: "pr_1" }, AGENT_WALLET);
+
+    expect(json.reclaim).toBeUndefined();
+  });
+
+  it("omits it once work is delivered — expireTask is Funded-only", async () => {
+    vi.mocked(getOnChainTask).mockResolvedValue(onChain("Delivered", now() - 60) as never);
+
+    const { json } = await callTool("get_task_status", { payment_request_id: "pr_1" }, AGENT_WALLET);
+
+    expect(json.reclaim).toBeUndefined();
+  });
+
+  it("omits it when the chain read fails", async () => {
+    vi.mocked(getOnChainTask).mockRejectedValue(new Error("rpc down"));
+
+    const { json } = await callTool("get_task_status", { payment_request_id: "pr_1" }, AGENT_WALLET);
+
+    expect(json.reclaim).toBeUndefined();
   });
 });
