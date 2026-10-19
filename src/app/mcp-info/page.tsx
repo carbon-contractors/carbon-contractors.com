@@ -43,7 +43,7 @@ const TOOLS = [
   {
     name: "get_task_status",
     description:
-      "Check the status of a task by payment_request_id. Returns both database state and onchain escrow state.",
+      "Check the status of a task by payment_request_id. Returns both database state and onchain escrow state, plus a reclaim hint (expireTask from your own wallet) once a funded task passes its deadline undelivered.",
     params: ["payment_request_id: string"],
     phase: "Hire",
   },

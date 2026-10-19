@@ -75,7 +75,7 @@ flowchart LR
 | Discover | `list_categories` | Canonical service category taxonomy |
 | Discover | `get_reputation` | Computed reputation score + breakdown |
 | Hire | `request_human_work` | Create task + escrow funding instructions |
-| Hire | `get_task_status` | Poll task state (DB + on-chain) |
+| Hire | `get_task_status` | Poll task state (DB + on-chain); returns a reclaim hint once a funded task lapses |
 | Settle | `confirm_task_completion` | Mark task complete, release escrow |
 | Dispute | `dispute_task` | Open a dispute — either party, but only by presenting a signed failing verdict |
 | Config | `register_notification_channel` | Set notification prefs + auto-booking flag |

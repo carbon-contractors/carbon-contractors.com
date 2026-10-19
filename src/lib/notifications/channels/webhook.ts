@@ -1,11 +1,12 @@
 /**
  * webhook.ts (CC-095)
  * Delivery to a worker-registered generic webhook: signed JSON POST of the full
- * event envelope.
+ * event envelope. Sent through the CC-108 guard: public addresses only, checked
+ * at connect time, no redirects.
  */
 
 import type { NotificationChannel } from "@/lib/db/notifications";
-import { postJson } from "../http";
+import { postJsonToWebhook } from "../webhook-target";
 import { withRetries, type RetryPolicy } from "../retry";
 import { buildEnvelope } from "../messages";
 import type { ChannelDeliveryResult, NotificationEvent, NotificationPayload } from "../types";
@@ -20,7 +21,7 @@ export async function deliverToWebhook(
   const body = JSON.stringify(buildEnvelope(event, payload));
   const headers = signedHeaders(body, webhookSecret());
   const result = await withRetries(
-    () => postJson(channel.address, body, headers, policy.timeoutMs),
+    () => postJsonToWebhook(channel.address, body, headers, policy.timeoutMs),
     policy,
   );
   return finishResult(channel, result);

@@ -34,6 +34,16 @@ vi.mock("@/lib/config", () => ({
   getConfig: () => testConfig,
 }));
 
+// CC-108: webhook delivery goes through node:https with a guarded lookup, which
+// this hermetic suite cannot reach. Route it through the fetch-based postJson so
+// the dispatch assertions below still see every request; the guard itself is
+// covered in webhook-target.test.ts.
+vi.mock("@/lib/notifications/webhook-target", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/notifications/webhook-target")>();
+  const http = await import("@/lib/notifications/http");
+  return { ...actual, postJsonToWebhook: http.postJson };
+});
+
 import {
   notifyContractor,
   dispatchToChannels,

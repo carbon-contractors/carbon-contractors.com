@@ -62,6 +62,10 @@ import { isIntakePaused } from "@/lib/config";
 import { isWalletSanctioned } from "@/lib/sanctions";
 import { evaluateAwolAtBooking, type AwolBookingDecision } from "@/lib/awol";
 import { log } from "@/lib/logging";
+import {
+  resolveWebhookTarget,
+  WEBHOOK_REJECTION_MESSAGES,
+} from "@/lib/notifications/webhook-target";
 
 /** Context provided when a caller authenticates their session. */
 export interface McpSessionContext {
@@ -645,7 +649,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
   // ─── Tool: get_task_status ────────────────────────────────────────────────
   server.tool(
     "get_task_status",
-    "Check the status of a task by payment_request_id. Returns both database state and on-chain escrow state (if contract is deployed).",
+    "Check the status of a task by payment_request_id. Returns both database state and on-chain escrow state (if contract is deployed). If the task is still Funded past its delivery deadline, also returns a `reclaim` object: the agent recovers its USDC by calling escrow.expireTask from its own wallet.",
     {
       payment_request_id: z
         .string()
@@ -692,6 +696,23 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
           }
         }
 
+        // CC-119: a Funded task past its deadline is dead — the worker can no longer
+        // submit — and its USDC sits locked until the agent calls expireTask itself
+        // (agent-only, ADR-0001 A1.2; the platform has no path to it). An agent with
+        // no UI learns that here, with everything it needs to send the call.
+        const reclaim =
+          onChain && "state" in onChain && onChain.state === "Funded" &&
+          Math.floor(Date.now() / 1000) >= onChain.deadline
+            ? {
+                lapsed: true,
+                action: "Call escrow.expireTask(task_id_bytes32) from the agent wallet to refund the full amount.",
+                escrow_contract: escrowConfig.address,
+                function: "expireTask(bytes32)",
+                task_id_bytes32: toTaskId(payment_request_id),
+                callable_by: onChain.agent,
+              }
+            : null;
+
         return {
           content: [
             {
@@ -714,6 +735,7 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
                   created_at: dbTask.created_at,
                 },
                 on_chain: onChain,
+                ...(reclaim ? { reclaim } : {}),
               }),
             },
           ],
@@ -898,6 +920,18 @@ export function createMcpServer(context?: McpSessionContext): McpServer {
             "INVALID_ARGUMENT",
             { reason: "invalid_channel_address" },
           );
+        }
+
+        // CC-108: same rule as /api/channels — a webhook must resolve public.
+        if (type === "webhook") {
+          const target = await resolveWebhookTarget(address.trim());
+          if (!target.ok) {
+            return toolError(
+              WEBHOOK_REJECTION_MESSAGES[target.reason],
+              "INVALID_ARGUMENT",
+              { reason: `webhook_${target.reason}` },
+            );
+          }
         }
 
         // The channel is bound to the caller's own contractor record — never
