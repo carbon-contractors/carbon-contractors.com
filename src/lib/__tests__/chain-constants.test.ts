@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMPLETION_SCHEMA, completionSchemaUid } from "@/lib/attestation/schema";
 import { getCheckerHash } from "@/lib/checker/hash";
+import { hashDomain, keccak256, toHex, type Address } from "viem";
 
 const RAW = readFileSync(join(process.cwd(), "chain-constants.json"), "utf8");
 
@@ -102,6 +103,44 @@ describe("chain-constants.json", () => {
     ];
     expect(new Set(all).size, "four envelopes must stay four values").toBe(4);
     expect(a.eip712Proxy.decision).toMatch(/REJECTED/);
+  });
+
+  it("derives the off-chain attestation envelope, by a method the chain confirms (ADR-0008 A2.7)", () => {
+    // The off-chain format lives in the EAS SDK, not the contract, so there is nothing on
+    // chain to read it from. The derivation is trusted because the SAME method, with the
+    // domain name "EAS", reproduces the delegated domainSeparator that WAS read from the
+    // chain on 2026-08-31. If that cross-check ever fails, the off-chain values are wrong too.
+    const a = constants.protocol.attestations;
+    const o = a.offchainEnvelope;
+    const domainTypes = {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+    } as const;
+    const chainIds: Record<string, number> = { "base-sepolia": 84532, "base-mainnet": 8453 };
+    const domainFor = (name: string, network: string) =>
+      hashDomain({
+        domain: {
+          name,
+          version: a.easVersion[network],
+          chainId: BigInt(chainIds[network]),
+          verifyingContract: a.easAddress[network] as Address,
+        },
+        types: domainTypes,
+      });
+
+    expect(keccak256(toHex(o.typeString))).toBe(o.typeHash);
+    for (const network of Object.keys(chainIds)) {
+      expect(domainFor("EAS", network), `${network} method check`).toBe(a.domainSeparator[network]);
+      expect(domainFor(o.domainName, network), network).toBe(o.domainSeparator[network]);
+    }
+    // Per-network, and never the delegated envelope by another name.
+    expect(o.domainSeparator["base-sepolia"]).not.toBe(o.domainSeparator["base-mainnet"]);
+    expect(o.typeHash).not.toBe(a.attestTypeHash["base-sepolia"]);
+    expect(o.typeHash).not.toBe(a.attestTypeHash["base-mainnet"]);
   });
 
   it("does not claim a registration that has not happened", () => {
