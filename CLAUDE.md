@@ -39,11 +39,11 @@ attempt the one-way migration", not "go public".
 
 **The money path is half proven.** As of 2026-08-15 a worker has been paid on Sepolia by the v2
 escrow, through a signed verdict, with no platform transaction anywhere in the path (`CC-082`).
-Still broken, and all app-layer rather than contract: **`/api/fund-task` strands USDC** because
-x402 pays the contract directly instead of calling `createTask` (`CC-081` Defect 1); the platform's
-own `expireTaskOnChain` can never succeed (`CC-080` — `completeTaskOnChain` was removed there); and
-`resolve_dispute` is still agent-only in the app layer, though the v2 contract no longer permits a
-bare-assertion dispute (`CC-081` Defect 2). Nothing is lost, because the funding path has still never been run.
+The app-layer defects listed here before are fixed: `/api/fund-task` is a confirmation endpoint, not
+a payment recipient (`CC-081` Defect 1); `completeTaskOnChain` and `expireTaskOnChain` are removed
+(`CC-080`, `CC-119`); `resolve_dispute` is gone from MCP (`CC-081` Defect 2). What is unproven is
+the rest of the lifecycle on chain: funding, every settlement route and the arbitration claim
+(`CC-077`–`CC-079`).
 
 ## Start here every session
 

@@ -284,6 +284,96 @@ before anything is published. Added to `CC-036`.
 neither on Base mainnet, at identical bytecode length. Probably public-RPC rate limiting rather
 than a real difference. Nothing here depends on the Indexer, so it is noted and not chased.*
 
+## Amendment 2 — 2026-10-19 — the attester's nonce is a queue, so nothing is pre-signed
+
+Written before any signing code. `CC-036`'s next box was "sign a delegated attestation", and the
+first question about building it — *when* does the platform sign? — turned out to have a wrong
+answer that A1.3 implied.
+
+### A2.1 — Measured: both versions spend one shared, sequential nonce per attester
+
+Read from the verified implementation source behind `0x4200…0021`, 2026-10-19 (Basescan):
+
+| | Implementation | Nonce in the signed hash | `deadline` | `increaseNonce` |
+| :-- | :-- | :-- | :-- | :-- |
+| base-sepolia | `0xc0d3…0021`, EAS **1.2.0** | `_nonces[request.attester]++` | yes | yes |
+| base-mainnet | `0xbeb5…06ed`, EAS **1.0.1** | `nonce = _nonces[request.attester]++` | **no** | **no** |
+
+A delegated request verifies only against the attester's *current* nonce. Every request our verdict
+signer issues shares one counter, so requests can only land **in nonce order**, one at a time.
+
+### A2.2 — Consequence: pre-signing at completion would deadlock on mainnet
+
+A1.3 read naturally as "sign at completion and hand the worker the request". With a shared
+sequential nonce that fails:
+
+- Worker A completes and gets a request at nonce *N*. Worker B completes and gets *N+1*.
+- B's request is unusable until A's is submitted. D2 makes submission optional, so A may never
+  submit.
+- On **1.0.1 nothing clears it**: there is no `deadline` to expire A's request and no
+  `increaseNonce` to skip past it. The only way out is for someone to submit A's request, and if
+  that someone is the platform, D1 is gone.
+
+So one worker who simply declined to publish would block every later worker's publication. It would
+show up as B's submission reverting `InvalidSignature`, which looks like a signing bug.
+
+### A2.3 — Decision: durability and discoverability come from different objects
+
+**At completion the worker gets an off-chain EAS attestation.** This is D1 as originally written: an
+EIP-712 signature over the attestation itself. It carries no nonce, never expires, and is
+verifiable by anyone forever. It is the durable copy `ADR-0006` D7 requires, and it is what survives
+us.
+
+**On-chain registration is signed on demand, at the current nonce, and never queued.** When a worker
+asks to publish, the platform reads `getNonce(attester)`, signs one delegated request for that
+attestation, and hands it back for immediate submission. Properties:
+
+- **An unsubmitted request blocks nobody.** It does not advance the nonce, so the next request is
+  signed at the same *N*. A stale request is harmless: if submitted it publishes a true attestation
+  for its own worker, and if not it is overtaken.
+- **A race costs a retry, not a loss.** Two workers signed at *N* concurrently: the first submission
+  wins and the second reverts. The second re-requests and gets *N+1*. The worker's gas on the
+  reverted transaction is the cost, so the endpoint should say "submit now", and the 1.2.0 `deadline`
+  stays short (`ATTESTATION_REQUEST_VALIDITY_SECONDS`, one hour).
+- **The platform still transacts nowhere.** It signs twice, once off-chain at completion and once
+  on request. It never submits, and never calls `increaseNonce`.
+
+### A2.4 — If the platform is gone, the worker can still anchor it
+
+Delegated registration needs a live platform to sign at the current nonce, so it cannot be the
+durability story. The off-chain attestation is. Both versions also expose
+`timestamp(bytes32 data)`: anyone can call it, it records `block.timestamp` against a value once,
+and it reverts `AlreadyTimestamped` on a repeat. A worker can timestamp their attestation's UID
+on-chain at their own cost, with no platform involvement. The UID is the anchor and the off-chain
+signature still proves the attester. Weaker discoverability than a full on-chain attestation, but it
+needs nobody's permission. That is the `ADR-0006` D7 property.
+
+### A2.5 — Rejected
+
+- **Pre-sign at completion (A1.3's natural reading).** A2.2.
+- **Platform submits, or batches, the attestations.** It removes the queue by putting the platform
+  in the transaction path, which D1 exists to prevent. It is also a recurring gas cost under
+  `ADR-0013` D2's no-fee position.
+- **Clear stuck nonces with `increaseNonce`.** Absent on mainnet, and a platform transaction where
+  it exists.
+- **One attester key per worker, or a pool of keys.** It parallelises nonces at the cost of many trust
+  roots, against D3's "no new key". Revisit only if A2.3's retry rate is measured to matter.
+- **`EIP712Proxy`.** Already rejected in A1.4. It also does not remove the nonce.
+
+### A2.6 — What this changes in `CC-036`
+
+- "Sign a delegated attestation" becomes two signing paths: an **off-chain attestation at
+  completion** and a **delegated request on demand**. Each has a test that reads the nonce at
+  signing time and never caches it.
+- **New measurement, same shape as A1.2.** The off-chain attestation has its own EIP-712 type,
+  distinct from the delegated `Attest`, and EAS has changed it across versions. Read or derive it per
+  network before signing; never transcribe it.
+- **The read-back check in A1.4 still stands**, and now also covers the off-chain path. The recovered
+  signer must be the verdict signer.
+- **Never call `revokeOffchain`.** Both versions have it, and it would let the platform mark its own
+  off-chain attestations revoked. That is the lever over a worker's history which the open
+  "non-revocable" item argues against.
+
 ## Open items
 
 - **Which network registers the schema first.** Sepolia, obviously, but the UID is derived from the
