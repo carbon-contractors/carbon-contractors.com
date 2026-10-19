@@ -367,12 +367,53 @@ needs nobody's permission. That is the `ADR-0006` D7 property.
   signing time and never caches it.
 - **New measurement, same shape as A1.2.** The off-chain attestation has its own EIP-712 type,
   distinct from the delegated `Attest`, and EAS has changed it across versions. Read or derive it per
-  network before signing; never transcribe it.
+  network before signing; never transcribe it. **Done 2026-10-19, A2.7.**
 - **The read-back check in A1.4 still stands**, and now also covers the off-chain path. The recovered
   signer must be the verdict signer.
 - **Never call `revokeOffchain`.** Both versions have it, and it would let the platform mark its own
   off-chain attestations revoked. That is the lever over a worker's history which the open
   "non-revocable" item argues against.
+
+### A2.7 — Measured: the off-chain envelope, and where it actually lives
+
+**It is not in the contract.** Both EAS implementations were searched (A2.1's sources). They know
+nothing about off-chain attestations except `timestamp(uid)` and `revokeOffchain(uid)`, which take
+an opaque UID. The format is defined by the EAS SDK, read from
+`@ethereum-attestation-service/eas-sdk` 2.10.0 (`dist/lib.esm/offchain/offchain.js`, read
+2026-10-19, not installed). A2.6 assumed the struct would vary by contract version. It does not:
+the SDK versions it separately (Legacy, 1, 2) and signs with **Version 2** whatever the contract
+version is.
+
+| | Value |
+| :-- | :-- |
+| Domain name | `EAS Attestation` (not `EAS`, which is the delegated domain) |
+| Domain version | the contract's `version()`: `1.2.0` Sepolia, `1.0.1` mainnet |
+| Type | `Attest(uint16 version,bytes32 schema,address recipient,uint64 time,uint64 expirationTime,bool revocable,bytes32 refUID,bytes data,bytes32 salt)` |
+| Typehash | `0x258b757f…1132`, the same on both networks |
+| Domain separator, base-sepolia | `0x624018bb…94be` |
+| Domain separator, base-mainnet | `0x21736c2b…89ec` |
+
+So only the domain differs per network. The struct does not.
+
+**How far to trust a derived value.** There is no chain value to read here, so these are derived.
+The method is checked against the chain. The same derivation with the name `EAS` reproduces the
+delegated `domainSeparator` that A1.2 *read* from both chains, exactly.
+`chain-constants.test.ts` repeats both derivations, and fails when one recorded value is
+corrupted. If the method check ever breaks, the off-chain values are wrong too.
+
+**A trap for the verifier.** The SDK's UID is
+`solidityPackedKeccak256(['uint16','bytes','address','address','uint64','uint64','bool','bytes32','bytes','bytes32','uint32'], …)`,
+and its `bytes` schema argument is `hexlify(toUtf8Bytes(schema))`: the schema UID's 66-character
+**hex string as UTF-8**, not its 32 raw bytes. A verifier that passes the bytes32 computes a
+different UID. It then rejects every genuine attestation, and the failure looks like a bad
+signature. Our signer must reproduce the SDK's UID exactly, and a test must pin it against an
+SDK-produced vector before anything is handed to a worker.
+
+**Salt.** Version 2 adds a random 32-byte `salt`, so two attestations with identical content get
+different UIDs. That matters to us: `completedAt` aside, two completions can encode the same data,
+and without a salt they would collide on `timestamp(uid)` (`AlreadyTimestamped`).
+
+Recorded in `chain-constants.json` → `protocol.attestations.offchainEnvelope`.
 
 ## Open items
 
