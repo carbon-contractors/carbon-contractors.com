@@ -89,7 +89,8 @@ export const REJECTED_PROXY_ENVELOPES: Record<Hex, AttestEnvelope> = {
  * The EIP-712 domain, confirmed by reproducing `getDomainSeparator()`.
  *
  * `name` is the literal string "EAS" — not "EAS Attestation", which is the plausible guess
- * and is wrong. `version` is whatever the contract's own `version()` returns, which is why it
+ * and is wrong *here*. "EAS Attestation" is the name for the off-chain envelope
+ * (`offchain.ts`, ADR-0008 A2.7) — same address and version, different string. `version` is whatever the contract's own `version()` returns, which is why it
  * is a parameter here rather than a constant.
  */
 export function easDomain(
