@@ -666,3 +666,96 @@ export function getEscrowConfig() {
     usdcDecimals: 6,
   };
 }
+
+// ── Completion record (CC-036, ADR-0008 A3) ─────────────────────────────────
+
+/**
+ * How and when a task paid its worker, read from the escrow's own events.
+ *
+ * `routeRaw` is the contract's `CompletionRoute` (0–4) for a `TaskCompleted` exit, or null
+ * for an owner ruling (`TaskResolved` with `releasedToWorker`), which the contract does not
+ * give a route. `completedAt` is the timestamp of the block that paid out — the chain's
+ * clock, never ours, so re-signing the same completion always yields the same attestation.
+ */
+export interface TaskCompletionRecord {
+  routeRaw: number | null;
+  completedAt: bigint;
+  amount: bigint;
+}
+
+/**
+ * Null when the task never paid its worker: still in flight, expired, or resolved for the
+ * agent. Scanned newest-first with an early exit, like `getTaskResolvedOutcome` — a task
+ * can only complete once, and the completion is usually recent when this is asked.
+ */
+export async function getTaskCompletion(
+  paymentRequestId: string,
+): Promise<TaskCompletionRecord | null> {
+  const taskId = toTaskId(paymentRequestId);
+  const onChain = await getOnChainTask(paymentRequestId);
+
+  let hit: { blockNumber: bigint; routeRaw: number | null; amount: bigint } | null = null;
+  if (onChain.state === "Completed") {
+    const logs = await getLogsChunked({
+      address: getEscrowAddress(),
+      event: parseAbiItem(
+        "event TaskCompleted(bytes32 indexed taskId, address indexed worker, uint256 amount, uint8 route)",
+      ),
+      args: { taskId },
+      newestFirst: true,
+      stopWhen: (found) => found.length > 0,
+    });
+    const last = logs.at(-1);
+    if (last) {
+      hit = {
+        blockNumber: BigInt(last.blockNumber),
+        routeRaw: Number(last.args.route),
+        amount: last.args.amount as bigint,
+      };
+    }
+  } else if (onChain.state === "Resolved") {
+    const logs = await getLogsChunked({
+      address: getEscrowAddress(),
+      event: parseAbiItem(
+        "event TaskResolved(bytes32 indexed taskId, bool releasedToWorker, uint256 amount)",
+      ),
+      args: { taskId },
+      newestFirst: true,
+      stopWhen: (found) => found.length > 0,
+    });
+    const last = logs.at(-1);
+    if (last && last.args.releasedToWorker === true) {
+      hit = { blockNumber: BigInt(last.blockNumber), routeRaw: null, amount: last.args.amount as bigint };
+    }
+  }
+  if (!hit) return null;
+
+  const block = await getPublicClient().getBlock({ blockNumber: hit.blockNumber });
+  return { routeRaw: hit.routeRaw, completedAt: BigInt(block.timestamp), amount: hit.amount };
+}
+
+/** The EAS predeploy — the same address on Base and Base Sepolia (ADR-0008 A1.1). */
+export const EAS_ADDRESS: Address = "0x4200000000000000000000000000000000000021";
+
+/**
+ * EAS's own `version()` and `getDomainSeparator()`, read at signing time (ADR-0008 A1.2):
+ * the contract is an operator-upgradeable proxy, so neither may be assumed.
+ */
+export async function readEasDomainInputs(): Promise<{ version: string; domainSeparator: `0x${string}` }> {
+  const pub = getPublicClient();
+  const abi = [
+    { type: "function", name: "version", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
+    {
+      type: "function",
+      name: "getDomainSeparator",
+      stateMutability: "view",
+      inputs: [],
+      outputs: [{ type: "bytes32" }],
+    },
+  ] as const;
+  const [version, domainSeparator] = await Promise.all([
+    pub.readContract({ address: EAS_ADDRESS, abi, functionName: "version" }),
+    pub.readContract({ address: EAS_ADDRESS, abi, functionName: "getDomainSeparator" }),
+  ]);
+  return { version: version as string, domainSeparator: domainSeparator as `0x${string}` };
+}

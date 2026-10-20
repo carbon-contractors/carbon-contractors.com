@@ -66,6 +66,13 @@ export const CompletionRoute = {
   ReviewElapsed: 1,
   PassingVerdict: 2,
   ArbitrationTimeout: 3,
+  /** `completeTaskByOwner` (CC-049): the agent's key was lost after delivery. Mirrors the
+   *  contract's `CompletionRoute.OwnerEmergency`. ADR-0008 A3.1. */
+  OwnerEmergency: 4,
+  /** **Not a contract value.** The owner ruled for the worker in `resolveDispute`, which
+   *  emits `TaskResolved` and no route. Numbered past the contract's enum so the two can
+   *  never collide; if the contract ever adds a route 5, this moves. ADR-0008 A3.1. */
+  ArbitrationRuling: 5,
 } as const;
 
 export type CompletionRouteValue =
