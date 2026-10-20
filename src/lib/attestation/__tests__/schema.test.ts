@@ -10,6 +10,8 @@
  * that must not move by accident, and a proof that the encoding matches the schema the UID
  * was computed from.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { decodeAbiParameters, encodePacked, keccak256 } from "viem";
 import {
@@ -181,6 +183,25 @@ describe("ADR-0008 completion schema", () => {
       ReviewElapsed: 1,
       PassingVerdict: 2,
       ArbitrationTimeout: 3,
+      OwnerEmergency: 4,
+      ArbitrationRuling: 5,
     });
+  });
+
+  it("matches the contract's enum, and keeps the off-contract route past its end (ADR-0008 A3.1)", () => {
+    // Read from the Solidity source rather than restated: the generated ABI carries the enum
+    // only as uint8, with no names.
+    const sol = readFileSync(join(process.cwd(), "contracts/CarbonEscrow.sol"), "utf8");
+    const body = sol.match(/enum CompletionRoute\s*\{([^}]*)\}/)?.[1] ?? "";
+    const names = body
+      .split("\n")
+      .map((l) => l.replace(/\/\/.*$/, "").trim().replace(/,$/, ""))
+      .filter(Boolean);
+    expect(names.length).toBeGreaterThan(0);
+    names.forEach((name, i) => {
+      expect(CompletionRoute[name as keyof typeof CompletionRoute], name).toBe(i);
+    });
+    // A contract route added at this index would collide with the owner-ruling value.
+    expect(CompletionRoute.ArbitrationRuling).toBe(names.length);
   });
 });

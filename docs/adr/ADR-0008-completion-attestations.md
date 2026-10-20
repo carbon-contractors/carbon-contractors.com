@@ -415,6 +415,67 @@ and without a salt they would collide on `timestamp(uid)` (`AlreadyTimestamped`)
 
 Recorded in `chain-constants.json` → `protocol.attestations.offchainEnvelope`.
 
+## Amendment 3 — 2026-10-20 — signing at completion (proposed)
+
+Written with the first signing code, `src/lib/attestation/completion.ts` and
+`GET /api/attestation/completion`. Four calls had to be made that D1–D5 and A2 left open.
+
+### A3.1 — Two more `route` values
+
+D5 listed four routes. The contract has five, and a sixth way to pay a worker:
+
+| Value | Name | Source |
+| :-- | :-- | :-- |
+| 0–3 | as D5 | `TaskCompleted.route` |
+| 4 | `OwnerEmergency` | `TaskCompleted.route`: `completeTaskByOwner` (CC-049), the agent's key lost after delivery |
+| 5 | `ArbitrationRuling` | **Not a contract value.** `TaskResolved(releasedToWorker = true)`: the owner ruled for the worker, and the contract records no route |
+
+`5` is numbered past the contract's enum so the two cannot collide. `schema.test.ts` reads the enum
+from `CarbonEscrow.sol` and fails if the contract ever gains a value at that index. `route` is a
+`uint8` in the registered schema, so neither value changes the schema UID. An unknown route from
+the chain makes the signer refuse rather than attest a number whose meaning is unwritten.
+
+A ruling for the **agent** is not a completion and is never attested.
+
+### A3.2 — One completion, one attestation, with nothing stored
+
+A2.7 noted the SDK draws a random `salt`. That would let a worker mint a fresh attestation for the
+same job each time they asked. Instead:
+
+- `salt = keccak256(abi.encode("carbon-contractors/CC-036/completion/v1", chainId, escrow, taskId))`;
+- `time` = the timestamp of the block that paid out, read from the chain;
+- every data field comes from the escrow: the worker, agent and hashes from `getTask`, the route
+  and amount from the payout event.
+
+So signing the same completion again produces the same message and the same UID. No table, no
+migration, and nothing to keep in sync. A repeated request is just another valid signature over
+one attestation. The salt stays unique per (chain, escrow, task), which is all A2.7 needed it for.
+
+### A3.3 — `checkerHash` is not recoverable, so it is pinned with a tripwire
+
+A verdict's `checkerHash` lives only inside its EIP-712 digest, which cannot be inverted. Verdicts
+are not persisted, and a smart-wallet `claimWithVerdict` arrives wrapped in an ERC-4337 bundle, so
+calldata decoding is not a dependable source either. Only `CHECKER_RULE_VERSION = 1` has ever
+existed, so for any non-zero `verdictHash` the value is exactly `getCheckerHash(1)`.
+`checkerHashFor` **throws** once a second rule version exists. At that point verdicts must persist
+their `checkerHash` (a migration) before completions can be attested again. This is a deliberate
+stop, not a silent guess.
+
+### A3.4 — Surface and checks
+
+- **`GET /api/attestation/completion?payment_request_id=…`** is worker-only. The worker is judged
+  against the on-chain `worker`, never the DB (`CC-037`), and before anything is signed. Auth is
+  the same two routes as `/api/verdict`: the session, or challenge headers. Responses: 409 when the
+  task has not paid its worker, 403 for anyone else.
+- **Before signing**, EAS `version()` is read and proven: the delegated domain built from it must
+  reproduce the chain's `getDomainSeparator()`, or the signer refuses. The off-chain domain is then
+  built from the proven version.
+- **The response is the EAS SDK's `{ sig, signer }` share shape**, so EAS tooling can verify or
+  import it. bigints are decimal strings.
+
+Still open: the delegated on-chain request (A2.3), the first real signature on Sepolia, and the
+A1.4 read-back. The dashboard and MCP surfaces are open too; this amendment builds the API only.
+
 ## Open items
 
 - **Which network registers the schema first.** Sepolia, obviously, but the UID is derived from the
