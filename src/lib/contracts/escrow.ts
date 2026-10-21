@@ -759,3 +759,44 @@ export async function readEasDomainInputs(): Promise<{ version: string; domainSe
   ]);
   return { version: version as string, domainSeparator: domainSeparator as `0x${string}` };
 }
+
+/**
+ * Everything a delegated `attestByDelegation` request is signed against, read at signing
+ * time (ADR-0008 A1.2, A2.3): the domain inputs, the `Attest` typehash that selects the
+ * struct, and the attester's **current** nonce. The nonce is a queue (A2.1), so it is read
+ * per request and never cached.
+ */
+export async function readEasDelegationInputs(attester: Address): Promise<{
+  version: string;
+  domainSeparator: `0x${string}`;
+  attestTypeHash: `0x${string}`;
+  nonce: bigint;
+}> {
+  const pub = getPublicClient();
+  const abi = [
+    {
+      type: "function",
+      name: "getAttestTypeHash",
+      stateMutability: "pure",
+      inputs: [],
+      outputs: [{ type: "bytes32" }],
+    },
+    {
+      type: "function",
+      name: "getNonce",
+      stateMutability: "view",
+      inputs: [{ type: "address" }],
+      outputs: [{ type: "uint256" }],
+    },
+  ] as const;
+  const [domain, attestTypeHash, nonce] = await Promise.all([
+    readEasDomainInputs(),
+    pub.readContract({ address: EAS_ADDRESS, abi, functionName: "getAttestTypeHash" }),
+    pub.readContract({ address: EAS_ADDRESS, abi, functionName: "getNonce", args: [attester] }),
+  ]);
+  return {
+    ...domain,
+    attestTypeHash: attestTypeHash as `0x${string}`,
+    nonce: nonce as bigint,
+  };
+}

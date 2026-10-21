@@ -116,4 +116,26 @@ describe("getTaskCompletion (CC-036)", () => {
       domainSeparator: `0x${"64".repeat(32)}`,
     });
   });
+
+  it("reads the typehash and the attester's current nonce alongside the domain inputs", async () => {
+    const ATTESTER = "0x3333333333333333333333333333333333333333";
+    mocks.readContract.mockImplementation(async ({ functionName, args }) => {
+      if (functionName === "getNonce") {
+        expect(args).toEqual([ATTESTER]);
+        return BigInt(12);
+      }
+      return {
+        version: "1.2.0",
+        getDomainSeparator: `0x${"64".repeat(32)}`,
+        getAttestTypeHash: `0x${"f8".repeat(32)}`,
+      }[functionName as string];
+    });
+    const { readEasDelegationInputs } = await import("@/lib/contracts/escrow");
+    expect(await readEasDelegationInputs(ATTESTER)).toEqual({
+      version: "1.2.0",
+      domainSeparator: `0x${"64".repeat(32)}`,
+      attestTypeHash: `0x${"f8".repeat(32)}`,
+      nonce: BigInt(12),
+    });
+  });
 });

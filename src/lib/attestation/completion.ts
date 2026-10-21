@@ -33,6 +33,7 @@ import {
   parseSignature,
   type Address,
   type Hex,
+  type TypedDataDomain,
 } from "viem";
 import {
   EAS_ADDRESS,
@@ -50,6 +51,7 @@ import {
   CompletionRoute,
   completionSchemaUid,
   encodeCompletionData,
+  type CompletionAttestationData,
   type CompletionRouteValue,
 } from "./schema";
 import { easDomain } from "./envelope";
@@ -118,16 +120,20 @@ export function completionSalt(chainId: number, escrow: Address, taskId: Hex): H
   );
 }
 
-/** Pure: the off-chain message for one completed task. */
-export function buildCompletionMessage(args: {
+/**
+ * Pure: the `COMPLETION_SCHEMA` record for one completed task. Shared by the off-chain
+ * attestation and the delegated on-chain request, so the two can never describe one
+ * completion differently.
+ */
+export function completionRecord(args: {
   taskId: Hex;
   escrow: Address;
   chainId: number;
   onChain: OnChainTask;
   completion: TaskCompletionRecord;
-}): OffchainAttestationMessage {
+}): CompletionAttestationData {
   const { taskId, escrow, chainId, onChain, completion } = args;
-  const data = encodeCompletionData({
+  return {
     taskId,
     escrow,
     chainId: BigInt(chainId),
@@ -139,18 +145,89 @@ export function buildCompletionMessage(args: {
     evidenceHash: onChain.evidenceHash,
     verdictHash: onChain.verdictHash,
     checkerHash: checkerHashFor(onChain.verdictHash),
-  });
+  };
+}
+
+/** The worker from the CONTRACT, never Supabase (CC-037), lowercased for the UID (A2.7). */
+export function completionRecipient(onChain: OnChainTask): Address {
+  return onChain.worker.toLowerCase() as Address;
+}
+
+/** Pure: the off-chain message for one completed task. */
+export function buildCompletionMessage(args: {
+  taskId: Hex;
+  escrow: Address;
+  chainId: number;
+  onChain: OnChainTask;
+  completion: TaskCompletionRecord;
+}): OffchainAttestationMessage {
+  const { taskId, escrow, chainId, onChain } = args;
   return {
     schema: completionSchemaUid(),
-    // The worker from the CONTRACT, never Supabase (CC-037).
-    recipient: onChain.worker.toLowerCase() as Address,
-    time: completion.completedAt,
+    recipient: completionRecipient(onChain),
+    time: args.completion.completedAt,
     expirationTime: BigInt(0),
     revocable: false,
     refUID: ZERO32,
-    data,
+    data: encodeCompletionData(completionRecord(args)),
     salt: completionSalt(chainId, escrow, taskId),
   };
+}
+
+/** `hashDomain` for a four-field EIP-712 domain. */
+export function domainSeparatorOf(domain: TypedDataDomain, chainId: number): Hex {
+  return hashDomain({
+    domain: { ...domain, chainId: BigInt(chainId) } as {
+      name: string;
+      version: string;
+      chainId: bigint;
+      verifyingContract: Address;
+    },
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+    } as const,
+  });
+}
+
+/** A task the escrow has paid to its worker, with every input either signer needs. */
+export interface CompletedTask {
+  escrow: Address;
+  chainId: number;
+  taskId: Hex;
+  onChain: OnChainTask;
+  completion: TaskCompletionRecord;
+}
+
+/**
+ * Load a completed task, refusing — before anything is signed — a caller who is not the
+ * on-chain worker, or a task that has not paid its worker.
+ */
+export async function loadCompletedTask(
+  paymentRequestId: string,
+  requireWorker?: string,
+): Promise<CompletedTask> {
+  const { address: escrow, chainId } = getEscrowConfig();
+  if (!escrow) throw new CompletionAttestationError("Escrow contract is not configured");
+
+  const [onChain, completion] = await Promise.all([
+    getOnChainTask(paymentRequestId),
+    getTaskCompletion(paymentRequestId),
+  ]);
+  if (requireWorker && onChain.worker.toLowerCase() !== requireWorker.toLowerCase()) {
+    throw new CompletionAttestationError("Caller is not this task's worker", "forbidden");
+  }
+  if (!completion) {
+    throw new CompletionAttestationError(
+      `Task has not paid its worker on chain (state: ${onChain.state})`,
+      "not_completed",
+    );
+  }
+  return { escrow, chainId, taskId: toTaskId(paymentRequestId), onChain, completion };
 }
 
 /** The EAS SDK's `{ sig, signer }` share format, with bigints as decimal strings for JSON. */
@@ -176,48 +253,18 @@ export async function signCompletionAttestation(
   /** When set, refuse unless this is the on-chain worker — checked before anything is signed. */
   requireWorker?: string,
 ): Promise<SignedCompletionAttestation> {
-  const { address: escrow, chainId } = getEscrowConfig();
-  if (!escrow) throw new CompletionAttestationError("Escrow contract is not configured");
-
-  const [onChain, completion] = await Promise.all([
-    getOnChainTask(paymentRequestId),
-    getTaskCompletion(paymentRequestId),
-  ]);
-  if (requireWorker && onChain.worker.toLowerCase() !== requireWorker.toLowerCase()) {
-    throw new CompletionAttestationError("Caller is not this task's worker", "forbidden");
-  }
-  if (!completion) {
-    throw new CompletionAttestationError(
-      `Task has not paid its worker on chain (state: ${onChain.state})`,
-      "not_completed",
-    );
-  }
+  const task = await loadCompletedTask(paymentRequestId, requireWorker);
+  const { chainId } = task;
 
   const { version, domainSeparator } = await readEasDomainInputs();
-  const proven = hashDomain({
-    domain: { ...easDomain(EAS_ADDRESS, chainId, version), chainId: BigInt(chainId) } as {
-      name: string;
-      version: string;
-      chainId: bigint;
-      verifyingContract: Address;
-    },
-    types: {
-      EIP712Domain: [
-        { name: "name", type: "string" },
-        { name: "version", type: "string" },
-        { name: "chainId", type: "uint256" },
-        { name: "verifyingContract", type: "address" },
-      ],
-    } as const,
-  });
+  const proven = domainSeparatorOf(easDomain(EAS_ADDRESS, chainId, version), chainId);
   if (proven.toLowerCase() !== domainSeparator.toLowerCase()) {
     throw new CompletionAttestationError(
       `EAS version ${version} does not reproduce the chain's domain separator — refusing to sign`,
     );
   }
 
-  const taskId = toTaskId(paymentRequestId);
-  const message = buildCompletionMessage({ taskId, escrow, chainId, onChain, completion });
+  const message = buildCompletionMessage(task);
   const domain = offchainDomain(EAS_ADDRESS, chainId, version);
 
   const account = await getPlatformAccount();

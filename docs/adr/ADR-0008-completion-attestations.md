@@ -476,6 +476,41 @@ stop, not a silent guess.
 Still open: the delegated on-chain request (A2.3), the first real signature on Sepolia, and the
 A1.4 read-back. The dashboard and MCP surfaces are open too; this amendment builds the API only.
 
+### A3.5 — The delegated publish request (2026-10-21)
+
+`src/lib/attestation/delegated.ts` and `POST /api/attestation/publish` build A2.3's on-demand path.
+
+- **The same record as the off-chain copy.** `completionRecord` and `completionRecipient` are
+  shared, so a published attestation and the worker's off-chain copy cannot describe one
+  completion differently.
+- **The struct is read, not assumed.** `getAttestTypeHash()` is resolved through `envelope.ts`,
+  which refuses an unknown typehash and names the `EIP712Proxy`'s. The domain built from
+  `version()` must reproduce `getDomainSeparator()`. An unknown struct returns 503 with nothing
+  signed.
+- **The calldata matches each network's struct**, read from the deployed source on 2026-10-21:
+
+  | | `DelegatedAttestationRequest` ends | Signed hash |
+  | :-- | :-- | :-- |
+  | base-sepolia, 1.2.0 | `…, address attester, uint64 deadline` | includes `value` and `deadline` |
+  | base-mainnet, 1.0.1 | `…, address attester` | neither |
+
+  Both carry `value` in `AttestationRequestData`, and it must be 0 because the resolver is
+  `address(0)`. The two give different selectors, so a request built for one network cannot be
+  sent to the other.
+- **1.0.1 verifies with `ECDSA.recover`**, not `SignatureChecker`. On mainnet the attester must be
+  an EOA. Our KMS/HSM signer is one, but a move to a contract-wallet attester would break
+  mainnet publishing silently. That is worth knowing at `CC-090`, when the verdict signer gets its
+  own key.
+- **Tested against EAS's own hash.** `delegated.test.ts` rebuilds `_verifyAttest`'s digest for
+  each version from the transcribed source, without viem's typed-data path, and recovers the
+  attester from the calldata's own signature.
+
+**Not prevented: publishing twice.** Each request is signed at a fresh nonce. A worker who
+submits two produces two on-chain attestations of one completion. The `taskId`, `escrow` and
+`chainId` in the data make them trivially deduplicable. Preventing it would need an EAS log scan
+per request. So reputation readers must count by `(chainId, escrow, taskId)`, never by
+attestation. Recorded here so the reader is written that way.
+
 ## Open items
 
 - **Which network registers the schema first.** Sepolia, obviously, but the UID is derived from the
