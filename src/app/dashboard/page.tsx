@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useAccount, useWriteContract, useSignMessage } from "wagmi";
+import { useAccount, useWriteContract, useSignMessage, useSendTransaction } from "wagmi";
 import { keccak256, toHex } from "viem";
 import Link from "next/link";
 import { CATEGORIES, validateCategorySelection } from "@/lib/categories";
@@ -36,6 +36,11 @@ import type { CheckResult } from "@/lib/checker/types";
 import PageShell from "@/components/PageShell";
 import { isNewWorker } from "@/lib/reputation/compute";
 import { chain as appChain } from "@/lib/wallet/providers";
+import {
+  attestationFilename,
+  isAttestable,
+  publishTransaction,
+} from "@/lib/attestation/client";
 import styles from "./dashboard.module.css";
 
 // ── ABIs for write operations ───────────────────────────────────────────────
@@ -326,6 +331,7 @@ export default function DashboardPage() {
   const [autoBookBusy, setAutoBookBusy] = useState<string | null>(null);
 
   const { writeContractAsync } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
   const { signMessageAsync } = useSignMessage();
   const ensureAppChain = useEnsureAppChain();
 
@@ -1084,6 +1090,120 @@ export default function DashboardPage() {
     } finally {
       setActionBusy(null);
       fetchData();
+    }
+  }
+
+  /**
+   * CC-036 (ADR-0008 A3): download the worker's signed off-chain completion attestation.
+   * Deterministic — fetching it again returns the same attestation — and free: nothing is
+   * sent on chain. This file is the worker's durable copy of the job (ADR-0006 D7).
+   */
+  async function handleDownloadAttestation(task: Task) {
+    if (!address) return;
+    setActionBusy(task.payment_request_id);
+    try {
+      const res = await fetchWithSession(
+        `/api/attestation/completion?payment_request_id=${encodeURIComponent(task.payment_request_id)}`,
+      );
+      const data = await res.json();
+      if (!data.ok) {
+        setActionMsg((prev) => ({
+          ...prev,
+          [task.id]: { ok: false, text: data.error ?? "Could not fetch the attestation." },
+        }));
+        return;
+      }
+      const blob = new Blob([JSON.stringify(data.attestation, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = attestationFilename(data.attestation?.sig?.uid ?? "", task.payment_request_id);
+      a.click();
+      URL.revokeObjectURL(url);
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: true,
+          text: "Attestation downloaded. Keep the file — it is your proof of this job, signed by the platform and checkable by anyone, even if this site goes away.",
+        },
+      }));
+    } catch {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: false, text: "Could not fetch the attestation." },
+      }));
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  /**
+   * CC-036 (ADR-0008 A3.5): publish the completion on chain through EAS, from the worker's
+   * own wallet and at their own gas. The request is signed fresh at EAS's current nonce, so
+   * it must be sent straight away; if another request lands first it reverts and the worker
+   * just asks again. `publishTransaction` refuses anything not addressed to the EAS
+   * predeploy on this app's chain.
+   */
+  async function handlePublishAttestation(task: Task) {
+    if (!address) return;
+    setActionBusy(task.payment_request_id);
+    setActionMsg((prev) => ({
+      ...prev,
+      [task.id]: { ok: true, text: "Preparing the publish request…" },
+    }));
+    try {
+      const res = await fetchWithSession("/api/attestation/publish", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ payment_request_id: task.payment_request_id }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setActionMsg((prev) => ({
+          ...prev,
+          [task.id]: { ok: false, text: data.error ?? "Could not prepare the publish request." },
+        }));
+        return;
+      }
+      let tx: ReturnType<typeof publishTransaction>;
+      try {
+        tx = publishTransaction(data.publish, appChain.id);
+      } catch (err) {
+        setActionMsg((prev) => ({
+          ...prev,
+          [task.id]: { ok: false, text: err instanceof Error ? err.message : "Not sent." },
+        }));
+        return;
+      }
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: { ok: true, text: "Confirm the publish transaction in your wallet…" },
+      }));
+      await ensureAppChain();
+      await sendTransactionAsync(tx);
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: true,
+          text: "Publish submitted — your completion is recorded on chain once the transaction confirms.",
+        },
+      }));
+    } catch (err) {
+      setActionMsg((prev) => ({
+        ...prev,
+        [task.id]: {
+          ok: false,
+          text: explainWriteError(
+            err,
+            "Not published. If another publish landed first, just try again — a fresh request is signed each time.",
+            appChain.name,
+          ),
+        },
+      }));
+    } finally {
+      setActionBusy(null);
     }
   }
 
@@ -2500,6 +2620,31 @@ export default function DashboardPage() {
                           )}
                         </div>
                       )}
+
+                    {/* ── Completion attestation (CC-036, ADR-0008 A3) ── */}
+                    {isWorkerForTask && isAttestable(task) && (
+                      <div className={styles.workerActionSection}>
+                        <p className={styles.actionNote}>
+                          Paid. Your proof of this job is a signed attestation: download
+                          it free and keep it, or publish it on chain so anyone can find
+                          it — publishing costs a small amount of gas from your wallet.
+                        </p>
+                        <button
+                          className={styles.actionBtn}
+                          onClick={() => handleDownloadAttestation(task)}
+                          disabled={busy}
+                        >
+                          {busy ? "Working..." : "Download attestation"}
+                        </button>
+                        <button
+                          className={styles.actionToggle}
+                          onClick={() => handlePublishAttestation(task)}
+                          disabled={busy}
+                        >
+                          {busy ? "Working..." : "Publish on chain"}
+                        </button>
+                      </div>
+                    )}
 
                     {/* ── Dispute (ADR-0001 D2): verdict-first ─────────── */}
                     {escrowContract &&
