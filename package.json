@@ -42,7 +42,7 @@
     "remark-gfm": "^4.0.1",
     "viem": "^2.47.4",
     "wagmi": "^2.19.5",
-    "zod": "^4.3.6"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.15",
